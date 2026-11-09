@@ -1,0 +1,38 @@
+---
+id: PLMCP-2
+title: Create public GitHub repository with CI and branch protection
+status: To Do
+assignee: []
+created_date: '2026-11-09T19:25:00Z'
+labels: []
+milestone: m-0
+dependencies:
+  - PLMCP-1
+documentation:
+  - backlog/docs/doc-1 - paperless-mcp-design.md
+type: chore
+ordinal: 2000
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+The design relies on CI blocking violations. That only works with required checks on a protected main, which GitHub Free offers for public repositories (with unlimited Actions minutes). The user chose a public repository. Creating it is outward-facing: confirm with the user right before running gh repo create.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Public repository gardenbaum/paperless-mcp exists and local main is pushed, after explicit user confirmation
+- [ ] #2 Workflow check runs the just check gates on Python 3.14 and 3.15
+- [ ] #3 Workflow audit runs pip-audit (with the ignore file) and gitleaks
+- [ ] #4 main is protected: pull request required, required checks check (3.14, 3.15) and audit, no force pushes, no direct pushes
+- [ ] #5 Third-party actions are pinned to full commit SHAs; Renovate is configured for Python dependencies, GitHub Actions and pinned container images
+<!-- AC:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Tests written first (red, then green) at every test level the change touches
+- [ ] #2 just check passes locally and all required CI checks are green on the PR
+- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [ ] #4 Merged to main through the task's own pull request
+<!-- DOD:END -->
