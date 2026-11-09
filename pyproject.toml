@@ -1,0 +1,208 @@
+[project]
+name = "paperless-mcp"
+version = "0.1.0.dev0"
+description = "MCP server for paperless-ngx 3.x."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "gardenbaum" }]
+dependencies = [
+    "fastmcp>=4.1.6,<4.2",
+    "httpx2>=2.16.0",
+    "pydantic>=2.14.3",
+    "pydantic-settings>=2.16.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.2",
+    "coverage>=7.17.2",
+    "deptry>=0.25.1",
+    "diff-cover>=11.0.1",
+    "import-linter>=2.16",
+    "pre-commit>=4.7.0",
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.4",
+]
+
+# --- Lint and format ---------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+# Vendored third-party docs and project-management files are not our code.
+extend-exclude = ["docs/vendor", ".superpowers", "backlog"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+# Every entry needs a reason. Suppressions in code: `# noqa: CODE -- reason` (see `just lint`).
+ignore = [
+    "COM812", # conflicts with `ruff format` (trailing commas are the formatter's job)
+    "CPY001", # the licence lives in LICENSE; no per-file copyright headers
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "D1",      # test names state the behaviour; a docstring would repeat them
+    "INP001",  # tests are collected by pytest (importlib mode), not imported as a package
+    "PLR2004", # literal expected values are the point of a test
+    "S101",    # assert is how pytest checks
+    "S105",    # fake credentials are test data
+    "S106",    # fake credentials are test data
+]
+
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves field annotations at runtime: their imports must not move under TYPE_CHECKING.
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"unittest.mock".msg = "Mocks are banned: use a fake via constructor injection or httpx2.MockTransport."
+"mock".msg = "Mocks are banned: use a fake via constructor injection or httpx2.MockTransport."
+"httpx".msg = "This project uses httpx2 only."
+
+# --- Types -------------------------------------------------------------------
+
+[tool.basedpyright]
+# `recommended` enables every rule (some as warnings) and fails on warnings: stricter than
+# `strict`. Fallback if FastMCP or Pydantic typing proves too noisy: `strict` + selected rules.
+typeCheckingMode = "recommended"
+pythonVersion = "3.14"
+# Only our code; docs/vendor, .superpowers and backlog are outside this scope.
+include = ["src", "tests"]
+# `# type: ignore` silences every rule on its line in pyright; only `# pyright: ignore[rule]` counts.
+enableTypeIgnoreComments = false
+
+# --- Tests and coverage ------------------------------------------------------
+
+[tool.pytest]
+strict = true
+addopts = ["--import-mode=importlib", "-ra"]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/paperless_mcp"]
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_empty = true
+# Lines that never run by design. Everything else needs `# pragma: no cover -- reason`.
+exclude_also = [
+    "if TYPE_CHECKING:",    # imports for annotations only
+    "^\\s*\\.\\.\\.$",      # bodies of Protocol methods and overloads
+]
+
+# --- Dependencies ------------------------------------------------------------
+
+[tool.deptry.per_rule_ignores]
+# Declared runtime dependencies not imported yet; remove each entry with its first import
+# (httpx2: Paperless adapter, PLMCP-6; fastmcp: tools and server, PLMCP-8).
+DEP002 = ["fastmcp", "httpx2"]
+
+# --- Architecture (design §5.1) ----------------------------------------------
+
+[tool.importlinter]
+root_package = "paperless_mcp"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layers: entrypoints > server > settings > tools | paperless > services > domain"
+type = "layers"
+containers = ["paperless_mcp"]
+# Every top-level module must be placed in a layer; nothing imports the entrypoints.
+exhaustive = true
+layers = [
+    "__main__ : app : cli",
+    "server",
+    "settings",
+    "tools | paperless",
+    "services",
+    "domain",
+]
+
+[[tool.importlinter.contracts]]
+name = "The adapter does not use services"
+type = "forbidden"
+source_modules = ["paperless_mcp.paperless"]
+forbidden_modules = ["paperless_mcp.services"]
+
+[[tool.importlinter.contracts]]
+name = "Only the composition root imports tools and paperless"
+type = "forbidden"
+source_modules = [
+    "paperless_mcp.__main__",
+    "paperless_mcp.app",
+    "paperless_mcp.cli",
+    "paperless_mcp.settings",
+]
+forbidden_modules = ["paperless_mcp.tools", "paperless_mcp.paperless"]
+# Entrypoints reach tools and paperless through server.py; only direct imports are wrong.
+allow_indirect_imports = true
+
+# The external-package rules check direct imports: with the layers above, every indirect path to
+# a forbidden package passes a direct import that one of these contracts already reports.
+# (`protected` contracts would be simpler but fail while a package is not imported yet.)
+# A module added to the layers joins the source lists below that apply to it.
+
+[[tool.importlinter.contracts]]
+name = "Only paperless imports httpx2"
+type = "forbidden"
+source_modules = [
+    "paperless_mcp.__main__",
+    "paperless_mcp.app",
+    "paperless_mcp.cli",
+    "paperless_mcp.server",
+    "paperless_mcp.settings",
+    "paperless_mcp.tools",
+    "paperless_mcp.services",
+    "paperless_mcp.domain",
+]
+forbidden_modules = ["httpx2"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Only tools, server and entrypoints import fastmcp and mcp"
+type = "forbidden"
+source_modules = [
+    "paperless_mcp.settings",
+    "paperless_mcp.paperless",
+    "paperless_mcp.services",
+    "paperless_mcp.domain",
+]
+forbidden_modules = ["fastmcp", "mcp"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "No pydantic-settings below the composition root (configuration is injected)"
+type = "forbidden"
+source_modules = [
+    "paperless_mcp.tools",
+    "paperless_mcp.paperless",
+    "paperless_mcp.services",
+    "paperless_mcp.domain",
+]
+forbidden_modules = ["pydantic_settings"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "No httpx"
+type = "forbidden"
+source_modules = ["paperless_mcp"]
+forbidden_modules = ["httpx"]
+
+# Toolset independence (design §5.1: toolset modules in tools/ do not import each other, shared
+# helpers live in tools/_shared) needs two toolset modules. The task that creates the second
+# one adds an `independence` contract over all toolset modules here.

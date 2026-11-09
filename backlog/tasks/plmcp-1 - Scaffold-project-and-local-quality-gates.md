@@ -1,9 +1,11 @@
 ---
 id: PLMCP-1
 title: Scaffold project and local quality gates
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:24:00Z'
+updated_date: '2026-11-09T19:53:00Z'
 labels: []
 milestone: m-0
 dependencies: []
@@ -40,3 +42,22 @@ Every later task needs one local gate that mirrors CI, and the layer boundaries 
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. pyproject.toml: uv_build backend, requires-python >=3.14, runtime deps fastmcp>=4.1.6,<4.2 + pydantic + pydantic-settings + httpx2 (no httpx); dev group with ruff, basedpyright, import-linter, deptry, pytest, pytest-cov, coverage, diff-cover, pre-commit; .python-version 3.14.
+2. Package skeleton per design 5.1: src/paperless_mcp/{domain,services,paperless,tools}/__init__.py, server.py, cli.py, __main__.py, app.py (docstring-only, no server logic; filled by PLMCP-6..8).
+3. TDD: tests/test_settings.py and tests/test_version.py first (RED), then settings.py (PaperlessSettings: PAPERLESS_URL, PAPERLESS_TOKEN as SecretStr, PAPERLESS_PUBLIC_URL optional; ServerSettings with PAPERLESS_MCP_ prefix: log_level) and __version__ from distribution metadata (GREEN).
+4. Gates in pyproject: ruff select ALL with a documented ignore list, Google docstrings, banned-api unittest.mock/mock (+ httpx), absolute imports; basedpyright (try recommended, else strict + rules) on src and tests with rule-specific, used ignore comments only; pytest strict + warnings as errors; coverage branch fail_under 95; deptry; import-linter contracts for every 5.1 rule whose modules exist (toolset independence deferred with a note, R2). Exclude docs/vendor, .superpowers, backlog (R5).
+5. justfile: lint (ruff + suppression/patching hygiene grep), format, format-check, typecheck, imports, deps, test, cov-diff base=main (diff-cover 100 %), check, audit (pip-audit + .pip-audit-ignore), precommit.
+6. .pre-commit-config.yaml running the same recipes plus file hygiene hooks and gitleaks (.gitleaks.toml allowlisting docs/vendor); pre-commit as dev dependency.
+7. LICENSE (MIT), .gitignore, .editorconfig, minimal README.
+8. Verify: just check green, pre-commit green; temporary probes prove each gate bites (forbidden import, unexplained noqa, unittest.mock in a test, coverage drop); revert probes, commit on plmcp-1-scaffold.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented scaffold and gates. Choices: basedpyright `recommended` (all rules, fails on warnings; no FastMCP code yet, so the strict fallback is untested); import-linter uses `forbidden` contracts for external packages because `protected` fails while httpx2/fastmcp are not imported yet; layers contract is exhaustive over paperless_mcp, settings sits between server and tools|paperless; suppression format `# noqa: CODE -- reason` / `# pyright: ignore[rule] -- reason` / `# pragma: no cover -- reason` enforced by `just hygiene` (part of `just lint`), `# type: ignore` disabled (blanket in pyright); monkeypatch.setattr & co. banned by the same check. Toolset independence contract deferred (R2). deptry DEP002 ignores fastmcp and httpx2 until their first import (PLMCP-6/8). Gate-bite probes recorded in the task-1 report.
+<!-- SECTION:NOTES:END -->

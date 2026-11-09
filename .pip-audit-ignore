@@ -1,0 +1,8 @@
+# pip-audit allowlist: vulnerability IDs the dependency audit (`just audit`) skips.
+#
+# One ID per line (PYSEC-*, GHSA-* or CVE-*). Blank lines and full-line `#` comments are
+# ignored; inline comments are not supported.
+#
+# Add an ID only for a triaged false positive or a vulnerability that demonstrably does not
+# apply to how paperless-mcp uses the package. Put the reason, the advisory link and the date
+# in a comment directly above the ID so the entry can be reviewed and removed later.

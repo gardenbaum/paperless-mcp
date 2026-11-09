@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+dist/
+build/
+
+# uv / virtual environments
+.venv/
+
+# Local environment overrides
+.env
+.env.*
+
+# Tool caches
+.ruff_cache/
+.import_linter_cache/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store

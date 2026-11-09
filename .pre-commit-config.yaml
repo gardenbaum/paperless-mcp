@@ -1,0 +1,64 @@
+# The gates of `just check` (through the same recipes), plus file hygiene and gitleaks.
+# Install once with `uv run pre-commit install`; run on everything with `just precommit`.
+exclude: '^docs/vendor/'
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.13.7
+    hooks:
+      - id: uv-lock
+
+  - repo: local
+    hooks:
+      - id: lint
+        name: lint (ruff, suppressions, patching)
+        entry: just lint
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: format-check
+        name: format check (ruff)
+        entry: just format-check
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: typecheck
+        name: type check (basedpyright)
+        entry: just typecheck
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: imports
+        name: import contracts (import-linter)
+        entry: just imports
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: deps
+        name: dependency hygiene (deptry)
+        entry: just deps
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: tests
+        name: tests with coverage and diff coverage
+        entry: just cov-diff
+        language: system
+        pass_filenames: false
+        always_run: true
