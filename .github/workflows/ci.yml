@@ -18,7 +18,7 @@ env:
   RUST_JUST_VERSION: "1.59.0"
 
 jobs:
-  # Job names `check (3.14)` / `check (3.15)` and `audit` are the required status checks.
+  # Job names `check (3.14)` / `check (3.15)`, `audit` and `e2e` are the required status checks.
   check:
     name: check (${{ matrix.python }})
     runs-on: ubuntu-latest
@@ -85,3 +85,34 @@ jobs:
 
       - name: Secret scan (gitleaks, whole history)
         run: just secrets
+
+  # Real paperless-ngx 3.4.2 + Redis from tests/e2e/compose.yaml; the same recipe as local runs.
+  # Readiness waiting and seeding live in the test session, so `just e2e` is the whole job.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install just
+        run: uv tool install "rust-just==${RUST_JUST_VERSION}"
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - run: just e2e
+
+      - name: Collect container logs
+        if: failure()
+        run: docker compose -f tests/e2e/compose.yaml logs --no-color > e2e-containers.log
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: e2e-container-logs
+          path: e2e-containers.log
+          retention-days: 7

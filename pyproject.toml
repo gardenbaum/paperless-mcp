@@ -81,6 +81,7 @@ typeCheckingMode = "recommended"
 pythonVersion = "3.14"
 # Only our code; docs/vendor, .superpowers and backlog are outside this scope.
 include = ["src", "tests"]
+extraPaths = ["src", "tests"]
 # `# type: ignore` silences every rule on its line in pyright; only `# pyright: ignore[rule]` counts.
 enableTypeIgnoreComments = false
 
@@ -88,10 +89,16 @@ enableTypeIgnoreComments = false
 
 [tool.pytest]
 strict = true
-addopts = ["--import-mode=importlib", "-ra"]
+# E2E tests need the docker compose stack (`just e2e`): `just check` deselects them.
+addopts = ["--import-mode=importlib", "-ra", "-m", "not e2e"]
 testpaths = ["tests"]
+# tests/e2e/helpers.py is imported as `e2e.helpers` (importlib mode adds no import path).
+pythonpath = ["tests"]
 filterwarnings = ["error"]
-markers = ["decision(id): the test guards the Backlog decision with this id, e.g. \"decision-1\""]
+markers = [
+    "e2e: runs against the real Paperless stack of tests/e2e/compose.yaml (`just e2e`)",
+    "decision(id): the test guards the Backlog decision with this id, e.g. \"decision-1\"",
+]
 
 [tool.coverage.run]
 branch = true

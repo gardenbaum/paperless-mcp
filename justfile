@@ -157,6 +157,20 @@ secrets:
 # The full local gate; CI's check job runs the same recipes. `audit` needs the network.
 check: lock-check lint format-check typecheck imports deps secrets cov-diff
 
+# Start the Paperless 3.4.2 E2E stack (tests/e2e/compose.yaml) on 127.0.0.1:${PAPERLESS_E2E_PORT:-8010}.
+# Readiness and seeding are the test session's job, so this returns as soon as the containers run.
+e2e-up:
+    docker compose -f tests/e2e/compose.yaml up -d
+
+# Run only the E2E tests (marker `e2e`, deselected by `check`) against the stack, starting it if needed.
+# The stack is left running for fast reruns; the seeding is idempotent. No coverage: E2E tests do not count.
+e2e: e2e-up
+    uv run pytest -m e2e --no-cov
+
+# Stop the E2E stack and delete its volumes, so the next start is a fresh instance.
+e2e-down:
+    docker compose -f tests/e2e/compose.yaml down --volumes --remove-orphans
+
 # Audit the locked dependencies for known vulnerabilities. Triaged false positives are
 # suppressed by ID in .pip-audit-ignore.
 audit:
