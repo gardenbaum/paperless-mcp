@@ -91,6 +91,7 @@ strict = true
 addopts = ["--import-mode=importlib", "-ra"]
 testpaths = ["tests"]
 filterwarnings = ["error"]
+markers = ["decision(id): the test guards the Backlog decision with this id, e.g. \"decision-1\""]
 
 [tool.coverage.run]
 branch = true
