@@ -1,0 +1,34 @@
+# Paperless-ngx E2E stack, shared by local development and CI (design 9.2). Driven by
+# `just e2e-up` / `just e2e` / `just e2e-down`. Everything here is test-only: SQLite, no
+# persistence beyond the named volumes (removed by `just e2e-down`), throwaway credentials.
+name: paperless-mcp-e2e
+
+services:
+  broker:
+    # renovate: datasource=docker depName=redis
+    image: redis:8.10.3@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
+
+  paperless:
+    # Same image digest the vendored schema was generated from (docs/vendor/paperless/UPSTREAM).
+    image: ghcr.io/paperless-ngx/paperless-ngx:3.4.2@sha256:d704e84f88300eb6ab001ab15720a2330ff99169cf9f94d6b8fcc44b63a84c84
+    depends_on:
+      - broker
+    ports:
+      - "127.0.0.1:${PAPERLESS_E2E_PORT:-8010}:8000"
+    environment:
+      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_SECRET_KEY: e2e-only-not-a-secret
+      PAPERLESS_ADMIN_USER: admin
+      PAPERLESS_ADMIN_PASSWORD: e2e-admin-password
+      PAPERLESS_OCR_LANGUAGE: eng
+      PAPERLESS_TASK_WORKERS: "1"
+      PAPERLESS_WEBSERVER_WORKERS: "1"
+      USERMAP_UID: "1000"
+      USERMAP_GID: "1000"
+    volumes:
+      - data:/usr/src/paperless/data
+      - media:/usr/src/paperless/media
+
+volumes:
+  data:
+  media:

@@ -1,9 +1,11 @@
 ---
 id: PLMCP-5
 title: Provide a Paperless 3.4.2 E2E stack locally and in CI
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:25:00Z'
+updated_date: '2026-11-09T20:52:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -36,3 +38,9 @@ The honest-fake guarantee and all API assumptions need a real Paperless. One com
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. tests/e2e/compose.yaml: paperless-ngx 3.4.2 (digest) + redis (digest), SQLite, fixed localhost port, admin via env. 2. tests/e2e/conftest.py: readiness poll, token via POST /api/token/, idempotent API-only seeding (generated PDFs, all custom field types, tag parent/child, restricted user). 3. Marker e2e; addopts deselects it so just check skips it; just e2e-up/e2e/e2e-down. 4. Smoke test: X-Api-Version == 10. 5. CI job e2e (SHA-pinned actions, log upload on failure). 6. Draft PR to validate CI.
+<!-- SECTION:PLAN:END -->
