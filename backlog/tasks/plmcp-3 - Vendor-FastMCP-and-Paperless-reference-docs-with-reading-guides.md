@@ -1,9 +1,11 @@
 ---
 id: PLMCP-3
 title: Vendor FastMCP and Paperless reference docs with reading guides
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:25:00Z'
+updated_date: '2026-11-09T20:29:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -36,3 +38,13 @@ Agents must consult current docs instead of memory: FastMCP 4 (MCP SDK v2, httpx
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. justfile: docs-sync (FastMCP latest vX.Y.Z, sparse docs/, prune, temp-first) and docs-sync-paperless (PAPERLESS_VERSION 3.4.2; openapi.json via spectacular in pinned image; api.md/usage/search docs from same tag; temp-first).
+2. Probe failure safety with broken tag/URL.
+3. Reading guides for FastMCP and Paperless.
+4. CLAUDE.md/AGENTS.md project section (design 9.6 rules + guide pointers).
+5. Check gitleaks/hygiene; just check; commit.
+<!-- SECTION:PLAN:END -->
