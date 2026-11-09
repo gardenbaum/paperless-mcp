@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-09T22:46:00Z'
+updated_date: '2026-11-09T22:48:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -25,23 +25,23 @@ Prove the architecture end to end before features pile on: one tool through tool
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 get_instance_overview (toolset core, read-only) returns statistics, system status, Paperless and API version, current user and capabilities (Paperless AI enabled) as structured output
-- [ ] #2 create_server wires settings, credential provider, adapter, services and providers; the server lifespan owns the single httpx2.AsyncClient
-- [ ] #3 Startup probe: a wrong API version or an invalid token fails fast with a clear message on stderr; unreachable Paperless still starts and the tool returns UpstreamUnavailable; the probe never blocks longer than its timeout
-- [ ] #4 stdio entrypoint as console script paperless-mcp and python -m paperless_mcp; all logging goes to stderr
-- [ ] #5 One error boundary maps domain errors to ToolError with message and hint; any other exception is masked
-- [ ] #6 Registry tests: every tool has a title, a description, annotations from the central table and exactly one toolset tag; destructive tools have confirm defaulting to false; no filesystem path parameter outside the stdio allowlist; the default profile has at most 20 tools
-- [ ] #7 A syrupy snapshot covers the MCP surface, plus schema-compatibility checks (object root, no $schema key, every parameter described)
+- [x] #1 get_instance_overview (toolset core, read-only) returns statistics, system status, Paperless and API version, current user and capabilities (Paperless AI enabled) as structured output
+- [x] #2 create_server wires settings, credential provider, adapter, services and providers; the server lifespan owns the single httpx2.AsyncClient
+- [x] #3 Startup probe: a wrong API version or an invalid token fails fast with a clear message on stderr; unreachable Paperless still starts and the tool returns UpstreamUnavailable; the probe never blocks longer than its timeout
+- [x] #4 stdio entrypoint as console script paperless-mcp and python -m paperless_mcp; all logging goes to stderr
+- [x] #5 One error boundary maps domain errors to ToolError with message and hint; any other exception is masked
+- [x] #6 Registry tests: every tool has a title, a description, annotations from the central table and exactly one toolset tag; destructive tools have confirm defaulting to false; no filesystem path parameter outside the stdio allowlist; the default profile has at most 20 tools
+- [x] #7 A syrupy snapshot covers the MCP surface, plus schema-compatibility checks (object root, no $schema key, every parameter described)
 - [ ] #8 README explains setup for Claude Code; verified manually with claude mcp add against a real instance
-- [ ] #9 Each tool call is logged with request id, tool name, duration and outcome; document content, tokens and full query text are never logged at INFO or above
+- [x] #9 Each tool call is logged with request id, tool name, duration and outcome; document content, tokens and full query text are never logged at INFO or above
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
-- [ ] #4 Merged to main through the task's own pull request
+- [x] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -66,4 +66,16 @@ Gate changes, deliberate: new import-linter layer 'observability' (between serve
 Verification: just check green (188 passed, coverage 100 %, diff 100 %); just e2e 13 passed incl. stdio smoke of the console script and the wrong-token exit against 3.4.2. Verification against the user's own instance via claude mcp add is left to the user.
 
 Fix round 1 (review + R17): confirm check accepts a described confirm (type boolean, default false) with a positive self-test; boundary now also catches non-domain exceptions (ERROR log names only the type, traceback at DEBUG, generic ToolError 'Internal error in <tool>; the server log has details.' from None) with a KeyError(content) log test; contract 6 renamed to include observability (pyproject comment, decision-1 Enforcement list updated); server binds ports(client) once; domain output models get one-line docstrings and Field descriptions (snapshot regenerated deliberately, -68 lines: no Attributes blocks, ComponentStatus docstring one line); seeded accounts moved to tests/fakes/accounts.py (e2e.helpers imports them). just check 190 passed, 100 %; just e2e 13 passed.
+
+Task review (opus): 2 Important (confirm check vs described param; non-domain exception logging) + R17 minors fixed in 2fc113e; scoped re-review clean.
+AC8: README documents claude mcp add; automated stdio smoke against E2E 3.4.2 passes (R9). Manual check against the user's own instance is still open → task stays In Progress until the user confirms.
+DoD1 not checked: implementer reports server/observability/settings tests were partly written after the code.
+Carry to next tool task: boundary must re-raise ToolError before the catch-all (+ test).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Walking skeleton: get_instance_overview (core toolset, read-only, structured output) runs tools → services → InstanceReader port → adapter, assembled in create_server with the lifespan owning the single httpx2 client. Startup probe fails fast on wrong API version or invalid token and tolerates an unreachable Paperless. stdio console script paperless-mcp / python -m paperless_mcp; logging to stderr with httpx2/httpcore2 at WARNING; one error boundary (domain errors → ToolError with hint; anything else logged by type only and masked). Registry tests with offender and positive self-tests, syrupy snapshot of the MCP surface with schema-compatibility checks, tests at unit/tool/contract/e2e level incl. a stdio smoke of the real console script.
+Open: manual verification against the user's own Paperless; ToolError re-raise in boundary; FastMCP stderr lines not JSON; probe does not check Paperless major version.
+<!-- SECTION:FINAL_SUMMARY:END -->
