@@ -21,9 +21,6 @@ async def get_instance_overview(ctx: Context) -> InstanceOverview:
     whether Paperless AI is enabled. Use it first to orient yourself, or to diagnose failures.
 
     Counts include only what the user may see, unless they may view global statistics. A null
-    field means the user may not see it, not that it is off: system_status needs the
-    system-monitoring permission; current_user and ai_enabled need permission to view the UI
-    settings, so ai_enabled null means unknown. inbox_documents is null if the user sees no
-    inbox tag.
+    field means the user may not see it, not that it is off: ai_enabled null means unknown.
     """
     return await services(ctx).instance.overview()

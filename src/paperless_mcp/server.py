@@ -81,7 +81,8 @@ def create_server(
             upload_timeout=UPLOAD_TIMEOUT,
             retry=RetryPolicy(),
         ) as client:
-            services = Services(instance=InstanceService(ports(client).instance))
+            adapters = ports(client)
+            services = Services(instance=InstanceService(adapters.instance))
             overview = await services.instance.probe(settings.startup_timeout)
             if overview is None:
                 logger.warning("Paperless is not reachable yet; tools report it until it is")

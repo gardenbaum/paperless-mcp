@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, cast
 
 import httpx2
 import pytest
-from e2e.helpers import ADMIN, READER
+from fakes.accounts import ADMIN, READER
 from fakes.paperless import FakePaperless, seeded
 
 from paperless_mcp.domain.ports import InstanceReader  # noqa: TC001 -- Ports' annotations are introspected

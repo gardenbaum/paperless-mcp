@@ -7,6 +7,7 @@ directly on the function, and the use case it calls on ``Services``. The registr
 """
 
 import functools
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, cast
 
@@ -35,6 +36,8 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
     ),
 }
 
+logger = logging.getLogger(__name__)
+
 # Key of the ``Services`` in the server's lifespan context.
 SERVICES: Final = "services"
 
@@ -52,12 +55,15 @@ def services(ctx: Context) -> Services:
 
 
 def boundary[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
-    """The error boundary of a tool: a domain error becomes a ``ToolError`` the client sees.
+    """The error boundary of a tool: every exception becomes a ``ToolError`` the client sees.
 
-    The message and hint are client-safe by contract. The cause is dropped (``from None``):
-    FastMCP logs a ``ToolError`` without traceback, so a cause that holds response content is
-    never logged. Every other exception passes on to FastMCP, which masks it.
+    A domain error's message and hint are client-safe by contract and reach the client. Any
+    other exception is a bug: the client gets a generic message, and the log at ERROR gets only
+    its type, because its message or a cause may hold response content (pydantic errors quote
+    their input). The traceback is logged at DEBUG. Causes are dropped (``from None``); FastMCP
+    logs a ``ToolError`` without traceback.
     """
+    name = tool.__name__
 
     @functools.wraps(tool)
     async def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
@@ -65,5 +71,10 @@ def boundary[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R
             return await tool(*args, **kwargs)
         except PaperlessMcpError as error:
             raise ToolError(error.describe()) from None
+        except Exception as error:
+            logger.error("%s failed: %s", name, type(error).__name__)  # noqa: TRY400 -- no traceback above DEBUG
+            logger.debug("%s failed", name, exc_info=True)
+            message = f"Internal error in {name}; the server log has details."
+            raise ToolError(message) from None
 
     return guarded

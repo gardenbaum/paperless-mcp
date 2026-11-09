@@ -148,3 +148,31 @@ async def test_a_failed_call_logs_the_error_type_but_neither_message_nor_cause(
     logged = fastmcp_records.text + str([vars(r) for r in fastmcp_records.records])
     assert CONTENT not in logged
     assert QUERY not in logged
+
+
+async def test_a_failing_bug_logs_its_type_but_never_its_message_above_debug(
+    fastmcp_records: pytest.LogCaptureFixture,
+) -> None:
+    fastmcp_records.set_level(logging.INFO)
+
+    async with Client(serve(FailsAfterProbe(KeyError(CONTENT)))) as client:
+        result = await client.call_tool("get_instance_overview", raise_on_error=False)
+
+    assert result.is_error
+    logged = fastmcp_records.text + str([vars(r) for r in fastmcp_records.records])
+    assert CONTENT not in logged
+    assert CONTENT not in str(result.content)
+    assert "get_instance_overview failed: KeyError" in fastmcp_records.messages
+
+
+async def test_the_traceback_of_a_bug_is_logged_at_debug(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="paperless_mcp.tools._shared")
+
+    async with Client(serve(FailsAfterProbe(KeyError(CONTENT)))) as client:
+        _ = await client.call_tool("get_instance_overview", raise_on_error=False)
+
+    [traceback] = [r for r in caplog.records if r.levelno == logging.DEBUG and r.exc_info]
+    assert CONTENT in caplog.text
+    assert traceback.getMessage() == "get_instance_overview failed"

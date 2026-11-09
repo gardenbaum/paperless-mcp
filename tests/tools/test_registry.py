@@ -6,13 +6,14 @@ pass for want of offenders (no destructive tool, no path parameter yet) is prove
 """
 
 from pathlib import Path  # noqa: TC003 -- FastMCP reads tool signatures at runtime
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, cast
 
 import pytest
 from fastmcp import FastMCP
 from fastmcp.server.providers import LocalProvider
 from harness import admin, serve
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from paperless_mcp.tools._shared import ANNOTATIONS, TOOLSETS, boundary
 
@@ -71,17 +72,18 @@ def destructive(tool: Tool) -> bool:
 
 
 def unconfirmed(tools: list[Tool]) -> list[str]:
-    """Destructive tools without an optional `confirm: bool = False`."""
-    expected = {"type": "boolean", "default": False}
-    return [
-        t.name
-        for t in tools
-        if destructive(t)
-        and (
-            cast("dict[str, object]", t.parameters.get("properties", {})).get("confirm") != expected
-            or "confirm" in cast("list[str]", t.parameters.get("required", []))
+    """Destructive tools without an optional `confirm: bool = False` (described or not)."""
+
+    def confirmed(tool: Tool) -> bool:
+        properties = cast("dict[str, dict[str, object]]", tool.parameters.get("properties", {}))
+        confirm = properties.get("confirm", {})
+        return (
+            confirm.get("type") == "boolean"
+            and confirm.get("default") is False
+            and "confirm" not in cast("list[str]", tool.parameters.get("required", []))
         )
-    ]
+
+    return [t.name for t in tools if destructive(t) and not confirmed(t)]
 
 
 def formats(schema: object) -> set[str]:
@@ -170,6 +172,15 @@ async def drop_without_confirm() -> None:
     """Not read-only and not marked non-destructive: destructive by MCP's default."""
 
 
+@offenders.tool(annotations=ToolAnnotations(title="Empty trash", destructive_hint=True))
+@boundary
+async def empty_trash(
+    *, confirm: Annotated[bool, Field(description="Set to true to really empty it.")] = False
+) -> bool:
+    """A correct destructive tool: a described confirm that defaults to false."""
+    return confirm
+
+
 async def offending_tools() -> list[Tool]:
     return list(await FastMCP(providers=[offenders]).list_tools())
 
@@ -203,6 +214,7 @@ async def test_self_test_destructive_tools_without_a_false_confirm_are_found() -
     found = set(unconfirmed(await offending_tools()))
 
     assert found >= {"delete_everything", "drop_without_confirm"}
+    assert "empty_trash" not in found
 
 
 @pytest.mark.decision("decision-7")

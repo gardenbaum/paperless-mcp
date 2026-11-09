@@ -26,8 +26,9 @@ the same entrypoint.
 At startup the server checks the connection: a rejected token or a Paperless that does not speak
 API version 10 stops it with a message on stderr (in Claude Code: `claude --debug` or the `/mcp`
 details). An unreachable Paperless does not stop it; the tools report the problem until
-Paperless is back. Logs go to stderr as JSON lines and never contain tokens, document content or
-query text at INFO or above.
+Paperless is back. Logs go to stderr (the server's own records as JSON lines) and never contain
+tokens, document content or query text at INFO or above: tool arguments and error messages are
+not logged, and an internal error is logged by type, with its traceback only at DEBUG.
 
 ## Configuration
 

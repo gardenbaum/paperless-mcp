@@ -4,7 +4,8 @@ import logging
 from typing import TYPE_CHECKING
 
 import pytest
-from e2e.helpers import BASE_URL, READER, Stack, client, seed, token_for, wait_ready
+from e2e.helpers import BASE_URL, Stack, client, seed, token_for, wait_ready
+from fakes.accounts import READER
 
 from paperless_mcp.observability import QUIET_LOGGERS
 

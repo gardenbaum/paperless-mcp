@@ -202,7 +202,9 @@ forbidden_modules = ["httpx2"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Only tools, server and entrypoints import fastmcp and mcp"
+# observability may import fastmcp too: its CallLogging is FastMCP middleware, and it sits
+# above settings and below server in the layers, outside the source list below.
+name = "Only tools, observability, server and entrypoints import fastmcp and mcp"
 type = "forbidden"
 source_modules = [
     "paperless_mcp.settings",

@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-09T22:36:00Z'
+updated_date: '2026-11-09T22:46:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -64,4 +64,6 @@ Prove the architecture end to end before features pile on: one tool through tool
 Implemented the walking skeleton (TDD, RED then GREEN per level): services/instance.py InstanceService (overview, probe: only UpstreamUnavailable or the timeout tolerated); tools/_shared.py (TOOLSETS, central ANNOTATIONS table, Services + services(ctx), boundary); tools/core.py get_instance_overview; observability.py (JSON lines on stderr, httpx2/httpcore2 held at WARNING, request-id ContextVar, CallLogging middleware); server.py Ports/paperless_ports seam + create_server with lifespan owning the one httpx2.AsyncClient via paperless.client.connect (server may not import httpx2); cli.py main + __main__ + console script; PAPERLESS_MCP_STARTUP_TIMEOUT. PaperlessMcpError.describe() (message + Hint) shared by the boundary and the CLI.
 Gate changes, deliberate: new import-linter layer 'observability' (between server and settings, added to the httpx2 contract); ruff per-file ignore TC001-3 for src/paperless_mcp/tools/*.py (FastMCP evaluates tool signatures at runtime); deptry DEP002 fastmcp exemption removed; mcp declared as a direct dependency (ToolAnnotations); syrupy added. New snapshot tests/tools/__snapshots__/test_surface.ambr: the first MCP surface (one tool). decision-6/7 Enforcement updated: their registry checks now exist (PLMCP-8) with self-tests.
 Verification: just check green (188 passed, coverage 100 %, diff 100 %); just e2e 13 passed incl. stdio smoke of the console script and the wrong-token exit against 3.4.2. Verification against the user's own instance via claude mcp add is left to the user.
+
+Fix round 1 (review + R17): confirm check accepts a described confirm (type boolean, default false) with a positive self-test; boundary now also catches non-domain exceptions (ERROR log names only the type, traceback at DEBUG, generic ToolError 'Internal error in <tool>; the server log has details.' from None) with a KeyError(content) log test; contract 6 renamed to include observability (pyproject comment, decision-1 Enforcement list updated); server binds ports(client) once; domain output models get one-line docstrings and Field descriptions (snapshot regenerated deliberately, -68 lines: no Attributes blocks, ComponentStatus docstring one line); seeded accounts moved to tests/fakes/accounts.py (e2e.helpers imports them). just check 190 passed, 100 %; just e2e 13 passed.
 <!-- SECTION:NOTES:END -->

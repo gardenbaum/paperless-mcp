@@ -12,7 +12,7 @@ import socket
 import threading
 from typing import TYPE_CHECKING, ClassVar, override
 
-from e2e.helpers import ADMIN
+from fakes.accounts import ADMIN
 from fakes.paperless import FakePaperless, seeded
 
 from paperless_mcp.server import Ports, create_server

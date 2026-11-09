@@ -23,10 +23,7 @@
         whether Paperless AI is enabled. Use it first to orient yourself, or to diagnose failures.
         
         Counts include only what the user may see, unless they may view global statistics. A null
-        field means the user may not see it, not that it is off: system_status needs the
-        system-monitoring permission; current_user and ai_enabled need permission to view the UI
-        settings, so ai_enabled null means unknown. inbox_documents is null if the user sees no
-        inbox tag.
+        field means the user may not see it, not that it is off: ai_enabled null means unknown.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -36,14 +33,7 @@
       }),
       'name': 'get_instance_overview',
       'outputSchema': dict({
-        'description': '''
-          A snapshot of the instance as the current user sees it.
-          
-          Attributes:
-              system_status: None if the user may not view the system status.
-              current_user: None if the user may not view the UI settings.
-              ai_enabled: Whether Paperless AI is enabled; None if unknown (as ``current_user``).
-        ''',
+        'description': 'The instance as the current user sees it.',
         'properties': dict({
           'ai_enabled': dict({
             'anyOf': list([
@@ -54,6 +44,7 @@
                 'type': 'null',
               }),
             ]),
+            'description': 'Whether Paperless AI is enabled; null means unknown (the user may not view the UI settings), not disabled.',
           }),
           'api_version': dict({
             'type': 'integer',
@@ -84,17 +75,13 @@
                 'type': 'null',
               }),
             ]),
+            'description': 'Null if the user may not view the UI settings.',
           }),
           'paperless_version': dict({
             'type': 'string',
           }),
           'statistics': dict({
-            'description': '''
-              Object counts; without global statistics permission, only of the objects the user sees.
-              
-              Attributes:
-                  inbox_documents: Documents with an inbox tag; None if the user sees no inbox tag.
-            ''',
+            'description': 'Object counts, of the objects the user may see unless they may view global statistics.',
             'properties': dict({
               'correspondents': dict({
                 'type': 'integer',
@@ -114,6 +101,7 @@
                     'type': 'null',
                   }),
                 ]),
+                'description': 'Documents with an inbox tag; null if no inbox tag is visible.',
               }),
               'storage_paths': dict({
                 'type': 'integer',
@@ -135,16 +123,10 @@
           'system_status': dict({
             'anyOf': list([
               dict({
-                'description': 'Storage and component health of the instance (no internal URLs or host details).',
+                'description': 'Storage and component health of the instance.',
                 'properties': dict({
                   'celery': dict({
-                    'description': '''
-                      Health of one Paperless component.
-                      
-                      Attributes:
-                          status: As Paperless reports it: ``OK``, ``WARNING``, ``ERROR`` or ``DISABLED``.
-                          error: Paperless's explanation when the status is not ``OK``.
-                    ''',
+                    'description': 'Health of one Paperless component.',
                     'properties': dict({
                       'error': dict({
                         'anyOf': list([
@@ -157,6 +139,7 @@
                         ]),
                       }),
                       'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
                         'type': 'string',
                       }),
                     }),
@@ -167,13 +150,7 @@
                     'type': 'object',
                   }),
                   'classifier': dict({
-                    'description': '''
-                      Health of one Paperless component.
-                      
-                      Attributes:
-                          status: As Paperless reports it: ``OK``, ``WARNING``, ``ERROR`` or ``DISABLED``.
-                          error: Paperless's explanation when the status is not ``OK``.
-                    ''',
+                    'description': 'Health of one Paperless component.',
                     'properties': dict({
                       'error': dict({
                         'anyOf': list([
@@ -186,6 +163,7 @@
                         ]),
                       }),
                       'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
                         'type': 'string',
                       }),
                     }),
@@ -196,13 +174,7 @@
                     'type': 'object',
                   }),
                   'database': dict({
-                    'description': '''
-                      Health of one Paperless component.
-                      
-                      Attributes:
-                          status: As Paperless reports it: ``OK``, ``WARNING``, ``ERROR`` or ``DISABLED``.
-                          error: Paperless's explanation when the status is not ``OK``.
-                    ''',
+                    'description': 'Health of one Paperless component.',
                     'properties': dict({
                       'error': dict({
                         'anyOf': list([
@@ -215,6 +187,7 @@
                         ]),
                       }),
                       'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
                         'type': 'string',
                       }),
                     }),
@@ -228,13 +201,7 @@
                     'type': 'string',
                   }),
                   'llm_index': dict({
-                    'description': '''
-                      Health of one Paperless component.
-                      
-                      Attributes:
-                          status: As Paperless reports it: ``OK``, ``WARNING``, ``ERROR`` or ``DISABLED``.
-                          error: Paperless's explanation when the status is not ``OK``.
-                    ''',
+                    'description': 'Health of one Paperless component.',
                     'properties': dict({
                       'error': dict({
                         'anyOf': list([
@@ -247,6 +214,7 @@
                         ]),
                       }),
                       'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
                         'type': 'string',
                       }),
                     }),
@@ -257,13 +225,7 @@
                     'type': 'object',
                   }),
                   'redis': dict({
-                    'description': '''
-                      Health of one Paperless component.
-                      
-                      Attributes:
-                          status: As Paperless reports it: ``OK``, ``WARNING``, ``ERROR`` or ``DISABLED``.
-                          error: Paperless's explanation when the status is not ``OK``.
-                    ''',
+                    'description': 'Health of one Paperless component.',
                     'properties': dict({
                       'error': dict({
                         'anyOf': list([
@@ -276,6 +238,7 @@
                         ]),
                       }),
                       'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
                         'type': 'string',
                       }),
                     }),
@@ -286,13 +249,7 @@
                     'type': 'object',
                   }),
                   'sanity_check': dict({
-                    'description': '''
-                      Health of one Paperless component.
-                      
-                      Attributes:
-                          status: As Paperless reports it: ``OK``, ``WARNING``, ``ERROR`` or ``DISABLED``.
-                          error: Paperless's explanation when the status is not ``OK``.
-                    ''',
+                    'description': 'Health of one Paperless component.',
                     'properties': dict({
                       'error': dict({
                         'anyOf': list([
@@ -305,6 +262,7 @@
                         ]),
                       }),
                       'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
                         'type': 'string',
                       }),
                     }),
@@ -315,13 +273,7 @@
                     'type': 'object',
                   }),
                   'search_index': dict({
-                    'description': '''
-                      Health of one Paperless component.
-                      
-                      Attributes:
-                          status: As Paperless reports it: ``OK``, ``WARNING``, ``ERROR`` or ``DISABLED``.
-                          error: Paperless's explanation when the status is not ``OK``.
-                    ''',
+                    'description': 'Health of one Paperless component.',
                     'properties': dict({
                       'error': dict({
                         'anyOf': list([
@@ -334,6 +286,7 @@
                         ]),
                       }),
                       'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
                         'type': 'string',
                       }),
                     }),
@@ -368,6 +321,7 @@
                 'type': 'null',
               }),
             ]),
+            'description': 'Null if the user may not view the system status.',
           }),
         }),
         'required': list([

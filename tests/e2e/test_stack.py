@@ -1,8 +1,9 @@
 """Smoke tests of the E2E stack itself: version, seeding, and its idempotence."""
 
 import pytest
+from fakes.accounts import ADMIN, READER
 
-from e2e.helpers import ADMIN, READER, Seeded, Stack, num, obj, parse, results, seed, seq
+from e2e.helpers import Seeded, Stack, num, obj, parse, results, seed, seq
 
 pytestmark = pytest.mark.e2e
 

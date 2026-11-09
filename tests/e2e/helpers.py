@@ -11,13 +11,11 @@ from typing import cast
 
 import httpx2
 import pytest
+from fakes.accounts import ADMIN, READER, READER_PERMISSIONS
 
 PORT = os.environ.get("PAPERLESS_E2E_PORT", "8010")
 BASE_URL = f"http://127.0.0.1:{PORT}"
 API_VERSION = 10
-# Test-only credentials of the throwaway stack in compose.yaml (the admin one is set there).
-ADMIN = ("admin", "e2e-admin-password")
-READER = ("e2e-reader", "e2e-reader-password")
 READY_TIMEOUT = 300.0
 CONSUME_TIMEOUT = 180.0
 # Every custom field data type of 3.4.2 except `select`, which needs options (see seed()).
@@ -25,15 +23,6 @@ DATA_TYPES = (
     *("string", "url", "date", "boolean", "integer", "float", "monetary"),
     *("documentlink", "longtext"),
 )
-# The restricted user's global permissions: view the documents and taxonomy, and the UI settings
-# every web UI user needs (they carry the current user and the AI flag).
-READER_PERMISSIONS = [
-    f"view_{model}"
-    for model in (
-        *("document", "tag", "correspondent", "documenttype", "storagepath", "customfield"),
-        "uisettings",
-    )
-]
 LOGS_HINT = "docker compose -f tests/e2e/compose.yaml logs paperless"
 
 type Json = dict[str, object]

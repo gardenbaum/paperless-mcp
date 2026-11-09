@@ -21,8 +21,7 @@ import functools
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Concatenate
 
-from e2e.helpers import ADMIN, READER, READER_PERMISSIONS
-
+from fakes.accounts import ADMIN, READER, READER_PERMISSIONS
 from paperless_mcp.domain.instance import (
     ComponentStatus,
     CurrentUser,

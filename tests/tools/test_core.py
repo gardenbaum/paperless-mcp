@@ -3,7 +3,7 @@
 from dataclasses import replace
 
 import pytest
-from e2e.helpers import READER
+from fakes.accounts import READER
 from fakes.paperless import FakePaperless, seeded
 from fastmcp import Client
 from harness import FailsAfterProbe, admin, serve
@@ -67,5 +67,5 @@ async def test_any_other_error_is_masked() -> None:
 
     assert result.is_error
     text = str([block.model_dump() for block in result.content])
-    assert "Error calling tool 'get_instance_overview'" in text
+    assert "Internal error in get_instance_overview; the server log has details." in text
     assert "internal-detail" not in text

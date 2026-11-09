@@ -29,12 +29,12 @@ Ports and adapters (design 5.1): entrypoints (`__main__`, `app`, `cli`) > `serve
 
 import-linter contracts in `pyproject.toml`, run by `just imports` inside `just check` and in CI (`check (3.14)`, `check (3.15)`):
 
-1. "Layers: entrypoints > server > settings > tools | paperless > services > domain" (layers, exhaustive)
+1. "Layers: entrypoints > server > observability > settings > tools | paperless > services > domain" (layers, exhaustive; `observability` added in PLMCP-8: logging setup and the tool-call logging middleware)
 2. "The package root imports nothing from the package and no I/O or MCP library"
 3. "The adapter does not use services"
 4. "Only the composition root imports tools and paperless"
 5. "Only paperless imports httpx2"
-6. "Only tools, server and entrypoints import fastmcp and mcp"
+6. "Only tools, observability, server and entrypoints import fastmcp and mcp" (observability holds FastMCP middleware)
 7. "No pydantic-settings below the composition root (configuration is injected)"
 8. "No httpx"
 
