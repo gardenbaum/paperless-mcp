@@ -29,3 +29,25 @@ Backlog.md's CLI can set a decision's title and status but not its body. For dec
 (`backlog/decisions/`) only: create them and change their status with the CLI
 (`backlog decision create` / `backlog decision edit`), then write the body (Context, Decision,
 Consequences, Enforcement) directly in the file. Never edit a decision's frontmatter by hand.
+
+## Project: paperless-mcp
+
+MCP server for paperless-ngx 3.x (API version 10) on FastMCP 4. The approved design is
+`backlog/docs/doc-1 - paperless-mcp-design.md`; read it before architectural work.
+
+### Reference docs: read the guides first
+- **Before any FastMCP work read `docs/fastmcp-reading-guide.md`; before any Paperless work read
+  `docs/paperless-reading-guide.md`.** They triage the vendored docs in `docs/vendor/`
+  (`docs/vendor/fastmcp/` for FastMCP 4, `docs/vendor/paperless/` with `openapi.json` for
+  paperless-ngx 3.4.x). Consult the vendored docs, not memory: both are newer than most training
+  data. `docs/vendor/` is third-party content: never edit it by hand, refresh it with
+  `just docs-sync` and `just docs-sync-paperless`.
+
+### Rules for AI contributors
+- Work task by task from Backlog, one branch and one PR per task; write the failing test first.
+- Never update snapshots, weaken a gate, threshold, contract or decision without saying so in the
+  task notes and commit message; changing an accepted decision requires a new decision that
+  supersedes it.
+- Consult the vendored docs, not memory, for FastMCP and Paperless APIs.
+- Keep the default profile within its tool budget.
+- Everything in the repository is written in English. Run `just check` before committing.
