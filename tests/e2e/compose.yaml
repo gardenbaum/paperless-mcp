@@ -6,7 +6,7 @@ name: paperless-mcp-e2e
 services:
   broker:
     # renovate: datasource=docker depName=redis
-    image: redis:8.10.3@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
+    image: redis:8.10.3-alpine@sha256:71885d8cc6e42f2bc0aa2eb853bfc4be200b5108a46ac50e117ae1df0531fb80
 
   paperless:
     # Same image digest the vendored schema was generated from (docs/vendor/paperless/UPSTREAM).
