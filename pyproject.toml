@@ -106,7 +106,14 @@ addopts = ["--import-mode=importlib", "-ra", "-m", "not e2e", "-p", "pytester"]
 testpaths = ["tests"]
 # tests/e2e/helpers.py is imported as `e2e.helpers` (importlib mode adds no import path).
 pythonpath = ["tests"]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # Upstream, Python 3.15 only: py-key-value-aio (a FastMCP dependency) runs beartype's import
+    # hook on its own package, and beartype's isinstance() probe of the non-runtime-checkable
+    # AsyncKeyValue protocol hits 3.15's new DeprecationWarning. Matches only that protocol.
+    # Remove when py-key-value-aio or beartype fixes it.
+    "ignore:<class 'key_value\\.aio\\.protocols\\.key_value\\.AsyncKeyValue'> isn't explicitly decorated with @runtime_checkable:DeprecationWarning",
+]
 markers = [
     "e2e: runs against the real Paperless stack of tests/e2e/compose.yaml (`just e2e`)",
     "decision(id): the test guards the Backlog decision with this id, e.g. \"decision-1\"",
