@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-09T21:56:00Z'
+updated_date: '2026-11-09T22:04:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -55,4 +55,6 @@ Services and tools are tested against an in-memory fake instead of mocks. To kee
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented InstanceReader (domain/ports.py, domain/instance.py), PaperlessInstanceReader (paperless/instance.py), FakePaperless with write guard (tests/fakes/paperless.py) and the contract suite (tests/contract/) incl. coverage meta-tests. Verified on 3.4.2: statistics are scoped to visible objects for users without view_global_statistics; /api/status/ is 403 text/html for non-staff without view_system_monitoring (overview: system_status None); /api/ui_settings/ needs view_uisettings (otherwise current_user and ai_enabled None); versions from X-Version/X-Api-Version. Schema guard: deliberate, documented deviations for GET /api/status/ 200 and 403 and GET /api/ui_settings/ 200, whose 3.4.2 schema is wrong; the live contract suite covers the real shapes. E2E seed: shared taxonomy now owner null (Paperless default owner is the creator, which hid it from the reader), new shared inbox tag e2e-inbox on the public document, reader gets view_uisettings; tokens fetched once per session (/api/token/ is throttled). Not built yet (no port needs them): pagination and PATCH behaviour of the fake arrive with the first list/patch port.
+
+Fix round 1 (R16): contract tests use the SEEDED_OBJECTS manifest (e2e/helpers.py) as lower bounds instead of exact counts, the fake seed is checked exactly against it; live isolation rule in tests/contract/conftest.py. Coverage guard now runs on items pytest collects (pytester, enabled via -p pytester): a method counts only with a contract-marked test taking backend with both fake and live params. Backend is now explicit wiring (Ports dataclass, one field per port; fake_ports/live_ports) instead of a multiple-inheritance Adapter; meta-tests check every port is wired and implemented by fake and adapter. ports.py states the *Writer rule.
 <!-- SECTION:NOTES:END -->

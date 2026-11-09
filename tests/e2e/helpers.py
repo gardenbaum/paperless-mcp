@@ -195,6 +195,19 @@ def ensure_document(api: httpx2.Client, title: str, text: str) -> int:
     pytest.fail(f"Consuming {title!r} timed out after {CONSUME_TIMEOUT:.0f}s. Logs: `{LOGS_HINT}`")
 
 
+# The seed's manifest per instance statistic: (objects every user sees, objects only the admin
+# sees). `fakes.paperless.seeded` matches it exactly; on the persistent live stack other tests may
+# add objects, so the contract suite only relies on these as lower bounds.
+SEEDED_OBJECTS: dict[str, tuple[int, int]] = {
+    "documents": (1, 1),
+    "inbox_documents": (1, 0),
+    "tags": (3, 1),
+    "correspondents": (1, 0),
+    "document_types": (1, 0),
+    "storage_paths": (1, 0),
+}
+
+
 def seed(admin: httpx2.Client) -> Seeded:
     """Create the fixture data; safe to run any number of times.
 

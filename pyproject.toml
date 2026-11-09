@@ -95,7 +95,7 @@ enableTypeIgnoreComments = false
 [tool.pytest]
 strict = true
 # E2E tests need the docker compose stack (`just e2e`): `just check` deselects them.
-addopts = ["--import-mode=importlib", "-ra", "-m", "not e2e"]
+addopts = ["--import-mode=importlib", "-ra", "-m", "not e2e", "-p", "pytester"]
 testpaths = ["tests"]
 # tests/e2e/helpers.py is imported as `e2e.helpers` (importlib mode adds no import path).
 pythonpath = ["tests"]

@@ -5,6 +5,7 @@ the adapter tests check the adapter's side of the same cases on recorded respons
 """
 
 import pytest
+from e2e.helpers import SEEDED_OBJECTS
 
 from fakes.paperless import (
     FakeDocument,
@@ -118,3 +119,21 @@ async def test_reads_need_no_opt_in() -> None:
     overview = await TaggingFake(seeded(), user="admin").get_overview()
 
     assert overview.statistics.documents == 2
+
+
+async def test_the_seed_matches_the_e2e_seed_manifest() -> None:
+    state = seeded()
+    admin = (await FakePaperless(state, user="admin").get_overview()).statistics
+    reader = (await FakePaperless(state, user="e2e-reader").get_overview()).statistics
+
+    assert {
+        "documents": (reader.documents, admin.documents - reader.documents),
+        "inbox_documents": (
+            reader.inbox_documents,
+            (admin.inbox_documents or 0) - (reader.inbox_documents or 0),
+        ),
+        "tags": (reader.tags, admin.tags - reader.tags),
+        "correspondents": (reader.correspondents, admin.correspondents - reader.correspondents),
+        "document_types": (reader.document_types, admin.document_types - reader.document_types),
+        "storage_paths": (reader.storage_paths, admin.storage_paths - reader.storage_paths),
+    } == SEEDED_OBJECTS
