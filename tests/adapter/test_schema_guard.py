@@ -89,3 +89,22 @@ async def test_a_wrong_recorded_response_fails_the_adapter_call(make_client: Cli
 
     with pytest.raises(SchemaViolationError, match="response does not match"):
         _ = await client.request("GET", "/api/tags/1/")
+
+
+@pytest.mark.parametrize(
+    ("path", "response"),
+    [
+        pytest.param("/api/status/", httpx2.Response(200, json={"tasks": {}}), id="status 200"),
+        pytest.param("/api/status/", httpx2.Response(403, text="Forbidden"), id="status 403"),
+        pytest.param(
+            "/api/ui_settings/", httpx2.Response(200, json={"user": {}}), id="ui settings 200"
+        ),
+    ],
+)
+def test_listed_response_deviations_pass(path: str, response: httpx2.Response) -> None:
+    check_response(get(path), response)
+
+
+def test_a_response_deviation_covers_only_its_status() -> None:
+    with pytest.raises(SchemaViolationError):
+        check_response(get("/api/status/"), httpx2.Response(404, text="<html>Not Found</html>"))

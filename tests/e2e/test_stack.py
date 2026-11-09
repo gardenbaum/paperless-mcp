@@ -34,3 +34,16 @@ def test_restricted_user_cannot_see_private_objects(stack: Stack) -> None:
     assert ids == {stack.seeded.public_document}
     assert stack.reader.get(f"/api/documents/{stack.seeded.private_document}/").status_code == 404
     assert stack.reader.post("/api/tags/", json={"name": "nope"}).status_code == 403
+
+
+def test_restricted_user_sees_the_shared_taxonomy_but_not_the_private_tag(stack: Stack) -> None:
+    seeded = stack.seeded
+    tags = {num(t["id"]) for t in results(stack.reader.get("/api/tags/"))}
+    assert tags == {seeded.parent_tag, seeded.child_tag, seeded.inbox_tag}
+    for path, object_id in (
+        ("correspondents", seeded.correspondent),
+        ("document_types", seeded.document_type),
+        ("storage_paths", seeded.storage_path),
+    ):
+        assert {num(o["id"]) for o in results(stack.reader.get(f"/api/{path}/"))} == {object_id}
+    assert stack.reader.get(f"/api/tags/{seeded.private_tag}/").status_code == 404

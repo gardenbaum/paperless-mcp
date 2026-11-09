@@ -25,9 +25,14 @@ DATA_TYPES = (
     *("string", "url", "date", "boolean", "integer", "float", "monetary"),
     *("documentlink", "longtext"),
 )
+# The restricted user's global permissions: view the documents and taxonomy, and the UI settings
+# every web UI user needs (they carry the current user and the AI flag).
 READER_PERMISSIONS = [
     f"view_{model}"
-    for model in ("document", "tag", "correspondent", "documenttype", "storagepath", "customfield")
+    for model in (
+        *("document", "tag", "correspondent", "documenttype", "storagepath", "customfield"),
+        "uisettings",
+    )
 ]
 LOGS_HINT = "docker compose -f tests/e2e/compose.yaml logs paperless"
 
@@ -68,6 +73,7 @@ class Seeded:
 
     parent_tag: int
     child_tag: int
+    inbox_tag: int
     private_tag: int
     correspondent: int
     document_type: int
@@ -85,6 +91,9 @@ class Stack:
     admin: httpx2.Client
     reader: httpx2.Client
     seeded: Seeded
+    # Fetched once: Paperless throttles /api/token/.
+    admin_token: str
+    reader_token: str
 
 
 def pdf(text: str) -> bytes:
@@ -187,17 +196,32 @@ def ensure_document(api: httpx2.Client, title: str, text: str) -> int:
 
 
 def seed(admin: httpx2.Client) -> Seeded:
-    """Create the fixture data; safe to run any number of times."""
-    parent = get_or_create(admin, "/api/tags/", "name", {"name": "e2e-finance"})
-    child = get_or_create(admin, "/api/tags/", "name", {"name": "e2e-invoices", "parent": parent})
+    """Create the fixture data; safe to run any number of times.
+
+    Paperless makes the creator the owner of a new object, which hides it from other users. The
+    shared taxonomy is created with `owner: None` so the restricted user sees it; `e2e-private`
+    keeps the admin as owner and stays hidden from that user.
+    """
+    shared: Json = {"owner": None}
+    parent = get_or_create(admin, "/api/tags/", "name", {"name": "e2e-finance", **shared})
+    child = get_or_create(
+        admin, "/api/tags/", "name", {"name": "e2e-invoices", "parent": parent, **shared}
+    )
+    inbox = get_or_create(
+        admin, "/api/tags/", "name", {"name": "e2e-inbox", "is_inbox_tag": True, **shared}
+    )
     private_tag = get_or_create(admin, "/api/tags/", "name", {"name": "e2e-private"})
-    correspondent = get_or_create(admin, "/api/correspondents/", "name", {"name": "e2e-acme"})
-    document_type = get_or_create(admin, "/api/document_types/", "name", {"name": "e2e-invoice"})
+    correspondent = get_or_create(
+        admin, "/api/correspondents/", "name", {"name": "e2e-acme", **shared}
+    )
+    document_type = get_or_create(
+        admin, "/api/document_types/", "name", {"name": "e2e-invoice", **shared}
+    )
     storage_path = get_or_create(
         admin,
         "/api/storage_paths/",
         "name",
-        {"name": "e2e-archive", "path": "e2e/{{ created_year }}/{{ title }}"},
+        {"name": "e2e-archive", "path": "e2e/{{ created_year }}/{{ title }}", **shared},
     )
     options = [{"label": "alpha"}, {"label": "beta"}]
     field_bodies: dict[str, Json] = {
@@ -244,7 +268,7 @@ def seed(admin: httpx2.Client) -> Seeded:
         f"/api/documents/{public}/",
         json={
             "owner": None,  # unowned: visible to every user with the model permission
-            "tags": [parent, child],
+            "tags": [parent, child, inbox],
             "correspondent": correspondent,
             "document_type": document_type,
             "storage_path": storage_path,
@@ -270,19 +294,13 @@ def seed(admin: httpx2.Client) -> Seeded:
         {
             "username": READER[0],
             "password": READER[1],
-            "user_permissions": [
-                "view_document",
-                "view_tag",
-                "view_correspondent",
-                "view_documenttype",
-                "view_storagepath",
-                "view_customfield",
-            ],
+            "user_permissions": READER_PERMISSIONS,
         },
     )
     return Seeded(
         parent_tag=parent,
         child_tag=child,
+        inbox_tag=inbox,
         private_tag=private_tag,
         correspondent=correspondent,
         document_type=document_type,
