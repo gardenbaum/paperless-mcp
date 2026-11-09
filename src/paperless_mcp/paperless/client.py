@@ -3,14 +3,16 @@
 Every request sends ``Accept: application/json; version=10`` and the current credential's auth
 header. Idempotent requests are retried on transient statuses; failures become domain errors.
 This module never logs headers, tokens or query values (they can carry search text). httpx2's
-own loggers log request URLs with their query at INFO; the composition root sets their level.
+own loggers log request URLs with their query at INFO; ``configure_logging`` (observability)
+holds them at WARNING.
 """
 
 import asyncio
+import contextlib
 import email.utils
 import logging
 import random
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
@@ -223,3 +225,20 @@ class PaperlessClient:
                 "%s %s failed: %s", request.method, request.url.path, type(error).__name__
             )
             raise error_for_transport(error) from error
+
+
+@contextlib.asynccontextmanager
+async def connect(
+    base_url: str,
+    credentials: CredentialProvider,
+    *,
+    timeout: float,  # noqa: ASYNC109 -- the client's default request timeout, not a cancel scope
+    upload_timeout: float,
+    retry: RetryPolicy,
+) -> AsyncGenerator[PaperlessClient]:
+    """A client on a new ``httpx2.AsyncClient`` for ``base_url``, closed on exit.
+
+    The process opens one, in the server lifespan; every request shares its connection pool.
+    """
+    async with httpx2.AsyncClient(base_url=base_url, timeout=timeout) as http:
+        yield PaperlessClient(http, credentials, retry=retry, upload_timeout=upload_timeout)

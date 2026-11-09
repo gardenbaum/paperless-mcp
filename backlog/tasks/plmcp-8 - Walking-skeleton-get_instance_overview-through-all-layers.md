@@ -1,10 +1,11 @@
 ---
 id: PLMCP-8
 title: 'Walking skeleton: get_instance_overview through all layers'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-09T19:26:00Z'
+updated_date: '2026-11-09T22:36:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -42,3 +43,25 @@ Prove the architecture end to end before features pile on: one tool through tool
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. services/instance.py: InstanceService(reader: InstanceReader) with overview() and probe(timeout): only UpstreamUnavailable or the timeout is tolerated (returns None); AuthenticationFailed, UnsupportedVersion and every other domain error propagate (fail fast). Unit tests against FakePaperless and small failing readers.
+2. tools/_shared.py: TOOLSETS, the central ANNOTATIONS table (title + hints per tool name), the Services container and services(ctx) accessor (lifespan context), and the error boundary decorator (PaperlessMcpError -> ToolError(message + hint) from None; everything else left to mask_error_details=True).
+3. tools/core.py: LocalProvider for the core toolset with get_instance_overview (read-only, structured InstanceOverview output, description explains null = not permitted / unknown).
+4. observability.py (new layer between server and settings): configure_logging (JSON lines to stderr, httpx2/httpcore at WARNING), request-id ContextVar, CallLogging middleware (request id, tool, duration, outcome; never arguments or messages).
+5. server.py: Ports + paperless_ports (the injection seam for FakePaperless), create_server(paperless, server, *, ports=paperless_ports): StaticTokenProvider, lifespan owning the one httpx2.AsyncClient, PaperlessClient, services, startup probe; FastMCP with providers, middleware, mask_error_details=True.
+6. cli.py main() + __main__.py + console script paperless-mcp: logging setup, clear stderr message and exit 1 on invalid configuration or a fatal probe; no banner (no update check).
+7. settings: PAPERLESS_MCP_STARTUP_TIMEOUT (probe bound).
+8. Tests: service unit, tool tests (in-memory Client + FakePaperless via the ports seam), server/cli startup tests (stub HTTP server for 401/406, refused port for unreachable), logging tests (no query value/token/cause at INFO+), registry tests with synthetic violating providers (decision-4/6/7), syrupy surface snapshot + schema-compatibility checks, E2E stdio smoke of the console script against 3.4.2 incl. a bad token.
+9. README: Claude Code setup (claude mcp add). import-linter/deptry updates, syrupy and mcp declared.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented the walking skeleton (TDD, RED then GREEN per level): services/instance.py InstanceService (overview, probe: only UpstreamUnavailable or the timeout tolerated); tools/_shared.py (TOOLSETS, central ANNOTATIONS table, Services + services(ctx), boundary); tools/core.py get_instance_overview; observability.py (JSON lines on stderr, httpx2/httpcore2 held at WARNING, request-id ContextVar, CallLogging middleware); server.py Ports/paperless_ports seam + create_server with lifespan owning the one httpx2.AsyncClient via paperless.client.connect (server may not import httpx2); cli.py main + __main__ + console script; PAPERLESS_MCP_STARTUP_TIMEOUT. PaperlessMcpError.describe() (message + Hint) shared by the boundary and the CLI.
+Gate changes, deliberate: new import-linter layer 'observability' (between server and settings, added to the httpx2 contract); ruff per-file ignore TC001-3 for src/paperless_mcp/tools/*.py (FastMCP evaluates tool signatures at runtime); deptry DEP002 fastmcp exemption removed; mcp declared as a direct dependency (ToolAnnotations); syrupy added. New snapshot tests/tools/__snapshots__/test_surface.ambr: the first MCP surface (one tool). decision-6/7 Enforcement updated: their registry checks now exist (PLMCP-8) with self-tests.
+Verification: just check green (188 passed, coverage 100 %, diff 100 %); just e2e 13 passed incl. stdio smoke of the console script and the wrong-token exit against 3.4.2. Verification against the user's own instance via claude mcp add is left to the user.
+<!-- SECTION:NOTES:END -->

@@ -24,7 +24,7 @@ An LLM with write tools can destroy data. Paperless PATCH replaces whole lists (
 
 ## Enforcement
 
-- Registry test: every destructive tool has a `confirm` parameter defaulting to false; read-only mode leaves only `read_only_hint` tools. PLMCP-15 (read-only mode) and PLMCP-17 (confirmation flow).
+- Registry test (`tests/tools/test_registry.py`, from PLMCP-8, with a self-test over synthetic offending tools): every destructive tool (MCP's default: not read-only and not marked non-destructive) has a `confirm` parameter defaulting to false. Read-only mode leaves only `read_only_hint` tools: PLMCP-15 (read-only mode); the confirmation flow itself: PLMCP-17.
 - Service tests for merge semantics and dry-run: PLMCP-16 (update_document with merge) and PLMCP-22 (bulk).
 - Write guard in `FakePaperless` (rejects writes unless a test opts in): PLMCP-7.
 - Contract snapshot of annotations (decision 4).
