@@ -1,0 +1,11 @@
+# gitleaks: the default rules, plus an allowlist for vendored third-party docs (docs/vendor/),
+# whose examples contain placeholder tokens that are not secrets of this project. Mirrors the
+# docs/vendor exclusion in .pre-commit-config.yaml, so full `gitleaks dir` scans stay clean too.
+title = "paperless-mcp gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Vendored third-party docs: upstream example tokens, not project secrets"
+paths = ['''^docs/vendor/''']
