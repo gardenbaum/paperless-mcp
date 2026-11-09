@@ -65,7 +65,17 @@ async def collect[T](
     params: Params | None = None,
     cap: int = MAX_ITEMS,
 ) -> Collected[T]:
-    """Fetch the pages of a list endpoint until ``cap`` items or the last page."""
+    """Fetch the pages of a list endpoint until ``cap`` items or the last page.
+
+    ``cap`` is clamped to ``MAX_ITEMS``.
+
+    Raises:
+        ValueError: ``cap`` is below 1.
+    """
+    if cap < 1:
+        message = f"cap must be at least 1, got {cap}"
+        raise ValueError(message)
+    cap = min(cap, MAX_ITEMS)
     size = min(cap, MAX_PAGE_SIZE)
     items: list[T] = []
     count = 0

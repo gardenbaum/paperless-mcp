@@ -1,13 +1,17 @@
 """PaperlessClient: headers, retries, error mapping and redaction, on real endpoint shapes."""
 
+import email.utils
 import logging
+from datetime import timedelta
 from typing import cast, override
 
 import httpx2
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from adapter.conftest import TOKEN, ClientFactory, RecordingSleep, tag
+from adapter.conftest import NOW, TOKEN, ClientFactory, RecordingSleep, tag
 from paperless_mcp.domain.errors import (
     AuthenticationFailed,
     Conflict,
@@ -15,11 +19,13 @@ from paperless_mcp.domain.errors import (
     PaperlessMcpError,
     PermissionDenied,
     UnsupportedVersion,
+    UpstreamTimeout,
     UpstreamUnavailable,
+    UpstreamUnreachable,
     Validation,
 )
 from paperless_mcp.paperless.auth import StaticTokenProvider
-from paperless_mcp.paperless.client import RetryPolicy
+from paperless_mcp.paperless.client import Method, RetryPolicy, retry_after, utc_now
 
 pytestmark = pytest.mark.anyio
 
@@ -88,6 +94,16 @@ async def test_get_parses_the_body_into_the_model(make_client: ClientFactory) ->
     assert await client.get("/api/tags/7/", TagStub) == TagStub(id=7, name="inbox")
 
 
+async def test_call_parses_any_method_through_one_path(make_client: ClientFactory) -> None:
+    client = make_client(Script(answer(201, tag(9, "new")), answer(201, tag(10, "x"))))
+
+    created = await client.call("POST", "/api/tags/", TagStub, json={"name": "new"})
+
+    assert created == TagStub(id=9, name="new")
+    with pytest.raises(PaperlessMcpError, match="unexpected response for POST /api/tags/"):
+        _ = await client.call("POST", "/api/tags/", BaseModelWithMissingField, json={"name": "x"})
+
+
 async def test_an_unexpected_body_is_a_client_safe_error(make_client: ClientFactory) -> None:
     client = make_client(Script(answer(200, tag(7, "inbox"))))
 
@@ -113,7 +129,7 @@ async def test_idempotent_requests_retry_transient_statuses(
 
 
 @pytest.mark.parametrize("method", ["GET", "PUT", "DELETE"])
-async def test_every_idempotent_method_retries(make_client: ClientFactory, method: str) -> None:
+async def test_every_idempotent_method_retries(make_client: ClientFactory, method: Method) -> None:
     done = answer(204) if method == "DELETE" else answer(200, tag(1, "inbox"))
     script = Script(answer(503), done)
     body = {"name": "inbox"} if method == "PUT" else None
@@ -125,7 +141,7 @@ async def test_every_idempotent_method_retries(make_client: ClientFactory, metho
 
 @pytest.mark.parametrize("method", ["POST", "PATCH"])
 async def test_post_and_patch_never_retry(
-    make_client: ClientFactory, sleep: RecordingSleep, method: str
+    make_client: ClientFactory, sleep: RecordingSleep, method: Method
 ) -> None:
     script = Script(answer(503))
     path = "/api/tags/" if method == "POST" else "/api/tags/1/"
@@ -158,6 +174,41 @@ async def test_retry_after_in_the_past_retries_at_once(
     _ = await make_client(script).request("GET", "/api/tags/")
 
     assert sleep.delays == [0.0]
+
+
+async def test_retry_after_date_is_measured_from_the_injected_clock(
+    make_client: ClientFactory, sleep: RecordingSleep
+) -> None:
+    ahead = email.utils.format_datetime(NOW + timedelta(seconds=3), usegmt=True)
+    script = Script(answer(503, **{"Retry-After": ahead}), answer(200, TAG_PAGE))
+
+    _ = await make_client(script).request("GET", "/api/tags/")
+
+    assert sleep.delays == [3.0]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("Mon, 09 Nov 2026 12:00:05 -0000", 5.0),  # parses naive: read as UTC
+        ("²", None),  # isdigit() but not an int
+        ("-4", 0.0),
+        ("9" * 400, None),  # too large for a float
+        ("", None),
+    ],
+)
+def test_retry_after_edge_cases(value: str, expected: float | None) -> None:
+    assert retry_after(value, NOW) == expected
+
+
+def test_the_default_clock_is_aware_utc() -> None:
+    assert utc_now().utcoffset() == timedelta(0)
+
+
+@given(st.text())
+def test_retry_after_never_raises(value: str) -> None:
+    delay = retry_after(value, NOW)
+    assert delay is None or delay >= 0.0
 
 
 async def test_retry_after_beyond_the_budget_gives_up_without_waiting(
@@ -279,6 +330,8 @@ async def test_unreachable_slow_and_revoked_are_distinct_client_safe_errors(
         caught.append(error.value)
 
     unreachable, slow, revoked = caught
+    assert isinstance(unreachable, UpstreamUnreachable)
+    assert isinstance(slow, UpstreamTimeout)
     assert isinstance(unreachable, UpstreamUnavailable)
     assert isinstance(slow, UpstreamUnavailable)
     assert isinstance(revoked, AuthenticationFailed)
@@ -328,7 +381,8 @@ async def test_token_never_appears_in_logs_errors_or_reprs(
     errors: list[BaseException] = []
 
     _ = await client.request("GET", "/api/tags/")
-    for method, path in (("POST", "/api/tags/"), ("GET", "/api/tags/")):
+    calls: list[tuple[Method, str]] = [("POST", "/api/tags/"), ("GET", "/api/tags/")]
+    for method, path in calls:
         with pytest.raises(PaperlessMcpError) as caught:
             _ = await client.request(method, path, json={"name": "x"} if method == "POST" else None)
         errors.append(caught.value)

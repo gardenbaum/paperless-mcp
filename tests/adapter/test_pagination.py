@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from adapter.conftest import BASE_URL, ClientFactory, tag
 from paperless_mcp.domain.errors import PaperlessMcpError
-from paperless_mcp.paperless.pagination import Page, collect, page_number
+from paperless_mcp.paperless.pagination import MAX_ITEMS, Page, collect, page_number
 
 pytestmark = pytest.mark.anyio
 
@@ -117,6 +117,20 @@ async def test_collect_small_cap_asks_for_small_pages(make_client: ClientFactory
 
     assert (len(collected.items), collected.truncated) == (10, True)
     assert server.requests[0].url.params["page_size"] == "10"
+
+
+async def test_collect_clamps_the_cap_to_the_hard_maximum(make_client: ClientFactory) -> None:
+    collected = await collect(
+        make_client(TagServer(total=2500)), "/api/tags/", Page[TagStub], cap=10_000
+    )
+
+    assert (len(collected.items), collected.truncated) == (MAX_ITEMS, True)
+
+
+@pytest.mark.parametrize("cap", [0, -1])
+async def test_collect_rejects_a_cap_below_one(make_client: ClientFactory, cap: int) -> None:
+    with pytest.raises(ValueError, match="cap must be at least 1"):
+        _ = await collect(make_client(TagServer(total=5)), "/api/tags/", Page[TagStub], cap=cap)
 
 
 async def test_collect_stops_on_an_empty_page(make_client: ClientFactory) -> None:

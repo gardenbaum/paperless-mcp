@@ -13,7 +13,9 @@ from paperless_mcp.domain.errors import (
     PaperlessMcpError,
     PermissionDenied,
     UnsupportedVersion,
+    UpstreamTimeout,
     UpstreamUnavailable,
+    UpstreamUnreachable,
     Validation,
 )
 
@@ -110,7 +112,7 @@ def error_for_status(response: httpx2.Response) -> PaperlessMcpError:
 def error_for_transport(error: httpx2.TransportError) -> UpstreamUnavailable:
     """The domain error for a request that got no response."""
     if isinstance(error, httpx2.TimeoutException):
-        return UpstreamUnavailable("Paperless did not respond in time.", hint=RETRY_LATER)
-    return UpstreamUnavailable(
+        return UpstreamTimeout("Paperless did not respond in time.", hint=RETRY_LATER)
+    return UpstreamUnreachable(
         "Paperless is unreachable.", hint="Check that Paperless is running and its URL is right."
     )

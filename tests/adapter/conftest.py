@@ -1,5 +1,6 @@
 """Fixtures of the adapter tests: a PaperlessClient on the schema-guarded MockTransport."""
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
 
 import httpx2
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 BASE_URL = "http://paperless.test"
 TOKEN = "0123456789abcdef-secret-token"
+NOW = datetime(2026, 11, 9, 12, 0, 0, tzinfo=UTC)
 
 
 class ClientFactory(Protocol):
@@ -75,6 +77,7 @@ async def make_client(sleep: RecordingSleep) -> AsyncIterator[ClientFactory]:
             retry=retry or RetryPolicy(),
             upload_timeout=300.0,
             sleep=sleep,
+            now=lambda: NOW,
         )
 
     yield factory

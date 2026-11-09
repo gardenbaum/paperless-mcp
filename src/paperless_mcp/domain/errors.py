@@ -44,5 +44,13 @@ class UpstreamUnavailable(PaperlessMcpError):
     """Paperless is unreachable, too slow or temporarily failing."""
 
 
+class UpstreamTimeout(UpstreamUnavailable):
+    """Paperless did not answer within the timeout."""
+
+
+class UpstreamUnreachable(UpstreamUnavailable):
+    """No connection to Paperless could be made."""
+
+
 class UnsupportedVersion(PaperlessMcpError):
     """The Paperless instance does not speak the API version this server needs."""

@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-09T21:31:00Z'
+updated_date: '2026-11-09T21:37:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -59,4 +59,6 @@ Every adapter call needs the same transport rules, and every request and respons
 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented domain errors + credential seam, StaticTokenProvider, PaperlessClient (version-10 Accept + credential header per request, idempotent-only retries honouring Retry-After within attempts and a sleep budget, upload timeout for multipart), error mapping, Page[T]/collect pagination, and the openapi-core schema guard (tests/adapter/schema_guard.py) with bite tests. Choices: 401 maps to a new AuthenticationFailed, 406 to UnsupportedVersion; unreachable and timeout are both UpstreamUnavailable with distinct messages and hints; transport errors are not retried. Gates: deptry DEP002 no longer lists httpx2; the 'Only paperless imports httpx2' contract keeps its explicit source list (complete because the layers contract is exhaustive) and was probed to break on an httpx2 import in domain; ruff per-file N818 ignore for the design's error names. Dev deps: openapi-core, anyio, hypothesis. E2E smoke tests/e2e/test_client.py passes against 3.4.2.
+
+Fix round 1 (review): injectable clock for Retry-After dates; Retry-After parsing never raises (naive dates read as UTC, int() parsing, overflow); corrected the logging docstring (httpx2's INFO URL logging is left to the composition root, PLMCP-8); collect() clamps cap to MAX_ITEMS and rejects cap < 1; UpstreamTimeout/UpstreamUnreachable subclasses; one generic parse path PaperlessClient.call(method, path, model, ...); Method Literal.
 <!-- SECTION:NOTES:END -->

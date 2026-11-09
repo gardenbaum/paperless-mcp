@@ -2,7 +2,8 @@
 
 Every request sends ``Accept: application/json; version=10`` and the current credential's auth
 header. Idempotent requests are retried on transient statuses; failures become domain errors.
-Headers are never logged, and query strings neither (they can carry search text).
+This module never logs headers, tokens or query values (they can carry search text). httpx2's
+own loggers log request URLs with their query at INFO; the composition root sets their level.
 """
 
 import asyncio
@@ -12,7 +13,7 @@ import random
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import httpx2
 import pydantic
@@ -27,9 +28,11 @@ ACCEPT = "application/json; version=10"
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 
+type Method = Literal["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
 type Params = Mapping[str, str | int]
 type Files = Mapping[str, tuple[str, bytes, str]]
 type Sleep = Callable[[float], Awaitable[None]]
+type Clock = Callable[[], datetime]
 
 logger = logging.getLogger(__name__)
 
@@ -50,16 +53,25 @@ class RetryPolicy:
     backoff: float = 0.5
 
 
-def _retry_after(response: httpx2.Response) -> float | None:
-    """Seconds to wait from ``Retry-After`` (delta seconds or HTTP date); None if absent or bad."""
-    value = response.headers.get("Retry-After", "").strip()
-    if value.isdigit():
-        return float(value)
+def utc_now() -> datetime:
+    """The current time in UTC; the default clock."""
+    return datetime.now(UTC)
+
+
+def retry_after(value: str, now: datetime) -> float | None:
+    """Seconds to wait from a ``Retry-After`` value (delta seconds or HTTP date); None if bad."""
+    value = value.strip()
+    try:
+        return max(0.0, float(int(value)))
+    except ValueError, OverflowError:
+        pass
     try:
         when = email.utils.parsedate_to_datetime(value)
-    except ValueError:
+    except ValueError, TypeError:
         return None
-    return max(0.0, (when - datetime.now(UTC)).total_seconds())
+    if when.tzinfo is None:  # "-0000" dates parse naive; RFC 9110 dates are GMT
+        when = when.replace(tzinfo=UTC)
+    return max(0.0, (when - now).total_seconds())
 
 
 class PaperlessClient:
@@ -69,7 +81,7 @@ class PaperlessClient:
     transport is the test seam.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- seams and settings are injected, keyword-only
         self,
         http: httpx2.AsyncClient,
         credentials: CredentialProvider,
@@ -77,6 +89,7 @@ class PaperlessClient:
         retry: RetryPolicy,
         upload_timeout: float,
         sleep: Sleep = asyncio.sleep,
+        now: Clock = utc_now,
     ) -> None:
         """Create the client.
 
@@ -86,16 +99,18 @@ class PaperlessClient:
             retry: Retry rules for idempotent requests.
             upload_timeout: Timeout in seconds for requests that send files.
             sleep: Waits between retries; injectable so tests do not wait.
+            now: Current time, for ``Retry-After`` dates; injectable for tests.
         """
         self._http: httpx2.AsyncClient = http
         self._credentials: CredentialProvider = credentials
         self._retry: RetryPolicy = retry
         self._upload_timeout: float = upload_timeout
         self._sleep: Sleep = sleep
+        self._now: Clock = now
 
     async def request(  # noqa: PLR0913 -- mirrors httpx2's request(); the parts are keyword-only
         self,
-        method: str,
+        method: Method,
         path: str,
         *,
         params: Params | None = None,
@@ -139,20 +154,36 @@ class PaperlessClient:
             raise error_for_status(response)
         return response
 
-    async def get[M: pydantic.BaseModel](
-        self, path: str, model: type[M], *, params: Params | None = None
+    async def call[M: pydantic.BaseModel](  # noqa: PLR0913 -- request() plus the model
+        self,
+        method: Method,
+        path: str,
+        model: type[M],
+        *,
+        params: Params | None = None,
+        json: object = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
     ) -> M:
-        """GET ``path`` and parse the JSON body into ``model``.
+        """Send a request and parse the JSON body of the successful response into ``model``.
 
         Raises:
             PaperlessMcpError: An error response, a failed transport, or a body ``model`` rejects.
         """
-        response = await self.request("GET", path, params=params)
+        response = await self.request(
+            method, path, params=params, json=json, data=data, files=files
+        )
         try:
             return model.model_validate_json(response.content)
         except pydantic.ValidationError as error:
-            message = f"Paperless sent an unexpected response for GET {path}."
+            message = f"Paperless sent an unexpected response for {method} {path}."
             raise PaperlessMcpError(message) from error
+
+    async def get[M: pydantic.BaseModel](
+        self, path: str, model: type[M], *, params: Params | None = None
+    ) -> M:
+        """GET ``path`` and parse the JSON body into ``model`` (see ``call``)."""
+        return await self.call("GET", path, model, params=params)
 
     def _retry_delay(self, response: httpx2.Response, attempt: int, waited: float) -> float | None:
         """Seconds to wait before the next attempt, or None if the response is final."""
@@ -162,7 +193,7 @@ class PaperlessClient:
             or attempt >= self._retry.attempts
         ):
             return None
-        delay = _retry_after(response)
+        delay = retry_after(response.headers.get("Retry-After", ""), self._now())
         if delay is None:
             cap = self._retry.backoff * 2.0 ** (attempt - 1)
             delay = random.uniform(0.0, cap)  # noqa: S311 -- jitter, not cryptography
