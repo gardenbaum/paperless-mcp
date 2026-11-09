@@ -164,12 +164,21 @@ def wait_ready() -> str:
     pytest.fail(f"{message} Is the stack up (`just e2e-up`)? Container logs: `{LOGS_HINT}`")
 
 
-def get_or_create(api: httpx2.Client, path: str, key: str, body: Json) -> int:
-    """Return the id of the object whose `key` equals body[key], creating it if absent."""
+def get_or_create(
+    api: httpx2.Client, path: str, key: str, body: Json, *, reconcile: Json | None = None
+) -> int:
+    """Return the id of the object whose `key` equals body[key], creating it if absent.
+
+    `reconcile` fields are also PATCHed onto an existing object, so a reused stack seeded by
+    older code converges to the current seed.
+    """
     found = results(api.get(path, params={f"{key}__iexact": str(body[key])}).raise_for_status())
-    if found:
-        return num(found[0]["id"])
-    return num(obj(parse(api.post(path, json=body).raise_for_status()))["id"])
+    if not found:
+        return num(obj(parse(api.post(path, json=body).raise_for_status()))["id"])
+    object_id = num(found[0]["id"])
+    if reconcile:
+        _ = api.patch(f"{path}{object_id}/", json=reconcile).raise_for_status()
+    return object_id
 
 
 def ensure_document(api: httpx2.Client, title: str, text: str) -> int:
@@ -216,25 +225,36 @@ def seed(admin: httpx2.Client) -> Seeded:
     keeps the admin as owner and stays hidden from that user.
     """
     shared: Json = {"owner": None}
-    parent = get_or_create(admin, "/api/tags/", "name", {"name": "e2e-finance", **shared})
+    parent = get_or_create(
+        admin, "/api/tags/", "name", {"name": "e2e-finance", **shared}, reconcile=shared
+    )
     child = get_or_create(
-        admin, "/api/tags/", "name", {"name": "e2e-invoices", "parent": parent, **shared}
+        admin,
+        "/api/tags/",
+        "name",
+        {"name": "e2e-invoices", "parent": parent, **shared},
+        reconcile=shared,
     )
     inbox = get_or_create(
-        admin, "/api/tags/", "name", {"name": "e2e-inbox", "is_inbox_tag": True, **shared}
+        admin,
+        "/api/tags/",
+        "name",
+        {"name": "e2e-inbox", "is_inbox_tag": True, **shared},
+        reconcile={"is_inbox_tag": True, **shared},
     )
     private_tag = get_or_create(admin, "/api/tags/", "name", {"name": "e2e-private"})
     correspondent = get_or_create(
-        admin, "/api/correspondents/", "name", {"name": "e2e-acme", **shared}
+        admin, "/api/correspondents/", "name", {"name": "e2e-acme", **shared}, reconcile=shared
     )
     document_type = get_or_create(
-        admin, "/api/document_types/", "name", {"name": "e2e-invoice", **shared}
+        admin, "/api/document_types/", "name", {"name": "e2e-invoice", **shared}, reconcile=shared
     )
     storage_path = get_or_create(
         admin,
         "/api/storage_paths/",
         "name",
         {"name": "e2e-archive", "path": "e2e/{{ created_year }}/{{ title }}", **shared},
+        reconcile=shared,
     )
     options = [{"label": "alpha"}, {"label": "beta"}]
     field_bodies: dict[str, Json] = {
@@ -288,7 +308,9 @@ def seed(admin: httpx2.Client) -> Seeded:
             "custom_fields": [{"field": fields[kind], "value": v} for kind, v in values.items()],
         },
     ).raise_for_status()
-    admin_id = num(results(admin.get("/api/users/", params={"username": ADMIN[0]}))[0]["id"])
+    admin_id = num(
+        results(admin.get("/api/users/", params={"username__iexact": ADMIN[0]}))[0]["id"]
+    )
     _ = admin.patch(
         f"/api/documents/{private}/",
         json={
@@ -309,6 +331,7 @@ def seed(admin: httpx2.Client) -> Seeded:
             "password": READER[1],
             "user_permissions": READER_PERMISSIONS,
         },
+        reconcile={"user_permissions": READER_PERMISSIONS},
     )
     return Seeded(
         parent_tag=parent,
