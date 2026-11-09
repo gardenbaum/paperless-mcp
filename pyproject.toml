@@ -55,10 +55,6 @@ ignore = [
     "S105",    # fake credentials are test data
     "S106",    # fake credentials are test data
 ]
-"tests/e2e/**" = [
-    "TID252", # the fixtures live in conftest.py, importable only relatively (importlib import mode)
-    "TC001",  # the fixture types are used at runtime by pytest to resolve annotations
-]
 
 [tool.ruff.lint.flake8-type-checking]
 # Pydantic resolves field annotations at runtime: their imports must not move under TYPE_CHECKING.
@@ -85,17 +81,9 @@ typeCheckingMode = "recommended"
 pythonVersion = "3.14"
 # Only our code; docs/vendor, .superpowers and backlog are outside this scope.
 include = ["src", "tests"]
+extraPaths = ["src", "tests"]
 # `# type: ignore` silences every rule on its line in pyright; only `# pyright: ignore[rule]` counts.
 enableTypeIgnoreComments = false
-
-# The E2E suite reads JSON from a live server: its shapes are asserted by the tests themselves,
-# so `Any` and ignored `Response` values (calls that only raise on error) are expected there.
-[[tool.basedpyright.executionEnvironments]]
-root = "tests/e2e"
-extraPaths = ["."]
-reportAny = false
-reportExplicitAny = false
-reportUnusedCallResult = false
 
 # --- Tests and coverage ------------------------------------------------------
 
@@ -104,6 +92,8 @@ strict = true
 # E2E tests need the docker compose stack (`just e2e`): `just check` deselects them.
 addopts = ["--import-mode=importlib", "-ra", "-m", "not e2e"]
 testpaths = ["tests"]
+# tests/e2e/helpers.py is imported as `e2e.helpers` (importlib mode adds no import path).
+pythonpath = ["tests"]
 filterwarnings = ["error"]
 markers = [
     "e2e: runs against the real Paperless stack of tests/e2e/compose.yaml (`just e2e`)",
