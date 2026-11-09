@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    "docker:pinDigests",
+    ":timezone(Europe/Zurich)",
+    ":enablePreCommit"
+  ],
+  "enabledManagers": ["pep621", "github-actions", "dockerfile", "docker-compose", "pre-commit", "custom.regex"],
+  "schedule": ["before 6am on Monday"],
+  "prConcurrentLimit": 3,
+  "labels": ["dependencies"],
+  "commitMessagePrefix": "chore(deps):",
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on Monday"]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Tool versions pinned in workflow env, annotated with a renovate comment",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s+\\w+: \"(?<currentValue>[^\"]+)\""
+      ]
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "ruff as dev dependency and as pre-commit hook must format identically",
+      "matchPackageNames": ["ruff", "astral-sh/ruff-pre-commit"],
+      "groupName": "ruff"
+    },
+    {
+      "description": "uv_build and uv-pre-commit move together",
+      "matchDepNames": ["uv_build", "astral-sh/uv-pre-commit"],
+      "groupName": "uv"
+    },
+    {
+      "description": "gitleaks pre-commit rev and the golang hook in .pre-commit-config.yaml move together (golang hook version is a manual follow-up)",
+      "matchPackageNames": ["gitleaks/gitleaks"],
+      "groupName": "gitleaks"
+    }
+  ]
+}

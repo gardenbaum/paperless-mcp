@@ -1,9 +1,11 @@
 ---
 id: PLMCP-2
 title: Create public GitHub repository with CI and branch protection
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:25:00Z'
+updated_date: '2026-11-09T20:18:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -36,3 +38,9 @@ The design relies on CI blocking violations. That only works with required check
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Create public repo, push main. 2. Bootstrap PR #1 for plmcp-1-scaffold, squash-merge. 3. Rebase plmcp-2 onto main. 4. Add .github/workflows/ci.yml (check 3.14/3.15 running just check; audit job with pip-audit + gitleaks), renovate.json; SHA-pinned actions. 5. PR #2, iterate until green; leave unmerged. Protection payload in report.
+<!-- SECTION:PLAN:END -->
