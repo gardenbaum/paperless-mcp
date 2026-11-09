@@ -69,6 +69,7 @@ ban-relative-imports = "all"
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "unittest.mock".msg = "Mocks are banned: use a fake via constructor injection or httpx2.MockTransport."
 "mock".msg = "Mocks are banned: use a fake via constructor injection or httpx2.MockTransport."
+"pytest_mock".msg = "Mocks are banned: use a fake via constructor injection or httpx2.MockTransport."
 "httpx".msg = "This project uses httpx2 only."
 
 # --- Types -------------------------------------------------------------------
@@ -99,7 +100,8 @@ source = ["src/paperless_mcp"]
 fail_under = 95
 show_missing = true
 skip_empty = true
-# Lines that never run by design. Everything else needs `# pragma: no cover -- reason`.
+# The only coverage exclusions: reviewed patterns for lines that never run by design. Inline
+# `# pragma` comments are banned (`just hygiene`); add a pattern here when a real need exists.
 exclude_also = [
     "if TYPE_CHECKING:",    # imports for annotations only
     "^\\s*\\.\\.\\.$",      # bodies of Protocol methods and overloads
@@ -122,7 +124,8 @@ include_external_packages = true
 name = "Layers: entrypoints > server > settings > tools | paperless > services > domain"
 type = "layers"
 containers = ["paperless_mcp"]
-# Every top-level module must be placed in a layer; nothing imports the entrypoints.
+# Every module below the package root must be placed in a layer, so nothing in the layers imports
+# the entrypoints. The root itself (`__init__.py`) is the container: its own contract follows.
 exhaustive = true
 layers = [
     "__main__ : app : cli",
@@ -132,6 +135,13 @@ layers = [
     "services",
     "domain",
 ]
+
+[[tool.importlinter.contracts]]
+name = "The package root imports nothing from the package and no I/O or MCP library"
+type = "forbidden"
+source_modules = ["paperless_mcp"]
+as_packages = false
+forbidden_modules = ["paperless_mcp.**", "httpx2", "fastmcp", "mcp", "pydantic_settings"]
 
 [[tool.importlinter.contracts]]
 name = "The adapter does not use services"
@@ -152,8 +162,10 @@ forbidden_modules = ["paperless_mcp.tools", "paperless_mcp.paperless"]
 # Entrypoints reach tools and paperless through server.py; only direct imports are wrong.
 allow_indirect_imports = true
 
-# The external-package rules check direct imports: with the layers above, every indirect path to
-# a forbidden package passes a direct import that one of these contracts already reports.
+# The external-package rules below check direct imports only. That is complete because every
+# module is either in a layer or the package root (which imports nothing from the package, see
+# above): an indirect path to a forbidden package ends in a direct import that one of these
+# contracts reports, and the layers block paths through the modules that may import it.
 # (`protected` contracts would be simpler but fail while a package is not imported yet.)
 # A module added to the layers joins the source lists below that apply to it.
 

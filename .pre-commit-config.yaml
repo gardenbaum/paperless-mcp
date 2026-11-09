@@ -1,4 +1,5 @@
-# The gates of `just check` (through the same recipes), plus file hygiene and gitleaks.
+# The gates of `just check` (through the same recipes; uv-lock and gitleaks as hooks), plus file
+# hygiene.
 # Install once with `uv run pre-commit install`; run on everything with `just precommit`.
 exclude: '^docs/vendor/'
 
@@ -17,7 +18,7 @@ repos:
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1
     hooks:
-      - id: gitleaks
+      - id: gitleaks # staged changes, on every commit
 
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.13.7
@@ -62,3 +63,13 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # Full-history scan for `just secrets` (manual stage: the commit hook above covers commits).
+      # Keep the version in step with the gitleaks `rev` above.
+      - id: gitleaks-history
+        name: gitleaks (whole history)
+        entry: gitleaks git --redact --no-banner
+        language: golang
+        additional_dependencies: [github.com/zricethezav/gitleaks/v8@v8.30.1]
+        pass_filenames: false
+        always_run: true
+        stages: [manual]

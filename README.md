@@ -17,7 +17,8 @@ An [MCP](https://modelcontextprotocol.io) server for [paperless-ngx](https://doc
 
 ## Development
 
-Requires [uv](https://docs.astral.sh/uv/) and [just](https://just.systems).
+Requires [uv](https://docs.astral.sh/uv/), [just](https://just.systems) and Go (pre-commit builds
+the pinned gitleaks that `just check` runs over the whole history).
 
 ```sh
 just install                  # create the environment
@@ -27,7 +28,8 @@ just --list                   # all recipes
 ```
 
 Lint suppressions name a specific code and a reason, e.g. `# noqa: S101 -- reason`
-(see `just hygiene`).
+(see `just hygiene`). Inline `# pragma` comments are banned: coverage exclusions are reviewed
+`exclude_also` patterns in `pyproject.toml`.
 
 ## Licence
 
