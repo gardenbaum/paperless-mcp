@@ -1,9 +1,13 @@
 """Fixtures shared by every test level."""
 
+import logging
 from typing import TYPE_CHECKING
 
 import pytest
-from e2e.helpers import BASE_URL, READER, Stack, client, seed, token_for, wait_ready
+from e2e.helpers import BASE_URL, Stack, client, seed, token_for, wait_ready
+from fakes.accounts import READER
+
+from paperless_mcp.observability import QUIET_LOGGERS
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -13,6 +17,22 @@ if TYPE_CHECKING:
 def anyio_backend() -> str:
     """Async tests (`pytest.mark.anyio`) run on asyncio, the event loop FastMCP uses."""
     return "asyncio"
+
+
+@pytest.fixture
+def isolated_logging() -> Iterator[None]:
+    """Undo what `configure_logging` changes in the process-wide logging setup."""
+    root = logging.getLogger()
+    quiet = [logging.getLogger(name) for name in QUIET_LOGGERS]
+    handlers, level, levels = root.handlers[:], root.level, [q.level for q in quiet]
+    yield
+    for handler in root.handlers[:]:
+        root.removeHandler(handler)
+    for handler in handlers:
+        root.addHandler(handler)
+    root.setLevel(level)
+    for logger, saved in zip(quiet, levels, strict=True):
+        logger.setLevel(saved)
 
 
 @pytest.fixture(scope="session")

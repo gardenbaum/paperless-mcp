@@ -103,3 +103,16 @@ def test_unknown_log_level_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PAPERLESS_MCP_LOG_LEVEL", "VERBOSE")
 
     assert invalid_fields(ServerSettings) == [("log_level",)]
+
+
+def test_the_startup_check_is_bounded_by_five_seconds_by_default() -> None:
+    assert ServerSettings.model_validate({}).startup_timeout == 5.0
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "soon"])
+def test_the_startup_timeout_must_be_a_positive_number(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_STARTUP_TIMEOUT", value)
+
+    assert invalid_fields(ServerSettings) == [("startup_timeout",)]

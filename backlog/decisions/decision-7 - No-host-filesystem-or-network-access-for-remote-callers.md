@@ -22,6 +22,6 @@ When the server runs over HTTP for a remote caller, a tool that reads a server-s
 
 ## Enforcement
 
-- Registry test: no tool exposes a filesystem path parameter outside the stdio-only allowlist. Added with the first upload tool, PLMCP-18 (upload for local and remote clients).
+- Registry test (`tests/tools/test_registry.py`, from PLMCP-8, with a self-test over a synthetic offending tool): no tool exposes a filesystem path parameter (schema format `path`, `file-path` or `directory-path`, i.e. typed as `pathlib.Path`) outside the stdio-only allowlist. The first upload tool, PLMCP-18, adds its allowlist entry.
 - Adapter design: the adapter's only network destination is the configured base URL (PLMCP-6).
 - Review point: the `raw` toolset (PLMCP-32) is read-only and restricted to the Paperless API path space; its tests cover path escapes.

@@ -19,6 +19,10 @@ class PaperlessMcpError(Exception):
         self.message: str = message
         self.hint: str | None = hint
 
+    def describe(self) -> str:
+        """The message, followed by the hint if there is one: what clients and users see."""
+        return f"{self.message} Hint: {self.hint}" if self.hint else self.message
+
 
 class NotFound(PaperlessMcpError):
     """The object does not exist or is not visible to the current user."""

@@ -10,9 +10,13 @@ authors = [{ name = "gardenbaum" }]
 dependencies = [
     "fastmcp>=4.1.6,<4.2",
     "httpx2>=2.16.0",
+    "mcp>=2.3.0,<3",
     "pydantic>=2.14.3",
     "pydantic-settings>=2.16.2",
 ]
+
+[project.scripts]
+paperless-mcp = "paperless_mcp.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]
@@ -32,6 +36,7 @@ dev = [
     "pytest>=9.2.0",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.4",
+    "syrupy>=6.1.1",
 ]
 
 # --- Lint and format ---------------------------------------------------------
@@ -52,6 +57,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # The error names of design §5.2 (NotFound, Validation, ...) read as outcomes; an Error suffix adds nothing.
 "src/paperless_mcp/domain/errors.py" = ["N818"]
+# FastMCP evaluates tool signatures at runtime: their types must be imported, not TYPE_CHECKING-only.
+"src/paperless_mcp/tools/*.py" = ["TC001", "TC002", "TC003"]
 "tests/**" = [
     "D1",      # test names state the behaviour; a docstring would repeat them
     "INP001",  # tests are collected by pytest (importlib mode), not imported as a package
@@ -99,7 +106,14 @@ addopts = ["--import-mode=importlib", "-ra", "-m", "not e2e", "-p", "pytester"]
 testpaths = ["tests"]
 # tests/e2e/helpers.py is imported as `e2e.helpers` (importlib mode adds no import path).
 pythonpath = ["tests"]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # Upstream, Python 3.15 only: py-key-value-aio (a FastMCP dependency) runs beartype's import
+    # hook on its own package, and beartype's isinstance() probe of the non-runtime-checkable
+    # AsyncKeyValue protocol hits 3.15's new DeprecationWarning. Matches only that protocol.
+    # Remove when py-key-value-aio or beartype fixes it.
+    "ignore:<class 'key_value\\.aio\\.protocols\\.key_value\\.AsyncKeyValue'> isn't explicitly decorated with @runtime_checkable:DeprecationWarning",
+]
 markers = [
     "e2e: runs against the real Paperless stack of tests/e2e/compose.yaml (`just e2e`)",
     "decision(id): the test guards the Backlog decision with this id, e.g. \"decision-1\"",
@@ -121,13 +135,6 @@ exclude_also = [
     "^\\s*\\.\\.\\.$",      # bodies of Protocol methods and overloads
 ]
 
-# --- Dependencies ------------------------------------------------------------
-
-[tool.deptry.per_rule_ignores]
-# Declared runtime dependencies not imported yet; remove each entry with its first import
-# (fastmcp: tools and server, PLMCP-8).
-DEP002 = ["fastmcp"]
-
 # --- Architecture (design §5.1) ----------------------------------------------
 
 [tool.importlinter]
@@ -135,7 +142,7 @@ root_package = "paperless_mcp"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Layers: entrypoints > server > settings > tools | paperless > services > domain"
+name = "Layers: entrypoints > server > observability > settings > tools | paperless > services > domain"
 type = "layers"
 containers = ["paperless_mcp"]
 # Every module below the package root must be placed in a layer, so nothing in the layers imports
@@ -144,6 +151,7 @@ exhaustive = true
 layers = [
     "__main__ : app : cli",
     "server",
+    "observability",
     "settings",
     "tools | paperless",
     "services",
@@ -191,6 +199,7 @@ source_modules = [
     "paperless_mcp.app",
     "paperless_mcp.cli",
     "paperless_mcp.server",
+    "paperless_mcp.observability",
     "paperless_mcp.settings",
     "paperless_mcp.tools",
     "paperless_mcp.services",
@@ -200,7 +209,9 @@ forbidden_modules = ["httpx2"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Only tools, server and entrypoints import fastmcp and mcp"
+# observability may import fastmcp too: its CallLogging is FastMCP middleware, and it sits
+# above settings and below server in the layers, outside the source list below.
+name = "Only tools, observability, server and entrypoints import fastmcp and mcp"
 type = "forbidden"
 source_modules = [
     "paperless_mcp.settings",

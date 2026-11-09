@@ -41,6 +41,9 @@ class ServerSettings(BaseSettings):
     Attributes:
         log_level: Minimum level of log records written to stderr
             (``PAPERLESS_MCP_LOG_LEVEL``).
+        startup_timeout: Most seconds the startup check of the Paperless connection may take
+            (``PAPERLESS_MCP_STARTUP_TIMEOUT``); a Paperless that does not answer in time does
+            not stop the start.
     """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -48,3 +51,4 @@ class ServerSettings(BaseSettings):
     )
 
     log_level: LogLevel = "INFO"
+    startup_timeout: float = Field(default=5.0, gt=0)

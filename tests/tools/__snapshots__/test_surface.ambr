@@ -1,0 +1,340 @@
+# serializer version: 1
+# name: test_the_surface_matches_the_snapshot
+  list([
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get instance overview',
+      }),
+      'description': '''
+        Describe the Paperless instance as the current user sees it.
+        
+        Reports the Paperless and API version, the document, inbox and taxonomy counts, the system
+        health (storage, database, task queue, search index, classifier), the current user and
+        whether Paperless AI is enabled. Use it first to orient yourself, or to diagnose failures.
+        
+        Counts include only what the user may see, unless they may view global statistics. A null
+        field means the user may not see it, not that it is off: ai_enabled null means unknown.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+        }),
+        'type': 'object',
+      }),
+      'name': 'get_instance_overview',
+      'outputSchema': dict({
+        'description': 'The instance as the current user sees it.',
+        'properties': dict({
+          'ai_enabled': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Whether Paperless AI is enabled; null means unknown (the user may not view the UI settings), not disabled.',
+          }),
+          'api_version': dict({
+            'type': 'integer',
+          }),
+          'current_user': dict({
+            'anyOf': list([
+              dict({
+                'description': 'The Paperless user the credential belongs to.',
+                'properties': dict({
+                  'id': dict({
+                    'type': 'integer',
+                  }),
+                  'is_superuser': dict({
+                    'type': 'boolean',
+                  }),
+                  'username': dict({
+                    'type': 'string',
+                  }),
+                }),
+                'required': list([
+                  'id',
+                  'username',
+                  'is_superuser',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null if the user may not view the UI settings.',
+          }),
+          'paperless_version': dict({
+            'type': 'string',
+          }),
+          'statistics': dict({
+            'description': 'Object counts, of the objects the user may see unless they may view global statistics.',
+            'properties': dict({
+              'correspondents': dict({
+                'type': 'integer',
+              }),
+              'document_types': dict({
+                'type': 'integer',
+              }),
+              'documents': dict({
+                'type': 'integer',
+              }),
+              'inbox_documents': dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'integer',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+                'description': 'Documents with an inbox tag; null if no inbox tag is visible.',
+              }),
+              'storage_paths': dict({
+                'type': 'integer',
+              }),
+              'tags': dict({
+                'type': 'integer',
+              }),
+            }),
+            'required': list([
+              'documents',
+              'inbox_documents',
+              'tags',
+              'correspondents',
+              'document_types',
+              'storage_paths',
+            ]),
+            'type': 'object',
+          }),
+          'system_status': dict({
+            'anyOf': list([
+              dict({
+                'description': 'Storage and component health of the instance.',
+                'properties': dict({
+                  'celery': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'classifier': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'database': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'install_type': dict({
+                    'type': 'string',
+                  }),
+                  'llm_index': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'redis': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'sanity_check': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'search_index': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'storage_available_bytes': dict({
+                    'type': 'integer',
+                  }),
+                  'storage_total_bytes': dict({
+                    'type': 'integer',
+                  }),
+                }),
+                'required': list([
+                  'install_type',
+                  'storage_total_bytes',
+                  'storage_available_bytes',
+                  'database',
+                  'redis',
+                  'celery',
+                  'search_index',
+                  'classifier',
+                  'sanity_check',
+                  'llm_index',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null if the user may not view the system status.',
+          }),
+        }),
+        'required': list([
+          'paperless_version',
+          'api_version',
+          'statistics',
+          'system_status',
+          'current_user',
+          'ai_enabled',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get instance overview',
+    }),
+  ])
+# ---

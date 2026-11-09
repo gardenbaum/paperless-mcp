@@ -1,0 +1,230 @@
+"""Registry tests: rules every tool of the assembled server follows (design 9.4).
+
+Each check returns the names of the tools that break its rule. The server must give none; the
+self-tests run every check over a synthetic provider of offending tools, so a check that would
+pass for want of offenders (no destructive tool, no path parameter yet) is proven to fire.
+"""
+
+from pathlib import Path  # noqa: TC003 -- FastMCP reads tool signatures at runtime
+from typing import TYPE_CHECKING, Annotated, cast
+
+import pytest
+from fastmcp import FastMCP
+from fastmcp.server.providers import LocalProvider
+from harness import admin, serve
+from mcp.types import ToolAnnotations
+from pydantic import Field
+
+from paperless_mcp.tools._shared import ANNOTATIONS, TOOLSETS, boundary
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from fastmcp.tools import Tool
+
+pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-4")]
+
+# Default profile budget (design 6): the core and ai toolsets together.
+TOOL_BUDGET = 20
+# (tool, parameter) pairs that may take a server-side path: stdio-only uploads (decision-7).
+STDIO_PATH_PARAMETERS: frozenset[tuple[str, str]] = frozenset()
+# JSON schema formats pydantic gives Path, FilePath and DirectoryPath. Filesystem paths must be
+# typed as such, so this check sees them.
+PATH_FORMATS = frozenset({"path", "file-path", "directory-path"})
+
+
+async def _no_op() -> None: ...
+
+
+GUARDED = boundary(_no_op).__code__
+
+
+def untitled(tools: list[Tool]) -> list[str]:
+    return [t.name for t in tools if t.annotations is None or not t.annotations.title]
+
+
+def undescribed(tools: list[Tool]) -> list[str]:
+    return [t.name for t in tools if not (t.description or "").strip()]
+
+
+def off_table(tools: list[Tool], table: Mapping[str, ToolAnnotations]) -> list[str]:
+    """Tools whose annotations are not their table entry, and table entries without a tool."""
+    names = {t.name for t in tools}
+    mismatched = [t.name for t in tools if t.name not in table or t.annotations != table[t.name]]
+    return mismatched + sorted(set(table) - names)
+
+
+def not_one_toolset(tools: list[Tool]) -> list[str]:
+    return [t.name for t in tools if len(t.tags) != 1 or not t.tags <= TOOLSETS]
+
+
+def unguarded(tools: list[Tool]) -> list[str]:
+    """Tools whose function is not wrapped by the error boundary."""
+    return [
+        t.name for t in tools if getattr(getattr(t, "fn", None), "__code__", None) is not GUARDED
+    ]
+
+
+def destructive(tool: Tool) -> bool:
+    """MCP's reading: a tool that is not read-only is destructive unless it says otherwise."""
+    hints = tool.annotations or ToolAnnotations()
+    return not hints.read_only_hint and hints.destructive_hint is not False
+
+
+def unconfirmed(tools: list[Tool]) -> list[str]:
+    """Destructive tools without an optional `confirm: bool = False` (described or not)."""
+
+    def confirmed(tool: Tool) -> bool:
+        properties = cast("dict[str, dict[str, object]]", tool.parameters.get("properties", {}))
+        confirm = properties.get("confirm", {})
+        return (
+            confirm.get("type") == "boolean"
+            and confirm.get("default") is False
+            and "confirm" not in cast("list[str]", tool.parameters.get("required", []))
+        )
+
+    return [t.name for t in tools if destructive(t) and not confirmed(t)]
+
+
+def formats(schema: object) -> set[str]:
+    """Every `format` anywhere in a JSON schema."""
+    if isinstance(schema, dict):
+        items = cast("dict[str, object]", schema)
+        found = {str(items["format"])} if "format" in items else set[str]()
+        return found.union(*(formats(value) for value in items.values()))
+    if isinstance(schema, list):
+        return set[str]().union(*(formats(value) for value in cast("list[object]", schema)))
+    return set()
+
+
+def path_parameters(tools: list[Tool]) -> list[str]:
+    return [
+        f"{t.name}.{name}"
+        for t in tools
+        for name, schema in cast("dict[str, object]", t.parameters.get("properties", {})).items()
+        if formats(schema) & PATH_FORMATS and (t.name, name) not in STDIO_PATH_PARAMETERS
+    ]
+
+
+def over_budget(tools: list[Tool]) -> list[str]:
+    return [t.name for t in tools] if len(tools) > TOOL_BUDGET else []
+
+
+async def server_tools() -> list[Tool]:
+    return list(await serve(admin()).list_tools())
+
+
+async def test_every_tool_has_a_title_and_a_description() -> None:
+    tools = await server_tools()
+
+    assert (untitled(tools), undescribed(tools)) == ([], [])
+
+
+async def test_every_tool_has_its_annotations_from_the_central_table() -> None:
+    assert off_table(await server_tools(), ANNOTATIONS) == []
+
+
+async def test_every_tool_has_exactly_one_toolset_tag() -> None:
+    assert not_one_toolset(await server_tools()) == []
+
+
+async def test_every_tool_goes_through_the_error_boundary() -> None:
+    assert unguarded(await server_tools()) == []
+
+
+@pytest.mark.decision("decision-6")
+async def test_destructive_tools_need_confirm_defaulting_to_false() -> None:
+    assert unconfirmed(await server_tools()) == []
+
+
+@pytest.mark.decision("decision-7")
+async def test_no_tool_takes_a_filesystem_path_outside_the_stdio_allowlist() -> None:
+    assert path_parameters(await server_tools()) == []
+
+
+async def test_the_default_profile_stays_within_the_tool_budget() -> None:
+    assert over_budget(await server_tools()) == []
+
+
+# --- Self-tests: every check fires on a tool that breaks its rule ------------------------------
+
+offenders = LocalProvider()
+
+
+@offenders.tool
+async def bare(source: Path) -> int:
+    return len(str(source))
+
+
+@offenders.tool(
+    tags={"core", "bulk"},
+    annotations=ToolAnnotations(title="Delete everything", destructive_hint=True),
+)
+@boundary
+async def delete_everything(*, confirm: bool = True) -> bool:
+    """Delete every document."""
+    return confirm
+
+
+@offenders.tool(annotations=ToolAnnotations(title="Drop"))
+@boundary
+async def drop_without_confirm() -> None:
+    """Not read-only and not marked non-destructive: destructive by MCP's default."""
+
+
+@offenders.tool(annotations=ToolAnnotations(title="Empty trash", destructive_hint=True))
+@boundary
+async def empty_trash(
+    *, confirm: Annotated[bool, Field(description="Set to true to really empty it.")] = False
+) -> bool:
+    """A correct destructive tool: a described confirm that defaults to false."""
+    return confirm
+
+
+async def offending_tools() -> list[Tool]:
+    return list(await FastMCP(providers=[offenders]).list_tools())
+
+
+async def test_self_test_untitled_and_undescribed_tools_are_found() -> None:
+    tools = await offending_tools()
+
+    assert "bare" in untitled(tools)
+    assert "bare" in undescribed(tools)
+
+
+async def test_self_test_annotations_off_the_table_and_stale_entries_are_found() -> None:
+    table = {"delete_everything": ToolAnnotations(title="Other"), "ghost": ToolAnnotations()}
+
+    assert set(off_table(await offending_tools(), table)) >= {"bare", "delete_everything", "ghost"}
+
+
+async def test_self_test_missing_or_extra_toolset_tags_are_found() -> None:
+    assert set(not_one_toolset(await offending_tools())) >= {"bare", "delete_everything"}
+
+
+async def test_self_test_tools_without_the_boundary_are_found() -> None:
+    found = unguarded(await offending_tools())
+
+    assert "bare" in found
+    assert "delete_everything" not in found
+
+
+@pytest.mark.decision("decision-6")
+async def test_self_test_destructive_tools_without_a_false_confirm_are_found() -> None:
+    found = set(unconfirmed(await offending_tools()))
+
+    assert found >= {"delete_everything", "drop_without_confirm"}
+    assert "empty_trash" not in found
+
+
+@pytest.mark.decision("decision-7")
+async def test_self_test_path_parameters_are_found() -> None:
+    assert path_parameters(await offending_tools()) == ["bare.source"]
+
+
+async def test_self_test_a_profile_over_the_budget_is_found() -> None:
+    crowded = LocalProvider()
+    for number in range(TOOL_BUDGET + 1):
+        _ = crowded.tool(_no_op, name=f"tool_{number}")
+
+    assert len(over_budget(list(await FastMCP(providers=[crowded]).list_tools()))) == 21
