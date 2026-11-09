@@ -20,11 +20,14 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "anyio>=4.16.0",
     "basedpyright>=1.40.2",
     "coverage>=7.17.2",
     "deptry>=0.25.1",
     "diff-cover>=11.0.1",
+    "hypothesis>=6.170.15",
     "import-linter>=2.16",
+    "openapi-core>=0.23.1",
     "pre-commit>=4.7.0",
     "pytest>=9.2.0",
     "pytest-cov>=7.1.0",
@@ -47,6 +50,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+# The error names of design §5.2 (NotFound, Validation, ...) read as outcomes; an Error suffix adds nothing.
+"src/paperless_mcp/domain/errors.py" = ["N818"]
 "tests/**" = [
     "D1",      # test names state the behaviour; a docstring would repeat them
     "INP001",  # tests are collected by pytest (importlib mode), not imported as a package
@@ -119,8 +124,8 @@ exclude_also = [
 
 [tool.deptry.per_rule_ignores]
 # Declared runtime dependencies not imported yet; remove each entry with its first import
-# (httpx2: Paperless adapter, PLMCP-6; fastmcp: tools and server, PLMCP-8).
-DEP002 = ["fastmcp", "httpx2"]
+# (fastmcp: tools and server, PLMCP-8).
+DEP002 = ["fastmcp"]
 
 # --- Architecture (design §5.1) ----------------------------------------------
 
