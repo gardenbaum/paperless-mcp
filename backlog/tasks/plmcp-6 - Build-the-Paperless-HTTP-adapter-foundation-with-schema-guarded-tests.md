@@ -1,9 +1,11 @@
 ---
 id: PLMCP-6
 title: Build the Paperless HTTP adapter foundation with schema-guarded tests
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:25:00Z'
+updated_date: '2026-11-09T21:38:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -22,19 +24,51 @@ Every adapter call needs the same transport rules, and every request and respons
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every request carries Accept: application/json; version=10 and the auth header of the current PaperlessCredential; the CredentialProvider seam has a static-token implementation and credentials expose a non-secret fingerprint
-- [ ] #2 Idempotent requests retry on 429/502/503/504 honouring Retry-After within a bounded budget; POST and PATCH never retry
-- [ ] #3 HTTP errors map to domain errors: 400 to Validation with sanitised field messages, 401, 403, 404, 409, and 5xx/timeouts/connection errors to UpstreamUnavailable
-- [ ] #4 Unreachable Paperless, a slow response hitting the timeout and an expired or revoked token each produce a distinct client-safe error
-- [ ] #5 Tokens and Authorization headers never appear in logs, exception messages or reprs (tested)
-- [ ] #6 The pagination helper stops at a hard item cap and reports truncated; next/previous links are reduced to page numbers
-- [ ] #7 Adapter tests run on httpx2 MockTransport through a schema guard (openapi-core) that fails on any request or recorded response not matching the vendored schema; per-endpoint exceptions must be listed with a reason
+- [x] #1 Every request carries Accept: application/json; version=10 and the auth header of the current PaperlessCredential; the CredentialProvider seam has a static-token implementation and credentials expose a non-secret fingerprint
+- [x] #2 Idempotent requests retry on 429/502/503/504 honouring Retry-After within a bounded budget; POST and PATCH never retry
+- [x] #3 HTTP errors map to domain errors: 400 to Validation with sanitised field messages, 401, 403, 404, 409, and 5xx/timeouts/connection errors to UpstreamUnavailable
+- [x] #4 Unreachable Paperless, a slow response hitting the timeout and an expired or revoked token each produce a distinct client-safe error
+- [x] #5 Tokens and Authorization headers never appear in logs, exception messages or reprs (tested)
+- [x] #6 The pagination helper stops at a hard item cap and reports truncated; next/previous links are reduced to page numbers
+- [x] #7 Adapter tests run on httpx2 MockTransport through a schema guard (openapi-core) that fails on any request or recorded response not matching the vendored schema; per-endpoint exceptions must be listed with a reason
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
-- [ ] #4 Merged to main through the task's own pull request
+- [x] #1 Tests written first (red, then green) at every test level the change touches
+- [x] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. domain/errors.py: PaperlessMcpError(message, hint) + NotFound, Validation, PermissionDenied, Conflict, AuthenticationFailed (401), UpstreamUnavailable, UnsupportedVersion (406). domain/credentials.py: opaque frozen PaperlessCredential (auth header hidden from repr, fingerprint) and CredentialProvider Protocol.
+2. paperless/auth.py: StaticTokenProvider (Authorization: Token ..., fingerprint = first 16 hex of SHA-256).
+3. paperless/errors.py: HTTP status and transport failures to domain errors; 400 field messages flattened, length-capped and stripped of control characters.
+4. paperless/client.py: PaperlessClient over one injected httpx2.AsyncClient; Accept version=10 + credential header per request; retries GET/HEAD/OPTIONS/PUT/DELETE on 429/502/503/504 honouring Retry-After (seconds or HTTP date) within attempts + sleep budget, exponential backoff with full jitter, injectable sleep; separate upload timeout for multipart requests; typed get() parsing into pydantic models; logs never carry headers.
+5. paperless/pagination.py: generic Page[T] (next/previous reduced to page numbers) and collect() with hard item cap and truncated flag.
+6. tests/adapter/schema_guard.py: MockTransport wrapper validating every request and response against docs/vendor/paperless/openapi.json with openapi-core (thin httpx2 adapter); rejects undeclared query params; explicit exception list with reasons; undocumented DRF 4xx error bodies checked for DRF error shape. Tests prove the guard bites.
+7. Adapter tests (TDD) on real endpoint shapes: GET /api/tags/ pages, 404 /api/documents/{id}/, 400 POST /api/tags/; decision markers 2, 3, 9. Dev deps: openapi-core, anyio (pytest plugin), hypothesis. deptry: drop httpx2 from DEP002.
+8. Live smoke in tests/e2e: paginated tags via the real client, 401 with a bad token.
+9. just check, just e2e, just e2e-down; report.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented domain errors + credential seam, StaticTokenProvider, PaperlessClient (version-10 Accept + credential header per request, idempotent-only retries honouring Retry-After within attempts and a sleep budget, upload timeout for multipart), error mapping, Page[T]/collect pagination, and the openapi-core schema guard (tests/adapter/schema_guard.py) with bite tests. Choices: 401 maps to a new AuthenticationFailed, 406 to UnsupportedVersion; unreachable and timeout are both UpstreamUnavailable with distinct messages and hints; transport errors are not retried. Gates: deptry DEP002 no longer lists httpx2; the 'Only paperless imports httpx2' contract keeps its explicit source list (complete because the layers contract is exhaustive) and was probed to break on an httpx2 import in domain; ruff per-file N818 ignore for the design's error names. Dev deps: openapi-core, anyio, hypothesis. E2E smoke tests/e2e/test_client.py passes against 3.4.2.
+
+Fix round 1 (review): injectable clock for Retry-After dates; Retry-After parsing never raises (naive dates read as UTC, int() parsing, overflow); corrected the logging docstring (httpx2's INFO URL logging is left to the composition root, PLMCP-8); collect() clamps cap to MAX_ITEMS and rejects cap < 1; UpstreamTimeout/UpstreamUnreachable subclasses; one generic parse path PaperlessClient.call(method, path, model, ...); Method Literal.
+
+Task review (opus): 4 Important (time injection, Retry-After crash, false logging docstring, soft cap) + load-bearing minors (timeout/unreachable subclasses, single parse path call(), Method Literal) fixed in 3ca8f96; scoped re-review: all addressed.
+Carried to PLMCP-8: set httpx2/httpcore loggers to WARNING with a test that no query value appears at INFO+; never log exception causes at INFO+ (pydantic causes can contain response content).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Built the transport foundation: PaperlessClient over one injected httpx2.AsyncClient (Accept version=10 + per-request credential header, separate upload timeout, idempotent-only retries on 429/502/503/504 honouring Retry-After with bounded attempts/budget/jitter, injectable sleep and clock, single parse path call()), opaque PaperlessCredential with fingerprint and a static-token CredentialProvider, a domain error hierarchy with a status→error table (incl. AuthenticationFailed, UpstreamTimeout, UpstreamUnreachable), and a pagination helper with a hard cap, truncated flag and page-number links. Tests run on MockTransport through a schema guard (openapi-core) that validates every request and response against the vendored schema and is proven to bite; live e2e smoke against 3.4.2.
+Follow-ups: logger levels and cause logging in PLMCP-8; guard 4xx exemption is global; guard uses openapi_core internals; DELETE retry may report NotFound after success.
+<!-- SECTION:FINAL_SUMMARY:END -->
