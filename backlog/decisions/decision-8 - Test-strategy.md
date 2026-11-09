@@ -29,5 +29,5 @@ Mocks and patching hide integration bugs and lock tests to implementation. The c
 - ruff banned-api in `pyproject.toml`: `unittest.mock`, `mock`, `pytest_mock`, `httpx`.
 - `typeCheckingMode = "recommended"` in `tool.basedpyright`, `just typecheck` (fails if `.basedpyright/baseline.json` exists).
 - Coverage `fail_under = 95` and `just cov-diff` (100 % on changed lines) in CI.
-- Shared contract suite and fake: PLMCP-7; schema-guard transport: PLMCP-6; E2E: PLMCP-5; mutation gate: PLMCP-14 and PLMCP-21.
+- Shared contract suite and fake (PLMCP-7): `tests/contract/test_coverage.py` fails when a port method in `domain/ports.py` has no `pytest.mark.contract` test or a `*Writer` method of `FakePaperless` lacks the `@write` guard; the suite runs against the fake in `just check` and against live Paperless in `just e2e`. Schema-guard transport: PLMCP-6; E2E: PLMCP-5; mutation gate: PLMCP-14 and PLMCP-21.
 - The `ai` gap is recorded here and in design 9.2; no automated guard (manual review: needs an external LLM backend).

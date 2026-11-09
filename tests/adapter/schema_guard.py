@@ -34,6 +34,22 @@ UNDECLARED_QUERY_PARAMETERS: Mapping[tuple[str, str], Mapping[str, str]] = {
         "all": "documented in api.md, missing from the generated parameters (PLMCP-3)",
     },
 }
+# Responses whose body the generated schema describes wrongly: (method, path template, status) ->
+# reason. Their bodies are not checked; the live contract suite (tests/contract) checks the
+# adapter against the real ones instead.
+WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
+    ("GET", "/api/status/", 200): (
+        "3.4.2 nests index, classifier and sanity check under `tasks` and sends null errors; "
+        "the schema has them top-level and non-nullable (PLMCP-7)"
+    ),
+    ("GET", "/api/status/", 403): (
+        "SystemStatusView answers HttpResponseForbidden('Insufficient permissions'), text/html "
+        "(PLMCP-7)"
+    ),
+    ("GET", "/api/ui_settings/", 200): (
+        "3.4.2 answers {user, settings, permissions}; the schema has {id, settings} (PLMCP-7)"
+    ),
+}
 # drf-spectacular documents no error responses. Paperless (Django REST framework) answers 4xx with
 # {"detail": "..."} or a map of field names to message lists; such bodies are checked for that shape
 # instead. 5xx responses are not checked: proxies and the web server produce them, not the API.
@@ -164,6 +180,8 @@ def check_request(request: httpx2.Request) -> None:
 def check_response(request: httpx2.Request, response: httpx2.Response) -> None:
     """Raise `SchemaViolationError` unless the response is one the schema allows for the request."""
     template = _template(request)
+    if (request.method, template, response.status_code) in WRONG_RESPONSE_SCHEMAS:
+        return
     operation = cast("Json", _PATHS[template][request.method.lower()])
     documented = str(response.status_code) in cast("Json", operation["responses"])
     if not documented and response.status_code in UNCHECKED_STATUSES:

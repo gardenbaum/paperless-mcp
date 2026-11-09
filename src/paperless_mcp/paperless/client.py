@@ -74,6 +74,26 @@ def retry_after(value: str, now: datetime) -> float | None:
     return max(0.0, (when - now).total_seconds())
 
 
+def unexpected(response: httpx2.Response) -> PaperlessMcpError:
+    """The error for a successful response whose content the adapter cannot use."""
+    request = response.request
+    return PaperlessMcpError(
+        f"Paperless sent an unexpected response for {request.method} {request.url.path}."
+    )
+
+
+def parse[M: pydantic.BaseModel](response: httpx2.Response, model: type[M]) -> M:
+    """Parse the JSON body of ``response`` into ``model``.
+
+    Raises:
+        PaperlessMcpError: ``model`` rejects the body.
+    """
+    try:
+        return model.model_validate_json(response.content)
+    except pydantic.ValidationError as error:
+        raise unexpected(response) from error
+
+
 class PaperlessClient:
     """Async client for one Paperless instance, over one shared ``httpx2.AsyncClient``.
 
@@ -173,11 +193,7 @@ class PaperlessClient:
         response = await self.request(
             method, path, params=params, json=json, data=data, files=files
         )
-        try:
-            return model.model_validate_json(response.content)
-        except pydantic.ValidationError as error:
-            message = f"Paperless sent an unexpected response for {method} {path}."
-            raise PaperlessMcpError(message) from error
+        return parse(response, model)
 
     async def get[M: pydantic.BaseModel](
         self, path: str, model: type[M], *, params: Params | None = None

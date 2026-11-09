@@ -6,7 +6,6 @@ import httpx2
 import pytest
 from pydantic import BaseModel
 
-from e2e.helpers import ADMIN, token_for
 from paperless_mcp.domain.errors import AuthenticationFailed
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
@@ -31,7 +30,7 @@ def paperless(http: httpx2.AsyncClient, token: str) -> PaperlessClient:
 
 async def test_pages_and_collection_of_real_tags(stack: Stack) -> None:
     async with httpx2.AsyncClient(base_url=stack.base_url, timeout=30.0) as http:
-        client = paperless(http, token_for(*ADMIN))
+        client = paperless(http, stack.admin_token)
         page = await client.get("/api/tags/", Page[TagName], params={"page": 2, "page_size": 1})
         collected = await collect(client, "/api/tags/", Page[TagName], cap=1000)
 
