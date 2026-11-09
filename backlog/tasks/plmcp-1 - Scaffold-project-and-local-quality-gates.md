@@ -1,11 +1,11 @@
 ---
 id: PLMCP-1
 title: Scaffold project and local quality gates
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:24:00Z'
-updated_date: '2026-11-09T20:17:00Z'
+updated_date: '2026-11-09T20:24:00Z'
 labels: []
 milestone: m-0
 dependencies: []
@@ -38,9 +38,9 @@ Every later task needs one local gate that mirrors CI, and the layer boundaries 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #2 just check passes locally and all required CI checks are green on the PR
 - [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
-- [ ] #4 Merged to main through the task's own pull request
+- [x] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -63,6 +63,8 @@ Implemented scaffold and gates. Choices: basedpyright `recommended` (all rules, 
 
 Task review (opus) found 3 Important gaps (package root outside contracts; suppression spellings bypassing hygiene; unused pragma undetected) plus fail-open holes; all fixed in 19705a3 and confirmed by scoped re-review. Rulings: R10 bans inline pragma: no cover (exclusions only via exclude_also); R11 adds gitleaks + uv lock --check to just check, fail-closed hygiene, setattr/pytest_mock bans, baseline-file guard, pinned pip-audit.
 Verification: just check exit 0 (8/8 import contracts kept, 15 tests, coverage 100 %, diff-cover 100 %).
+
+Merged to main via bootstrap PR #1 (squash e848f0d) before CI existed; local just check evidence in PR body.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
