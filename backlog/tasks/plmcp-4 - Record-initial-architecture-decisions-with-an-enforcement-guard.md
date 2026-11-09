@@ -1,9 +1,11 @@
 ---
 id: PLMCP-4
 title: Record initial architecture decisions with an enforcement guard
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:25:00Z'
+updated_date: '2026-11-09T20:44:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -35,3 +37,12 @@ The ten decisions in design §11 must be durable records that agents cannot sile
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Write tests/test_decisions.py first (red): parse backlog/decisions, accepted => non-empty Enforcement, decision marker ids exist, decisions 1-10 exist; each check proven on synthetic tmp_path input.
+2. Register the decision(id) marker in pyproject.
+3. Create decisions 1-10 with the backlog CLI (status accepted), write bodies directly.
+4. just check, commit.
+<!-- SECTION:PLAN:END -->
