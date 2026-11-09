@@ -1,11 +1,11 @@
 ---
 id: PLMCP-7
 title: Add FakePaperless and the shared Paperless contract suite
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-09T22:04:00Z'
+updated_date: '2026-11-09T22:06:00Z'
 labels: []
 milestone: m-0
 dependencies:
@@ -25,18 +25,18 @@ Services and tools are tested against an in-memory fake instead of mocks. To kee
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 FakePaperless implements the ports defined so far with realistic pagination, permission behaviour (403/404 for objects the credential cannot see) and PATCH semantics
-- [ ] #2 FakePaperless rejects write calls unless the test opts in (write guard)
-- [ ] #3 The contract suite is parametrised over the fake and the live backend; just check runs it against the fake, just e2e against Paperless 3.4.2
-- [ ] #4 A test fails when a port method has no contract test
+- [x] #1 FakePaperless implements the ports defined so far with realistic pagination, permission behaviour (403/404 for objects the credential cannot see) and PATCH semantics
+- [x] #2 FakePaperless rejects write calls unless the test opts in (write guard)
+- [x] #3 The contract suite is parametrised over the fake and the live backend; just check runs it against the fake, just e2e against Paperless 3.4.2
+- [x] #4 A test fails when a port method has no contract test
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
-- [ ] #4 Merged to main through the task's own pull request
+- [x] #1 Tests written first (red, then green) at every test level the change touches
+- [x] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
 ## Implementation Plan
@@ -57,4 +57,14 @@ Services and tools are tested against an in-memory fake instead of mocks. To kee
 Implemented InstanceReader (domain/ports.py, domain/instance.py), PaperlessInstanceReader (paperless/instance.py), FakePaperless with write guard (tests/fakes/paperless.py) and the contract suite (tests/contract/) incl. coverage meta-tests. Verified on 3.4.2: statistics are scoped to visible objects for users without view_global_statistics; /api/status/ is 403 text/html for non-staff without view_system_monitoring (overview: system_status None); /api/ui_settings/ needs view_uisettings (otherwise current_user and ai_enabled None); versions from X-Version/X-Api-Version. Schema guard: deliberate, documented deviations for GET /api/status/ 200 and 403 and GET /api/ui_settings/ 200, whose 3.4.2 schema is wrong; the live contract suite covers the real shapes. E2E seed: shared taxonomy now owner null (Paperless default owner is the creator, which hid it from the reader), new shared inbox tag e2e-inbox on the public document, reader gets view_uisettings; tokens fetched once per session (/api/token/ is throttled). Not built yet (no port needs them): pagination and PATCH behaviour of the fake arrive with the first list/patch port.
 
 Fix round 1 (R16): contract tests use the SEEDED_OBJECTS manifest (e2e/helpers.py) as lower bounds instead of exact counts, the fake seed is checked exactly against it; live isolation rule in tests/contract/conftest.py. Coverage guard now runs on items pytest collects (pytester, enabled via -p pytester): a method counts only with a contract-marked test taking backend with both fake and live params. Backend is now explicit wiring (Ports dataclass, one field per port; fake_ports/live_ports) instead of a multiple-inheritance Adapter; meta-tests check every port is wired and implemented by fake and adapter. ports.py states the *Writer rule.
+
+Task review (opus): approved; load-bearing minors fixed per R16 in 3867aa5 (seed manifest + lower bounds, collected-item coverage guard, explicit Ports wiring, port-implementation meta-tests, *Writer rule); scoped re-review clean.
+R15: AC#1 pagination/PATCH apply to ports defined so far (none list/patch yet) — every later task adding such a port must add it to the fake.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the first resource port InstanceReader (domain models: versions, statistics, system status, current user incl. superuser, ai_enabled) and its adapter over PaperlessClient (/api/statistics/, /api/status/, /api/ui_settings/, version headers; 403 on status/ui_settings → None for restricted users). Added FakePaperless (tests/fakes) with permission-aware visibility and a write guard, and a shared contract suite parametrised over fake and live backends (live in just e2e, admin + restricted reader), with meta-tests that every port method has a contract test on both backends and every port is wired for fake and live. E2E seed: shared taxonomy without owner, one seed manifest for fake and live.
+Schema-guard exemptions (status-keyed, with reasons) for /api/status/ and /api/ui_settings/ responses where the vendored 3.4.2 schema is wrong. Follow-ups: per-port fake mixins when the fake grows; ComponentStatus Literal; ai_enabled None ambiguity (PLMCP-8); sequential GETs.
+<!-- SECTION:FINAL_SUMMARY:END -->
