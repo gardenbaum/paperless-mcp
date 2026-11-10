@@ -56,6 +56,21 @@ Lint suppressions name a specific code and a reason, e.g. `# noqa: S101 -- reaso
 (see `just hygiene`). Inline `# pragma` comments are banned: coverage exclusions are reviewed
 `exclude_also` patterns in `pyproject.toml`.
 
+## Credits
+
+This is a new build, not a fork, but it learned from three existing paperless-ngx MCP servers and
+adopts some of their ideas deliberately:
+
+- [pvliesdonk/paperless-mcp](https://github.com/pvliesdonk/paperless-mcp) (MIT): field
+  projection in lists, content slicing with a next offset, retries only for idempotent calls,
+  token redaction, errors that name the next call, a central tool-annotation table, `web_url`.
+- [baruchiro/paperless-mcp](https://github.com/baruchiro/paperless-mcp) (ISC): names instead of
+  IDs in output, `confirm: true` for destructive calls, an upload allowlist, live end-to-end tests
+  against a real Paperless, a test over every advertised tool schema.
+- [OrellBuehler/paperless-mcp](https://github.com/OrellBuehler/paperless-mcp) (MIT): toolsets,
+  a read-only mode and a test that every tool belongs to a toolset, coverage of Paperless 3.x
+  features (versions, AI suggestions, trash, PDF operations), prompts that ask for confirmation.
+
 ## Licence
 
 MIT, see [LICENSE](LICENSE).
