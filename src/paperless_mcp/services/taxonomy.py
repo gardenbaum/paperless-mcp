@@ -38,13 +38,20 @@ def pick(kind: TaxonomyKind, items: Sequence[TaxonomyItem], value: str | int) ->
     """
     label = kind.replace("_", " ")
     text = str(value).strip()
-    if isinstance(value, int) or (text.isascii() and text.isdigit()):
+    numeric = isinstance(value, int) and not isinstance(value, bool)
+    if numeric or (text.isascii() and text.isdigit()):
         wanted = int(text)
         found = [item for item in items if item.id == wanted]
         if found:
             return found[0]
+        named = [item for item in items if item.name == text]
+        hint = (
+            f"A {label} is named {text!r}; pass its id {named[0].id} instead."
+            if named
+            else f"Call list_taxonomy(kind={kind!r}) to see the ids."
+        )
         message = f"No {label} has id {wanted}."
-        raise NotFound(message, hint=f"Call list_taxonomy(kind={kind!r}) to see the ids.")
+        raise NotFound(message, hint=hint)
     exact = [item for item in items if item.name == text]
     folded = [item for item in items if fold(item.name) == fold(text)]
     for matches in (exact, folded):

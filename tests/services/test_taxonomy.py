@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 from fakes.accounts import ADMIN, READER
 from fakes.paperless import FakePaperless, FakeTag, FakeTaxonomy, seeded
-from hypothesis import assume, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from paperless_mcp.domain.credentials import PaperlessCredential
@@ -64,13 +64,14 @@ def test_more_than_one_insensitive_match_is_always_ambiguous(
     assert all(f"{other!r} (id " in raised.value.message for other in others)
 
 
+@example(pool=["a"], query=" a")
 @given(st.lists(words, max_size=6), words)
 def test_a_match_is_never_a_guess(pool: list[str], query: str) -> None:
     try:
         found = pick("tag", items(*pool), query)
     except NotFound, Ambiguous:
         return
-    assert fold(found.name) == fold(query)
+    assert fold(found.name) == fold(query.strip())  # pick strips the input
 
 
 @given(st.lists(words, max_size=6), st.integers(min_value=1, max_value=8))
@@ -84,9 +85,15 @@ def test_numeric_input_is_an_id(pool: list[str], wanted: int) -> None:
                 _ = pick("tag", rows, value)
 
 
-def test_a_digit_only_name_is_read_as_an_id() -> None:
-    with pytest.raises(NotFound):
-        _ = pick("tag", items("2024"), "2024")
+def test_a_digit_only_name_is_read_as_an_id_and_the_hint_names_its_id() -> None:
+    with pytest.raises(NotFound) as raised:
+        _ = pick("tag", items("Other", "2024"), "2024")
+
+    assert raised.value.hint == "A tag is named '2024'; pass its id 2 instead."
+
+
+def test_a_boolean_is_a_name_not_an_id() -> None:
+    assert pick("tag", items("x", "True"), True).id == 2  # noqa: FBT003 -- the input under test
 
 
 def test_no_match_suggests_the_closest_names() -> None:

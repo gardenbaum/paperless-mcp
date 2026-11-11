@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-11T19:56:00Z'
+updated_date: '2026-11-11T20:00:00Z'
 labels: []
 milestone: m-1
 dependencies:
@@ -60,4 +60,6 @@ Verified live before writing the fake: e2e-reader gets 403 on /api/saved_views/,
 Deliberate surface change: tools snapshot adds list_taxonomy; new snapshot of the resource templates (decision-4 asks for the full surface). No gate, threshold or decision changed.
 TDD: service, contract and tool tests were red before the code; the adapter test was written first but not run red separately.
 Verification: just check 236 passed, coverage 100 %, diff coverage 100 %; just e2e 25 passed (contract suite live incl. 15 TaxonomyReader cases).
+
+Task review (opus): no Critical. Important fixed: property test_a_match_is_never_a_guess compared against the unstripped query (flaky; counterexample pool ['a'], query ' a' now pinned with @example). Minors fixed: a bool is a name, not an id; a digit-only name's NotFound hint names its id. Minors accepted, not fixed: NFKD folding misses non-decomposing letters (ł, ø, đ; fails safe as NotFound); stored names are not stripped; unknown kind on the resource gives FastMCP's generic error; contract suite does not pin document_count visibility or ordering; rows carry null fields (no exclude_none); nothing calls invalidate yet. Carry to PLMCP-16/19: document and taxonomy writes must call TaxonomyResolver.invalidate (document writes change document_count). just check 237 passed, 100 %.
 <!-- SECTION:NOTES:END -->
