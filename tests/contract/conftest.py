@@ -25,10 +25,14 @@ import pytest
 from fakes.accounts import ADMIN, READER
 from fakes.paperless import FakePaperless, seeded
 
-from paperless_mcp.domain.ports import InstanceReader  # noqa: TC001 -- Ports' annotations are introspected
+from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
+    InstanceReader,
+    TaxonomyReader,
+)
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
+from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -41,16 +45,17 @@ class Ports:
     """One credential's implementation of every port, one field per port."""
 
     instance: InstanceReader
+    taxonomy: TaxonomyReader
 
 
 def fake_ports(fake: FakePaperless) -> Ports:
     """The fake implements every port itself."""
-    return Ports(instance=fake)
+    return Ports(instance=fake, taxonomy=fake)
 
 
 def live_ports(client: PaperlessClient) -> Ports:
     """The adapter, one object per port, all on `client`."""
-    return Ports(instance=PaperlessInstanceReader(client))
+    return Ports(instance=PaperlessInstanceReader(client), taxonomy=PaperlessTaxonomyReader(client))
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from paperless_mcp.domain.instance import InstanceOverview
+    from paperless_mcp.domain.taxonomy import TaxonomyItem, TaxonomyKind
 
 
 class InstanceReader(Protocol):
@@ -22,5 +23,17 @@ class InstanceReader(Protocol):
         """Versions, statistics, system status, current user and capabilities.
 
         What the user may not see is None in the result (see ``InstanceOverview``).
+        """
+        ...
+
+
+class TaxonomyReader(Protocol):
+    """Tags, correspondents, document types, storage paths, custom fields, views, users, groups."""
+
+    async def list_taxonomy(self, kind: TaxonomyKind) -> list[TaxonomyItem]:
+        """Every object of ``kind`` the user may see, over all pages, in Paperless order.
+
+        Raises:
+            PermissionDenied: The user lacks the global view permission for ``kind``.
         """
         ...

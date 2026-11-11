@@ -93,3 +93,11 @@ def test_self_test_incompatible_schemas_are_found() -> None:
         "t: output schema has a $schema key",
         "t: parameter query has no description",
     ]
+
+
+async def test_the_resource_templates_match_the_snapshot(snapshot: SnapshotAssertion) -> None:
+    async with Client(serve(admin())) as client:
+        templates = sorted(await client.list_resource_templates(), key=lambda t: t.uri_template)
+    wire = [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in templates]
+
+    assert wire == snapshot

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from fastmcp import Context
 
     from paperless_mcp.services.instance import InstanceService
+    from paperless_mcp.services.taxonomy import TaxonomyResolver
 
 # Every toolset; each tool carries exactly one of them as its only tag.
 TOOLSETS: Final = frozenset({"core"})
@@ -30,6 +31,12 @@ TOOLSETS: Final = frozenset({"core"})
 ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
     "get_instance_overview": ToolAnnotations(
         title="Get instance overview",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "list_taxonomy": ToolAnnotations(
+        title="List taxonomy",
         read_only_hint=True,
         idempotent_hint=True,
         open_world_hint=False,
@@ -47,6 +54,7 @@ class Services:
     """The use cases tools call, one field per service; built by the composition root."""
 
     instance: InstanceService
+    taxonomy: TaxonomyResolver
 
 
 def services(ctx: Context) -> Services:
@@ -69,6 +77,8 @@ def boundary[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R
     async def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return await tool(*args, **kwargs)
+        except ToolError:
+            raise
         except PaperlessMcpError as error:
             raise ToolError(error.describe()) from None
         except Exception as error:

@@ -1,4 +1,25 @@
 # serializer version: 1
+# name: test_the_resource_templates_match_the_snapshot
+  list([
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'description': '''
+        Every tag, correspondent, document type, storage path, custom field, saved view, user or
+        group the current user may see, as JSON rows with id, name and document count.
+      ''',
+      'mimeType': 'application/json',
+      'name': 'taxonomy',
+      'title': 'Taxonomy table',
+      'uriTemplate': 'paperless://taxonomy/{kind}',
+    }),
+  ])
+# ---
 # name: test_the_surface_matches_the_snapshot
   list([
     dict({
@@ -335,6 +356,182 @@
         'type': 'object',
       }),
       'title': 'Get instance overview',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List taxonomy',
+      }),
+      'description': '''
+        List the tags, correspondents, document types, storage paths, custom fields, saved views,
+        users or groups the current user may see, as compact rows with their ids.
+        
+        Use it to find the exact name or id to pass to other tools. Returns at most 100 rows in
+        Paperless order (by name); truncated true means more match, so narrow with name_contains.
+        Users, groups and saved views need the matching view permission in Paperless.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'kind': dict({
+            'description': 'Which kind of object to list.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+              'saved_view',
+              'user',
+              'group',
+            ]),
+            'type': 'string',
+          }),
+          'name_contains': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only names that contain this text, ignoring case and accents.',
+          }),
+        }),
+        'required': list([
+          'kind',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'list_taxonomy',
+      'outputSchema': dict({
+        'description': 'Taxonomy rows of one kind, at most a page of them.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many objects match, also beyond the items.',
+            'type': 'integer',
+          }),
+          'items': dict({
+            'items': dict({
+              'description': 'One taxonomy object; fields that do not apply to its kind are null.',
+              'properties': dict({
+                'colour': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Tags: the colour, e.g. #a6cee3.',
+                }),
+                'data_type': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Custom fields: the data type.',
+                }),
+                'document_count': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'Documents the user may see that use it; null for views, users, groups.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'description': 'The name; the username for users.',
+                  'type': 'string',
+                }),
+                'parent': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Tags: id of the parent tag.',
+                }),
+                'select_options': dict({
+                  'anyOf': list([
+                    dict({
+                      'items': dict({
+                        'type': 'string',
+                      }),
+                      'type': 'array',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Custom fields of type select: option labels.',
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+                'document_count',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'kind': dict({
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+              'saved_view',
+              'user',
+              'group',
+            ]),
+            'type': 'string',
+          }),
+          'truncated': dict({
+            'description': 'More match than the items hold; narrow with name_contains.',
+            'type': 'boolean',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'count',
+          'truncated',
+          'items',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List taxonomy',
     }),
   ])
 # ---

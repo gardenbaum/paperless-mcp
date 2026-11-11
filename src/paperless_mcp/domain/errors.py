@@ -28,6 +28,10 @@ class NotFound(PaperlessMcpError):
     """The object does not exist or is not visible to the current user."""
 
 
+class Ambiguous(PaperlessMcpError):
+    """A name matches more than one object; the message lists the candidates."""
+
+
 class Validation(PaperlessMcpError):
     """Paperless rejected the input."""
 
