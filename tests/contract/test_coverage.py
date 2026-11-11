@@ -19,7 +19,7 @@ from fakes.paperless import FakePaperless, is_write, write
 
 from contract.conftest import Ports, live_ports
 from paperless_mcp.domain import ports
-from paperless_mcp.domain.ports import InstanceReader
+from paperless_mcp.domain.ports import InstanceReader, TaxonomyReader
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
 
@@ -154,7 +154,7 @@ def test_every_writer_method_of_the_fake_is_guarded() -> None:
 def test_ports_are_found_by_introspection() -> None:
     assert InstanceReader in protocols(ports)
     assert "InstanceReader.get_overview" in port_methods(protocols(ports))
-    assert wired() == {"instance": InstanceReader}
+    assert wired() == {"instance": InstanceReader, "taxonomy": TaxonomyReader}
 
 
 def test_only_real_contract_tests_on_both_backends_count(pytester: pytest.Pytester) -> None:

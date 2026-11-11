@@ -17,20 +17,24 @@ from paperless_mcp.observability import CallLogging
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import RetryPolicy, connect
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
+from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
 from paperless_mcp.services.instance import InstanceService
+from paperless_mcp.services.taxonomy import TaxonomyResolver
 from paperless_mcp.tools import core
 from paperless_mcp.tools._shared import SERVICES, Services
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-    from paperless_mcp.domain.ports import InstanceReader
+    from paperless_mcp.domain.ports import InstanceReader, TaxonomyReader
     from paperless_mcp.paperless.client import PaperlessClient
     from paperless_mcp.settings import PaperlessSettings, ServerSettings
 
 # Seconds per Paperless request; uploads get longer (they carry the file).
 REQUEST_TIMEOUT = 30.0
 UPLOAD_TIMEOUT = 120.0
+# Seconds a taxonomy list is reused before it is read again; this server's writes invalidate it.
+TAXONOMY_TTL = 300.0
 
 INSTRUCTIONS = (
     "Tools for a paperless-ngx document archive: find, read and organise documents and their "
@@ -46,11 +50,12 @@ class Ports:
     """One implementation of every domain port, one field per port."""
 
     instance: InstanceReader
+    taxonomy: TaxonomyReader
 
 
 def paperless_ports(client: PaperlessClient) -> Ports:
     """The Paperless adapter for every port, all on ``client``."""
-    return Ports(instance=PaperlessInstanceReader(client))
+    return Ports(instance=PaperlessInstanceReader(client), taxonomy=PaperlessTaxonomyReader(client))
 
 
 def create_server(
@@ -82,7 +87,10 @@ def create_server(
             retry=RetryPolicy(),
         ) as client:
             adapters = ports(client)
-            services = Services(instance=InstanceService(adapters.instance))
+            services = Services(
+                instance=InstanceService(adapters.instance),
+                taxonomy=TaxonomyResolver(adapters.taxonomy, credentials, ttl=TAXONOMY_TTL),
+            )
             overview = await services.instance.probe(settings.startup_timeout)
             if overview is None:
                 logger.warning("Paperless is not reachable yet; tools report it until it is")

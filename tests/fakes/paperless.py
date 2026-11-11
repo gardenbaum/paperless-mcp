@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Concatenate
 
 from fakes.accounts import ADMIN, READER, READER_PERMISSIONS
+from paperless_mcp.domain.errors import PermissionDenied
 from paperless_mcp.domain.instance import (
     ComponentStatus,
     CurrentUser,
@@ -29,9 +30,12 @@ from paperless_mcp.domain.instance import (
     InstanceStatistics,
     SystemStatus,
 )
+from paperless_mcp.domain.taxonomy import TaxonomyItem
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+
+    from paperless_mcp.domain.taxonomy import TaxonomyKind
 
 VERSION = "3.4.2"
 API_VERSION = 10
@@ -90,7 +94,7 @@ class Owned:
 
 @dataclass(kw_only=True)
 class FakeTaxonomy(Owned):
-    """A correspondent, document type or storage path."""
+    """A correspondent, document type, storage path or saved view."""
 
     name: str
 
@@ -100,6 +104,26 @@ class FakeTag(FakeTaxonomy):
     """A tag; inbox tags are what the statistics count as the inbox."""
 
     is_inbox: bool = False
+    colour: str = "#a6cee3"
+    parent: int | None = None
+
+
+@dataclass(frozen=True, kw_only=True)
+class FakeCustomField:
+    """A custom field; Paperless does not give custom fields an owner."""
+
+    id: int
+    name: str
+    data_type: str
+    select_options: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, kw_only=True)
+class FakeGroup:
+    """A user group."""
+
+    id: int
+    name: str
 
 
 @dataclass(kw_only=True)
@@ -108,6 +132,10 @@ class FakeDocument(Owned):
 
     title: str
     tags: list[int] = field(default_factory=list[int])
+    correspondent: int | None = None
+    document_type: int | None = None
+    storage_path: int | None = None
+    custom_fields: list[int] = field(default_factory=list[int])
 
 
 @dataclass(kw_only=True)
@@ -120,27 +148,71 @@ class FakeState:
     correspondents: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
     document_types: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
     storage_paths: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
+    custom_fields: list[FakeCustomField] = field(default_factory=list[FakeCustomField])
+    saved_views: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
+    groups: list[FakeGroup] = field(default_factory=list[FakeGroup])
     system_status: SystemStatus = HEALTHY
     ai_enabled: bool = False
+
+
+# The seeded custom fields in creation order (tests/e2e/helpers.py `seed`), `select` comes last.
+CUSTOM_FIELD_TYPES = (
+    *("string", "url", "date", "boolean", "integer", "float", "monetary"),
+    *("documentlink", "longtext"),
+)
+# The global permission Paperless requires to list each kind (PaperlessObjectPermissions).
+VIEW_PERMISSION: dict[TaxonomyKind, str] = {
+    "tag": "view_tag",
+    "correspondent": "view_correspondent",
+    "document_type": "view_documenttype",
+    "storage_path": "view_storagepath",
+    "custom_field": "view_customfield",
+    "saved_view": "view_savedview",
+    "user": "view_user",
+    "group": "view_group",
+}
 
 
 def seeded() -> FakeState:
     """A fresh state with the objects and users of the E2E seed."""
     admin = FakeUser(id=2, username=ADMIN[0], is_superuser=True, is_staff=True)
     reader = FakeUser(id=3, username=READER[0], permissions=frozenset(READER_PERMISSIONS))
+    fields = [
+        FakeCustomField(id=number, name=f"e2e-{data_type}", data_type=data_type)
+        for number, data_type in enumerate(CUSTOM_FIELD_TYPES, start=1)
+    ]
+    fields.append(
+        FakeCustomField(
+            id=len(fields) + 1,
+            name="e2e-select",
+            data_type="select",
+            select_options=("alpha", "beta"),
+        )
+    )
     return FakeState(
         users=[admin, reader],
         tags=[
             FakeTag(id=1, name="e2e-finance"),
-            FakeTag(id=2, name="e2e-invoices"),
+            FakeTag(id=2, name="e2e-invoices", parent=1),
             FakeTag(id=3, name="e2e-private", owner=admin.id),
             FakeTag(id=4, name="e2e-inbox", is_inbox=True),
         ],
         correspondents=[FakeTaxonomy(id=1, name="e2e-acme")],
         document_types=[FakeTaxonomy(id=1, name="e2e-invoice")],
         storage_paths=[FakeTaxonomy(id=1, name="e2e-archive")],
+        custom_fields=fields,
+        saved_views=[FakeTaxonomy(id=1, name="e2e-view", owner=admin.id)],
+        groups=[FakeGroup(id=1, name="e2e-group")],
         documents=[
-            FakeDocument(id=1, title="e2e-public-invoice", tags=[1, 2, 4]),
+            FakeDocument(
+                id=1,
+                title="e2e-public-invoice",
+                tags=[1, 2, 4],
+                correspondent=1,
+                document_type=1,
+                storage_path=1,
+                custom_fields=[f.id for f in fields],
+            ),
             FakeDocument(id=2, title="e2e-private-note", owner=admin.id, tags=[3]),
         ],
     )
@@ -230,3 +302,73 @@ class FakePaperless:
             document_types=len(visible(self.state.document_types)),
             storage_paths=len(visible(self.state.storage_paths)),
         )
+
+    async def list_taxonomy(self, kind: TaxonomyKind) -> list[TaxonomyItem]:
+        """`TaxonomyReader.list_taxonomy` (the taxonomy, user and group viewsets).
+
+        Paperless orders by name and counts only the documents the user may see.
+        """
+        if not self.user.has(VIEW_PERMISSION[kind]):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        rows = self._rows(kind)
+        return sorted(rows, key=lambda row: (row.name.lower(), row.id))
+
+    def _rows(self, kind: TaxonomyKind) -> list[TaxonomyItem]:
+        state, user = self.state, self.user
+        documents = [d for d in state.documents if d.visible_to(user)]
+
+        def count(uses: Callable[[FakeDocument], bool]) -> int:
+            return sum(1 for document in documents if uses(document))
+
+        def tags() -> list[TaxonomyItem]:
+            return [
+                TaxonomyItem(
+                    id=t.id,
+                    name=t.name,
+                    document_count=count(lambda d, t=t: t.id in d.tags),
+                    colour=t.colour,
+                    parent=t.parent,
+                )
+                for t in state.tags
+                if t.visible_to(user)
+            ]
+
+        def owned(
+            objects: list[FakeTaxonomy], link: Callable[[FakeDocument], int | None]
+        ) -> Callable[[], list[TaxonomyItem]]:
+            return lambda: [
+                TaxonomyItem(
+                    id=o.id, name=o.name, document_count=count(lambda d, o=o: link(d) == o.id)
+                )
+                for o in objects
+                if o.visible_to(user)
+            ]
+
+        def custom_fields() -> list[TaxonomyItem]:
+            return [
+                TaxonomyItem(
+                    id=f.id,
+                    name=f.name,
+                    document_count=count(lambda d, f=f: f.id in d.custom_fields),
+                    data_type=f.data_type,
+                    select_options=f.select_options if f.data_type == "select" else None,
+                )
+                for f in state.custom_fields
+            ]
+
+        def names(rows: list[tuple[int, str]]) -> Callable[[], list[TaxonomyItem]]:
+            return lambda: [TaxonomyItem(id=i, name=n, document_count=None) for i, n in rows]
+
+        views = [(v.id, v.name) for v in state.saved_views if v.visible_to(user)]
+        kinds: dict[TaxonomyKind, Callable[[], list[TaxonomyItem]]] = {
+            "tag": tags,
+            "correspondent": owned(state.correspondents, lambda d: d.correspondent),
+            "document_type": owned(state.document_types, lambda d: d.document_type),
+            "storage_path": owned(state.storage_paths, lambda d: d.storage_path),
+            "custom_field": custom_fields,
+            "saved_view": names(views),
+            "user": names([(u.id, u.username) for u in state.users]),
+            "group": names([(g.id, g.name) for g in state.groups]),
+        }
+        return kinds[kind]()

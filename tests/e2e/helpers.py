@@ -311,6 +311,14 @@ def seed(admin: httpx2.Client) -> Seeded:
             },
         },
     ).raise_for_status()
+    _ = get_or_create(admin, "/api/groups/", "name", {"name": "e2e-group", "permissions": []})
+    # /api/saved_views/ has no name filter, so the lookup is by hand. Owned by the admin.
+    views = results(admin.get("/api/saved_views/", params={"page_size": 100}).raise_for_status())
+    if not any(view["name"] == "e2e-view" for view in views):
+        rules = [{"rule_type": 6, "value": str(parent)}]  # 6: has tag
+        _ = admin.post(
+            "/api/saved_views/", json={"name": "e2e-view", "filter_rules": rules}
+        ).raise_for_status()
     _ = get_or_create(
         admin,
         "/api/users/",

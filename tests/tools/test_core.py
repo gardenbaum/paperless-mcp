@@ -1,14 +1,17 @@
 """Tools of the core toolset, called through the in-memory FastMCP client."""
 
+import logging
 from dataclasses import replace
 
 import pytest
 from fakes.accounts import READER
 from fakes.paperless import FakePaperless, seeded
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 from harness import FailsAfterProbe, admin, serve
 
 from paperless_mcp.domain.errors import UpstreamUnreachable
+from paperless_mcp.tools._shared import boundary
 
 pytestmark = pytest.mark.anyio
 
@@ -69,3 +72,16 @@ async def test_any_other_error_is_masked() -> None:
     text = str([block.model_dump() for block in result.content])
     assert "Internal error in get_instance_overview; the server log has details." in text
     assert "internal-detail" not in text
+
+
+async def test_a_tool_error_passes_the_boundary_unchanged(caplog: pytest.LogCaptureFixture) -> None:
+    error = ToolError("Pass confirm=true to delete.")
+
+    async def tool() -> None:
+        raise error
+
+    with pytest.raises(ToolError) as raised:
+        await boundary(tool)()
+
+    assert raised.value is error
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
