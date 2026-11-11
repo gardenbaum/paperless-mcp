@@ -12,6 +12,7 @@ read-only tests of tools, find writes by that name alone.
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from paperless_mcp.domain.documents import DocumentPage, DocumentQuery
     from paperless_mcp.domain.instance import InstanceOverview
     from paperless_mcp.domain.taxonomy import TaxonomyItem, TaxonomyKind
 
@@ -35,5 +36,23 @@ class TaxonomyReader(Protocol):
 
         Raises:
             PermissionDenied: The user lacks the global view permission for ``kind``.
+        """
+        ...
+
+
+class DocumentReader(Protocol):
+    """Documents the current user may see."""
+
+    async def search_documents(
+        self, query: DocumentQuery, *, page: int, page_size: int
+    ) -> DocumentPage:
+        """One page of the documents matching ``query``, in Paperless order.
+
+        Fetches that page only and never the content. Full-text and more-like results are
+        ranked by relevance unless ``query.ordering`` is set, and carry highlights.
+
+        Raises:
+            Validation: Paperless rejected the query (e.g. a bad ``custom_field_query``).
+            NotFound: ``page`` is beyond the last page.
         """
         ...

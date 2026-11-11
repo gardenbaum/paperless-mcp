@@ -18,11 +18,22 @@ write its contract tests.
 """
 
 import functools
+import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Concatenate
+from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING, Concatenate, cast
+
+from pydantic import JsonValue
 
 from fakes.accounts import ADMIN, READER, READER_PERMISSIONS
-from paperless_mcp.domain.errors import PermissionDenied
+from fakes.custom_field_query import compile_query
+from paperless_mcp.domain.documents import (
+    CustomFieldValue,
+    DocumentHit,
+    DocumentPage,
+    DocumentQuery,
+)
+from paperless_mcp.domain.errors import PermissionDenied, Validation
 from paperless_mcp.domain.instance import (
     ComponentStatus,
     CurrentUser,
@@ -30,7 +41,8 @@ from paperless_mcp.domain.instance import (
     InstanceStatistics,
     SystemStatus,
 )
-from paperless_mcp.domain.taxonomy import TaxonomyItem
+from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyItem
+from paperless_mcp.paperless.documents import beyond_last_page, unseen_document
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -115,7 +127,7 @@ class FakeCustomField:
     id: int
     name: str
     data_type: str
-    select_options: tuple[str, ...] = ()
+    select_options: tuple[SelectOption, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -126,16 +138,29 @@ class FakeGroup:
     name: str
 
 
+SEED_DAY = date(2026, 11, 11)
+
+
 @dataclass(kw_only=True)
 class FakeDocument(Owned):
-    """A document."""
+    """A document.
+
+    Attributes:
+        custom_fields: The value of each custom field the document has, by field id, as
+            Paperless stores it (a select field stores the option id).
+    """
 
     title: str
+    content: str = ""
+    created: date = SEED_DAY
+    added: datetime = datetime(2026, 11, 11, 19, 47, tzinfo=UTC)
+    modified: datetime = datetime(2026, 11, 11, 19, 59, tzinfo=UTC)
+    archive_serial_number: int | None = None
     tags: list[int] = field(default_factory=list[int])
     correspondent: int | None = None
     document_type: int | None = None
     storage_path: int | None = None
-    custom_fields: list[int] = field(default_factory=list[int])
+    custom_fields: dict[int, JsonValue] = field(default_factory=dict[int, JsonValue])
 
 
 @dataclass(kw_only=True)
@@ -173,6 +198,21 @@ VIEW_PERMISSION: dict[TaxonomyKind, str] = {
 }
 
 
+# The seeded public document's custom field values by data type (tests/e2e/helpers.py `seed`).
+SEED_VALUES: dict[str, JsonValue] = {
+    "string": "hello",
+    "url": "https://example.com/e2e",
+    "date": "2026-01-15",
+    "boolean": True,
+    "integer": 42,
+    "float": 3.25,
+    "monetary": "EUR12.50",
+    "documentlink": [2],
+    "longtext": "line one\nline two",
+    "select": "opt-alpha",
+}
+
+
 def seeded() -> FakeState:
     """A fresh state with the objects and users of the E2E seed."""
     admin = FakeUser(id=2, username=ADMIN[0], is_superuser=True, is_staff=True)
@@ -186,7 +226,9 @@ def seeded() -> FakeState:
             id=len(fields) + 1,
             name="e2e-select",
             data_type="select",
-            select_options=("alpha", "beta"),
+            select_options=tuple(
+                SelectOption(id=f"opt-{label}", label=label) for label in ("alpha", "beta")
+            ),
         )
     )
     return FakeState(
@@ -207,13 +249,20 @@ def seeded() -> FakeState:
             FakeDocument(
                 id=1,
                 title="e2e-public-invoice",
+                content="E2E public invoice ACME 2026",
                 tags=[1, 2, 4],
                 correspondent=1,
                 document_type=1,
                 storage_path=1,
-                custom_fields=[f.id for f in fields],
+                custom_fields={f.id: SEED_VALUES[f.data_type] for f in fields},
             ),
-            FakeDocument(id=2, title="e2e-private-note", owner=admin.id, tags=[3]),
+            FakeDocument(
+                id=2,
+                title="e2e-private-note",
+                content="E2E private admin only note",
+                owner=admin.id,
+                tags=[3],
+            ),
         ],
     )
 
@@ -372,3 +421,131 @@ class FakePaperless:
             "group": names([(g.id, g.name) for g in state.groups]),
         }
         return kinds[kind]()
+
+    async def search_documents(
+        self, query: DocumentQuery, *, page: int, page_size: int
+    ) -> DocumentPage:
+        """`DocumentReader.search_documents` (UnifiedSearchViewSet, DocumentFilterSet).
+
+        Full text matches whole words of the title and content, all terms required (Tantivy
+        also searches notes, names and fields and supports its query syntax); more-like finds
+        visible documents sharing a word of the content. Without full text Paperless orders
+        newest first.
+
+        Raises:
+            Validation: Both `query` and `more_like`, or a bad `custom_field_query`.
+            NotFound: `page` is beyond the last page.
+        """
+        if query.query is not None and query.more_like is not None:
+            message = (
+                "Paperless rejected the request: "
+                "Specify only one of text, title_search, query, or more_like_id."
+            )
+            raise Validation(message)
+        documents = [d for d in self.state.documents if d.visible_to(self.user)]
+        matches = _filters(query, self.state)
+        if query.custom_field_query is not None:
+            test = compile_query(query.custom_field_query, self.state.custom_fields)
+            matches.append(lambda d: test(d.custom_fields))
+        terms = _words(query.query or "") - TANTIVY_OPERATORS
+        if query.query is not None:
+            matches.append(lambda d: terms <= _words(f"{d.title} {d.content}"))
+        if query.more_like is not None:
+            like = [d for d in documents if d.id == query.more_like]
+            if not like:
+                raise unseen_document(query.more_like)
+            words = _words(like[0].content)
+            matches.append(lambda d: d.id != query.more_like and bool(words & _words(d.content)))
+        found = [d for d in documents if all(match(d) for match in matches)]
+        found = _ordered(found, query.ordering, ranked=query.query or query.more_like)
+        start = (page - 1) * page_size
+        if page > 1 and start >= len(found):
+            raise beyond_last_page(page)
+        hits = tuple(
+            _hit(d, _highlight(d.content, terms) if query.query is not None else None)
+            for d in found[start : start + page_size]
+        )
+        return DocumentPage(
+            count=len(found),
+            next_page=page + 1 if start + page_size < len(found) else None,
+            hits=hits,
+        )
+
+
+type _Match = Callable[[FakeDocument], bool]
+
+
+def _filters(query: DocumentQuery, state: FakeState) -> list[_Match]:
+    """The tests of the structured filters `query` sets."""
+    inbox = {tag.id for tag in state.tags if tag.is_inbox}
+    checks: list[tuple[object, _Match]] = [
+        (query.title_contains, lambda d: (query.title_contains or "").lower() in d.title.lower()),
+        (query.correspondent, lambda d: d.correspondent == query.correspondent),
+        (query.document_type, lambda d: d.document_type == query.document_type),
+        (query.storage_path, lambda d: d.storage_path == query.storage_path),
+        (query.tags_all, lambda d: set(query.tags_all) <= set(d.tags)),
+        (query.tags_any, lambda d: bool(set(query.tags_any) & set(d.tags))),
+        (query.tags_none, lambda d: not set(query.tags_none) & set(d.tags)),
+        (
+            query.created_from,
+            lambda d: query.created_from is None or d.created >= query.created_from,
+        ),
+        (query.created_to, lambda d: query.created_to is None or d.created <= query.created_to),
+        (
+            query.added_from,
+            lambda d: query.added_from is None or d.added.date() >= query.added_from,
+        ),
+        (query.added_to, lambda d: query.added_to is None or d.added.date() <= query.added_to),
+        (query.owner, lambda d: d.owner == query.owner),
+        (query.inbox, lambda d: bool(inbox & set(d.tags)) == query.inbox),
+    ]
+    return [match for value, match in checks if value not in {None, ()}]
+
+
+# Words Tantivy reads as operators, not as terms.
+TANTIVY_OPERATORS = frozenset({"and", "or", "not"})
+
+
+def _words(text: str) -> set[str]:
+    return {word.lower() for word in cast("list[str]", re.findall(r"\w+", text))}
+
+
+def _highlight(content: str, terms: set[str]) -> str | None:
+    marked = re.sub(r"\w+", lambda m: f"<b>{m[0]}</b>" if m[0].lower() in terms else m[0], content)
+    return marked if marked != content else None
+
+
+def _ordered(
+    documents: list[FakeDocument], ordering: str | None, *, ranked: object
+) -> list[FakeDocument]:
+    if ordering is None:
+        return (
+            documents
+            if ranked
+            else sorted(documents, key=lambda d: (d.created, d.id), reverse=True)
+        )
+    name = ordering.removeprefix("-")
+
+    def key(document: FakeDocument) -> tuple[bool, str, int]:
+        value = cast("object", getattr(document, name))
+        return (value is None, str(value), document.id)
+
+    return sorted(documents, key=key, reverse=ordering.startswith("-"))
+
+
+def _hit(document: FakeDocument, highlights: str | None) -> DocumentHit:
+    return DocumentHit(
+        id=document.id,
+        title=document.title,
+        created=document.created,
+        added=document.added,
+        correspondent=document.correspondent,
+        document_type=document.document_type,
+        storage_path=document.storage_path,
+        tags=tuple(document.tags),
+        custom_fields=tuple(
+            CustomFieldValue(field=number, value=value)
+            for number, value in document.custom_fields.items()
+        ),
+        highlights=highlights,
+    )
