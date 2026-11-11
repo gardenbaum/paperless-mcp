@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from paperless_mcp.domain.errors import PaperlessMcpError
     from paperless_mcp.domain.instance import InstanceOverview
-    from paperless_mcp.domain.ports import InstanceReader, TaxonomyReader
+    from paperless_mcp.domain.ports import DocumentReader, InstanceReader, TaxonomyReader
 
 URL = "http://paperless.test"
 TOKEN = "harness-token-0123456789"
@@ -43,17 +43,21 @@ def serve(
     reader: InstanceReader,
     *,
     taxonomy: TaxonomyReader | None = None,
+    documents: DocumentReader | None = None,
     startup_timeout: float = 2.0,
 ) -> FastMCP:
     """The assembled server, with `reader` in place of the Paperless adapter.
 
-    `taxonomy` defaults to `reader` if that is a fake, else to the seeded admin's fake.
+    `taxonomy` and `documents` default to `reader` if that is a fake, else to the seeded
+    admin's fake.
     """
-    taxonomy = taxonomy or (reader if isinstance(reader, FakePaperless) else admin())
+    fake = reader if isinstance(reader, FakePaperless) else admin()
     return create_server(
         paperless_settings(),
         server_settings(startup_timeout),
-        ports=lambda _client: Ports(instance=reader, taxonomy=taxonomy),
+        ports=lambda _client: Ports(
+            instance=reader, taxonomy=taxonomy or fake, documents=documents or fake
+        ),
     )
 
 

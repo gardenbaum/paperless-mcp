@@ -26,11 +26,13 @@ from fakes.accounts import ADMIN, READER
 from fakes.paperless import FakePaperless, seeded
 
 from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
+    DocumentReader,
     InstanceReader,
     TaxonomyReader,
 )
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
+from paperless_mcp.paperless.documents import PaperlessDocumentReader
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
 
@@ -46,16 +48,21 @@ class Ports:
 
     instance: InstanceReader
     taxonomy: TaxonomyReader
+    documents: DocumentReader
 
 
 def fake_ports(fake: FakePaperless) -> Ports:
     """The fake implements every port itself."""
-    return Ports(instance=fake, taxonomy=fake)
+    return Ports(instance=fake, taxonomy=fake, documents=fake)
 
 
 def live_ports(client: PaperlessClient) -> Ports:
     """The adapter, one object per port, all on `client`."""
-    return Ports(instance=PaperlessInstanceReader(client), taxonomy=PaperlessTaxonomyReader(client))
+    return Ports(
+        instance=PaperlessInstanceReader(client),
+        taxonomy=PaperlessTaxonomyReader(client),
+        documents=PaperlessDocumentReader(client),
+    )
 
 
 @dataclass(frozen=True)

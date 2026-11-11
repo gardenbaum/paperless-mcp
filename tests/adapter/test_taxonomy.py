@@ -8,7 +8,7 @@ import pytest
 from adapter.conftest import tag
 from adapter.test_pagination import TagServer
 from paperless_mcp.domain.errors import PaperlessMcpError, PermissionDenied
-from paperless_mcp.domain.taxonomy import TaxonomyItem
+from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyItem
 from paperless_mcp.paperless.pagination import MAX_ITEMS
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
 
@@ -141,7 +141,10 @@ CASES: list[tuple[TaxonomyKind, str, list[Json], list[TaxonomyItem]]] = [
                 name="e2e-select",
                 document_count=1,
                 data_type="select",
-                select_options=("alpha", "beta"),
+                select_options=(
+                    SelectOption(id="1sg5d8f1333w5Qak", label="alpha"),
+                    SelectOption(id="fV0FaQetPHJNFt8t", label="beta"),
+                ),
             ),
             row(id=7, name="e2e-monetary", document_count=1, data_type="monetary"),
         ],

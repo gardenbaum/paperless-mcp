@@ -75,7 +75,10 @@ async def test_the_resource_is_the_full_table_as_json() -> None:
     assert content.mime_type == "application/json"
     table = cast("list[dict[str, object]]", json.loads(content.text))
     rows = {row["name"]: row for row in table}
-    assert rows["e2e-select"]["select_options"] == ["alpha", "beta"]
+    assert rows["e2e-select"]["select_options"] == [
+        {"id": "opt-alpha", "label": "alpha"},
+        {"id": "opt-beta", "label": "beta"},
+    ]
     assert len(rows) == 10
 
 

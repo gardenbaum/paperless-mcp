@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
     from fastmcp import Context
 
+    from paperless_mcp.services.documents import DocumentService
     from paperless_mcp.services.instance import InstanceService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
 
@@ -41,6 +42,12 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
+    "search_documents": ToolAnnotations(
+        title="Search documents",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
 }
 
 logger = logging.getLogger(__name__)
@@ -55,6 +62,7 @@ class Services:
 
     instance: InstanceService
     taxonomy: TaxonomyResolver
+    documents: DocumentService
 
 
 def services(ctx: Context) -> Services:

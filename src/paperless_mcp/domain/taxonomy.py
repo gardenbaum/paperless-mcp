@@ -20,6 +20,15 @@ type TaxonomyKind = Literal[
 ]
 
 
+class SelectOption(BaseModel):
+    """An option of a select custom field; documents store its id as the value."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    id: str
+    label: str
+
+
 class TaxonomyItem(BaseModel):
     """One taxonomy object; fields that do not apply to its kind are null."""
 
@@ -35,7 +44,8 @@ class TaxonomyItem(BaseModel):
     parent: Annotated[int | None, Field(description="Tags: id of the parent tag.")] = None
     data_type: Annotated[str | None, Field(description="Custom fields: the data type.")] = None
     select_options: Annotated[
-        tuple[str, ...] | None, Field(description="Custom fields of type select: option labels.")
+        tuple[SelectOption, ...] | None,
+        Field(description="Custom fields of type select: the options, ids and labels."),
     ] = None
 
 
