@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-10T21:46:00Z'
-updated_date: '2026-11-10T21:47:00Z'
+updated_date: '2026-11-11T19:41:00Z'
 labels: []
 dependencies: []
 type: docs
@@ -26,11 +26,17 @@ The design (doc-1 §4) uses pvliesdonk/paperless-mcp, baruchiro/paperless-mcp an
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #1 Tests written first (red, then green) at every test level the change touches
+- [x] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DoD #1: docs-only change, no test level touched. DoD #3: no snapshot, gate or decision change. Review: added the OrellBuehler prompt-tool-existence test from doc-1 §4 that the first draft missed.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

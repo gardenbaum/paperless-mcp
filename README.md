@@ -69,7 +69,8 @@ adopts some of their ideas deliberately:
   against a real Paperless, a test over every advertised tool schema.
 - [OrellBuehler/paperless-mcp](https://github.com/OrellBuehler/paperless-mcp) (MIT): toolsets,
   a read-only mode and a test that every tool belongs to a toolset, coverage of Paperless 3.x
-  features (versions, AI suggestions, trash, PDF operations), prompts that ask for confirmation.
+  features (versions, AI suggestions, trash, PDF operations), prompts that ask for confirmation,
+  a test that every tool named in a prompt exists.
 
 ## Licence
 
