@@ -44,6 +44,8 @@ MCP server for paperless-ngx 3.x (API version 10) on FastMCP 4. The approved des
   `just docs-sync` and `just docs-sync-paperless`.
 
 ### Rules for AI contributors
+- Follow the per-task loop, GitHub notes and standing rulings in
+  `backlog/docs/doc-2 - AI-contributor-workflow.md`.
 - Work task by task from Backlog, one branch and one PR per task; write the failing test first.
 - Never update snapshots, weaken a gate, threshold, contract or decision without saying so in the
   task notes and commit message; changing an accepted decision requires a new decision that
