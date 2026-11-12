@@ -28,7 +28,7 @@ def counts(statistics: InstanceStatistics) -> dict[str, int]:
 async def test_overview_reports_versions_and_the_current_user(backend: Backend) -> None:
     overview = await backend.admin.instance.get_overview()
 
-    assert (overview.paperless_version, overview.api_version) == ("3.4.2", 10)
+    assert (overview.paperless_version, overview.api_version) == (backend.expected_version, 10)
     assert overview.current_user is not None
     assert (overview.current_user.username, overview.current_user.is_superuser) == ("admin", True)
     assert overview.ai_enabled is False
@@ -67,4 +67,4 @@ async def test_a_restricted_user_sees_shared_objects_and_no_system_status(
         "e2e-reader",
         False,
     )
-    assert overview.paperless_version == "3.4.2"
+    assert overview.paperless_version == backend.expected_version

@@ -30,3 +30,4 @@ htmlcov/
 
 # E2E CI log
 e2e-containers.log
+mutants/
