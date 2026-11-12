@@ -52,6 +52,14 @@ just check                    # the full local gate, identical to CI
 just --list                   # all recipes
 ```
 
+Scheduled quality jobs (weekly GitHub workflows, each also a recipe and a manual dispatch):
+
+```sh
+just mutation                 # mutmut on services/ and paperless/ (report-only), a few minutes
+just e2e-latest               # E2E suite against the latest stable paperless-ngx 3.x image
+just drift-check              # vendored Paperless schema and docs vs. the latest 3.x release
+```
+
 Lint suppressions name a specific code and a reason, e.g. `# noqa: S101 -- reason`
 (see `just hygiene`). Inline `# pragma` comments are banned: coverage exclusions are reviewed
 `exclude_also` patterns in `pyproject.toml`.

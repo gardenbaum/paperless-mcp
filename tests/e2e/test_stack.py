@@ -3,7 +3,7 @@
 import pytest
 from fakes.accounts import ADMIN, READER
 
-from e2e.helpers import Seeded, Stack, num, obj, parse, results, seed, seq
+from e2e.helpers import EXPECTED_VERSION, Seeded, Stack, num, obj, parse, results, seed, seq
 
 pytestmark = pytest.mark.e2e
 
@@ -12,7 +12,7 @@ pytestmark = pytest.mark.e2e
 def test_instance_reports_api_version_10(stack: Stack) -> None:
     response = stack.admin.get("/api/tags/")
     assert response.headers["X-Api-Version"] == "10"
-    assert response.headers["X-Version"] == "3.4.2"
+    assert response.headers["X-Version"] == EXPECTED_VERSION
 
 
 def test_seeding_is_idempotent(stack: Stack, reseed: Seeded) -> None:

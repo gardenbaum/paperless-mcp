@@ -12,6 +12,8 @@ import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
+from e2e.helpers import EXPECTED_VERSION
+
 if TYPE_CHECKING:
     from e2e.helpers import Stack
 
@@ -37,7 +39,7 @@ async def test_claude_code_can_call_get_instance_overview_over_stdio(stack: Stac
 
     output = result.structured_content
     assert output is not None
-    assert (output["paperless_version"], output["api_version"]) == ("3.4.2", 10)
+    assert (output["paperless_version"], output["api_version"]) == (EXPECTED_VERSION, 10)
     assert output["current_user"]["username"] == "admin"
     assert output["system_status"] is not None
 

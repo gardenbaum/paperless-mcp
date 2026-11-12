@@ -1,0 +1,5 @@
+# Overlay of `just e2e-latest` (weekly job, design 9.2): the same stack, but the latest stable 3.x
+# image instead of the pinned digest. PAPERLESS_E2E_VERSION is set by the recipe.
+services:
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:${PAPERLESS_E2E_VERSION:?set by just e2e-latest}

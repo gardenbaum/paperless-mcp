@@ -1,0 +1,55 @@
+name: Mutation testing
+
+# Weekly and on demand (design 9.2, 9.5). Report-only: the score goes to the job summary and an
+# artifact, nothing fails below a threshold until PLMCP-21 makes 80 % a gate.
+on:
+  schedule:
+    - cron: "23 3 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation
+  cancel-in-progress: false
+
+env:
+  # renovate: datasource=pypi depName=rust-just
+  RUST_JUST_VERSION: "1.59.0"
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install just
+        run: uv tool install "rust-just==${RUST_JUST_VERSION}"
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Run mutmut on services/ and paperless/
+        run: just mutation
+
+      - name: Publish the mutation score
+        run: cat mutants/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: mutation-report
+          path: |
+            mutants/summary.md
+            mutants/survivors.txt
+            mutants/mutmut-cicd-stats.json
+          if-no-files-found: ignore
+          retention-days: 30
