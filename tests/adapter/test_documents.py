@@ -252,6 +252,7 @@ DETAIL: Json = {
     "original_file_name": "e2e-public-invoice.pdf",
     "archived_file_name": "2026-11-12 e2e-acme e2e-public-invoice.pdf",
     "owner": None,
+    "user_can_change": False,
     "notes": [
         {
             "id": 1,
@@ -358,6 +359,7 @@ async def test_a_document_is_fetched_by_id_with_named_fields_and_no_content(
         "application/pdf",
     )
     assert record.notes_count == 1
+    assert record.user_can_change is False
     [version] = record.versions
     assert (version.id, version.version_label, version.is_root) == (1, None, True)
 

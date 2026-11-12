@@ -28,9 +28,11 @@ if TYPE_CHECKING:
     from paperless_mcp.domain.instance import InstanceOverview
     from paperless_mcp.domain.ports import (
         DocumentReader,
+        DocumentWriter,
         InstanceReader,
         TaskReader,
         TaxonomyReader,
+        TaxonomyWriter,
     )
 
 URL = "http://paperless.test"
@@ -68,6 +70,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     taxonomy: TaxonomyReader | None = None,
     documents: DocumentReader | None = None,
     tasks: TaskReader | None = None,
+    document_writes: DocumentWriter | None = None,
+    taxonomy_writes: TaxonomyWriter | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
     startup_timeout: float = 2.0,
@@ -79,11 +83,12 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
 ) -> FastMCP:
     """The assembled server, with `reader` in place of the Paperless adapter.
 
-    `taxonomy`, `documents` and `tasks` default to `reader` if that is a fake, else to the seeded
-    admin's fake. `sleep` and `clock` replace the real ones the task wait uses. `toolsets`,
-    `read_only` and `disabled_tools` go to the server settings; `catalogue` replaces the
-    tools the server offers, to try toolsets that do not exist yet. `max_download_bytes`
-    replaces the download limit.
+    `taxonomy`, `documents`, `tasks` and the two writers default to `reader` if that is a fake,
+    else to the seeded admin's fake (which refuses writes unless it was created to allow them).
+    `sleep` and `clock` replace the real ones the task wait uses. `toolsets`, `read_only` and
+    `disabled_tools` go to the server settings; `catalogue` replaces the tools the server
+    offers, to try toolsets that do not exist yet. `max_download_bytes` replaces the download
+    limit.
     """
     fake = reader if isinstance(reader, FakePaperless) else admin()
     return create_server(
@@ -101,6 +106,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
             taxonomy=taxonomy or fake,
             documents=documents or fake,
             tasks=tasks or fake,
+            document_writes=document_writes or fake,
+            taxonomy_writes=taxonomy_writes or fake,
         ),
         sleep=sleep,
         clock=clock,

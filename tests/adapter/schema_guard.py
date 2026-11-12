@@ -20,6 +20,7 @@ from urllib.parse import parse_qs
 import httpx2
 from openapi_core import Config, OpenAPI
 from openapi_core.datatypes import RequestParameters
+from openapi_core.templating.paths.exceptions import PathError
 from openapi_core.templating.paths.finders import APICallPathFinder
 from werkzeug.datastructures import Headers, ImmutableMultiDict
 
@@ -35,6 +36,12 @@ UNDECLARED_QUERY_PARAMETERS: Mapping[tuple[str, str], Mapping[str, str]] = {
         "more_like_id": "documented in api.md, missing from the generated parameters (PLMCP-3)",
         "all": "documented in api.md, missing from the generated parameters (PLMCP-3)",
     },
+    ("PATCH", "/api/documents/{id}/"): {
+        "fields": (
+            "the update serializer honours it like the retrieve one; without it the answer "
+            "carries the whole OCR text (PLMCP-16)"
+        ),
+    },
 }
 # Responses whose body the generated schema describes wrongly: (method, path template, status) ->
 # reason. Their bodies are not checked; the live contract suite (tests/contract) checks the
@@ -47,6 +54,13 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
     ("GET", "/api/documents/{id}/", 200): (
         "`fields=` drops properties the schema requires, and custom field values can be booleans "
         "and id lists, which the value's oneOf omits (PLMCP-11)"
+    ),
+    ("PATCH", "/api/documents/{id}/", 200): (
+        "`fields=` drops properties the schema requires, and custom field values can be booleans "
+        "and id lists, which the value's oneOf omits (PLMCP-16)"
+    ),
+    ("POST", "/api/tags/", 201): (
+        "3.4.2 answers a created tag without the `document_count` the schema requires (PLMCP-16)"
     ),
     ("GET", "/api/documents/{id}/history/", 200): (
         "3.4.2 answers a bare list, not the paginated envelope of the schema, and a null actor "
@@ -84,6 +98,14 @@ FILE_RESPONSES: Mapping[tuple[str, str], str] = {
     ("GET", "/api/documents/{id}/thumb/"): "the thumbnail is image/webp (PLMCP-12)",
     ("GET", "/api/documents/{id}/download/"): "the original or archive file as stored (PLMCP-12)",
 }
+# Requests whose custom field values the schema describes too narrowly (the value's oneOf omits
+# booleans and id lists): (method, path template) -> reason. Such values are replaced by a
+# string before the body is validated; the rest of the body is checked as usual.
+NARROW_VALUE_REQUESTS: Mapping[tuple[str, str], str] = {
+    ("PATCH", "/api/documents/{id}/"): (
+        "custom field values can be booleans and id lists, which the value's oneOf omits (PLMCP-16)"
+    ),
+}
 # drf-spectacular documents no error responses. Paperless (Django REST framework) answers 4xx with
 # {"detail": "..."} or a map of field names to message lists; such bodies are checked for that shape
 # instead. 5xx responses are not checked: proxies and the web server produce them, not the API.
@@ -108,8 +130,9 @@ class SchemaViolationError(AssertionError):
 class _Request:
     """An httpx2 request in the shape of openapi-core's `Request` protocol."""
 
-    def __init__(self, request: httpx2.Request) -> None:
+    def __init__(self, request: httpx2.Request, body: bytes | None = None) -> None:
         self._request: httpx2.Request = request
+        self._body: bytes | None = body or request.content or None
         self.parameters: RequestParameters = RequestParameters(
             query=ImmutableMultiDict(parse_qs(request.url.query.decode(), keep_blank_values=True)),
             header=Headers(dict(request.headers)),
@@ -129,7 +152,7 @@ class _Request:
 
     @property
     def body(self) -> bytes | None:
-        return self._request.content or None
+        return self._body
 
     @property
     def content_type(self) -> str:
@@ -182,9 +205,9 @@ def _undeclared_query_parameters(request: httpx2.Request) -> set[str]:
     return {name for name, _ in request.url.params.multi_items()} - allowed
 
 
-def _json_or_none(response: httpx2.Response) -> object:
+def _json_or_none(message: httpx2.Request | httpx2.Response) -> object:
     try:
-        return cast("object", json.loads(response.content))
+        return cast("object", json.loads(message.content))
     except ValueError:
         return None
 
@@ -200,9 +223,30 @@ def _is_drf_error(body: object) -> bool:
     return False
 
 
+def _narrowed(request: httpx2.Request) -> bytes | None:
+    """The body of a request listed in `NARROW_VALUE_REQUESTS` with its values made strings."""
+    try:
+        listed = (request.method, _template(request)) in NARROW_VALUE_REQUESTS
+    except PathError:  # no such operation: the schema check reports it
+        return None
+    if not listed or not request.content:
+        return None
+    body = _json_or_none(request)
+    if not isinstance(body, dict):
+        return None
+    fields = cast("Json", body).get("custom_fields")
+    if isinstance(fields, list):
+        for item in cast("list[object]", fields):
+            if isinstance(item, dict) and "value" in item:
+                value = cast("Json", item)["value"]
+                if isinstance(value, bool | list):
+                    cast("Json", item)["value"] = "value"
+    return json.dumps(body).encode()
+
+
 def check_request(request: httpx2.Request) -> None:
     """Raise `SchemaViolationError` unless the request matches an operation of the schema."""
-    errors = list(_OPENAPI.iter_request_errors(_Request(request)))
+    errors = list(_OPENAPI.iter_request_errors(_Request(request, _narrowed(request))))
     if errors:
         raise _fail(request, "request does not match the schema", errors)
     if undeclared := _undeclared_query_parameters(request):

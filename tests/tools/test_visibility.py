@@ -112,7 +112,8 @@ async def test_a_toolset_not_selected_takes_its_resources_with_it() -> None:
 async def test_read_only_mode_offers_only_tools_with_the_read_only_hint() -> None:
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"], read_only=True)
 
-    assert await names(server) == CORE | {"ask_something", "bulk_preview"}
+    # update_document is core's first tool that changes data, so read-only mode hides it.
+    assert await names(server) == (CORE - {"update_document"}) | {"ask_something", "bulk_preview"}
 
 
 async def test_disabled_tools_are_not_offered() -> None:

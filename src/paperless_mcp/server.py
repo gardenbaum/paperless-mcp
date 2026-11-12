@@ -20,10 +20,11 @@ from paperless_mcp.domain.errors import InvalidConfiguration
 from paperless_mcp.observability import CallLogging
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import RetryPolicy, connect
-from paperless_mcp.paperless.documents import PaperlessDocumentReader
+from paperless_mcp.paperless.documents import PaperlessDocumentReader, PaperlessDocumentWriter
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
-from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
+from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
+from paperless_mcp.services.document_edits import DocumentEditor
 from paperless_mcp.services.documents import DocumentService
 from paperless_mcp.services.files import FileService
 from paperless_mcp.services.instance import InstanceService
@@ -54,9 +55,11 @@ if TYPE_CHECKING:
     from paperless_mcp.domain.instance import InstanceOverview
     from paperless_mcp.domain.ports import (
         DocumentReader,
+        DocumentWriter,
         InstanceReader,
         TaskReader,
         TaxonomyReader,
+        TaxonomyWriter,
     )
     from paperless_mcp.paperless.client import PaperlessClient
     from paperless_mcp.settings import PaperlessSettings, ServerSettings
@@ -117,6 +120,8 @@ class Ports:
     taxonomy: TaxonomyReader
     documents: DocumentReader
     tasks: TaskReader
+    document_writes: DocumentWriter
+    taxonomy_writes: TaxonomyWriter
 
 
 def paperless_ports(client: PaperlessClient) -> Ports:
@@ -126,6 +131,8 @@ def paperless_ports(client: PaperlessClient) -> Ports:
         taxonomy=PaperlessTaxonomyReader(client),
         documents=PaperlessDocumentReader(client),
         tasks=PaperlessTaskReader(client),
+        document_writes=PaperlessDocumentWriter(client),
+        taxonomy_writes=PaperlessTaxonomyWriter(client),
     )
 
 
@@ -182,12 +189,20 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
         ) as client:
             adapters = ports(client)
             taxonomy = TaxonomyResolver(adapters.taxonomy, credentials, ttl=TAXONOMY_TTL)
+            documents = DocumentService(adapters.documents, taxonomy, web_url=web_url)
             services = Services(
                 instance=InstanceService(adapters.instance),
                 taxonomy=taxonomy,
-                documents=DocumentService(adapters.documents, taxonomy, web_url=web_url),
+                documents=documents,
                 files=FileService(
                     adapters.documents, web_url=web_url, max_bytes=settings.max_download_bytes
+                ),
+                edits=DocumentEditor(
+                    adapters.documents,
+                    adapters.document_writes,
+                    adapters.taxonomy_writes,
+                    taxonomy,
+                    documents=documents,
                 ),
                 tasks=TaskService(adapters.tasks, sleep=sleep, clock=clock),
             )

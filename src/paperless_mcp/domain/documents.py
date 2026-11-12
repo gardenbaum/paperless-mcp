@@ -7,7 +7,7 @@ and enrich the hits with names into ``DocumentSummary``. No row ever holds the O
 from datetime import date, datetime
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 type Include = Literal["notes", "history", "metadata", "versions", "suggestions"]
 type Ordering = Literal[
@@ -80,6 +80,70 @@ class CustomFieldValue(BaseModel):
 
     field: int
     value: JsonValue
+
+
+class DocumentPatch(BaseModel):
+    """What a document update changes, ids only; the port sends exactly the fields that are set.
+
+    A field that was never given is left alone, one given as ``None`` is cleared (correspondent,
+    document type, storage path, archive serial number, owner). ``tags`` and ``custom_fields``
+    are the whole new lists: Paperless replaces them as a whole, so whoever builds the patch
+    merges them with the current state first.
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    title: str | None = None
+    created: date | None = None
+    archive_serial_number: int | None = None
+    owner: int | None = None
+    correspondent: int | None = None
+    document_type: int | None = None
+    storage_path: int | None = None
+    tags: tuple[int, ...] | None = None
+    custom_fields: tuple[CustomFieldValue, ...] | None = None
+
+    @model_validator(mode="after")
+    def _required_values(self) -> DocumentPatch:
+        """Title, created date and the two lists cannot be cleared, only changed."""
+        for name in ("title", "created", "tags", "custom_fields"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                message = f"{name} cannot be cleared"
+                raise ValueError(message)
+        return self
+
+
+type Clearable = Literal[
+    "correspondent", "document_type", "storage_path", "archive_serial_number", "owner"
+]
+
+
+class DocumentEdit(BaseModel):
+    """What a caller wants changed on a document, with names where Paperless wants ids.
+
+    A field left out stays as it is. ``clear`` empties the fields that can be empty. Tags are
+    added, removed or replaced as a whole (``tags_set``, not together with the others); custom
+    fields are set by name or id and taken off with ``remove_custom_fields``; whatever is not
+    named stays. Services resolve the names and merge, see ``DocumentEditor``.
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    title: str | None = None
+    created: date | None = None
+    archive_serial_number: int | None = None
+    owner: NameOrId | None = None
+    correspondent: NameOrId | None = None
+    document_type: NameOrId | None = None
+    storage_path: NameOrId | None = None
+    clear: tuple[Clearable, ...] = ()
+    tags_add: tuple[NameOrId, ...] = ()
+    tags_remove: tuple[NameOrId, ...] = ()
+    tags_set: tuple[NameOrId, ...] | None = None
+    create_missing_tags: bool = False
+    confirm: bool = False
+    custom_fields: dict[str, JsonValue] = Field(default_factory=dict[str, JsonValue])
+    remove_custom_fields: tuple[NameOrId, ...] = ()
 
 
 class DocumentHit(BaseModel):
@@ -247,6 +311,15 @@ class DocumentRecord(BaseModel):
     page_count: int | None
     notes_count: int
     versions: tuple[DocumentVersion, ...]
+    user_can_change: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Whether object permissions let the user change the document; null where "
+                "Paperless does not say (the answer to an update)."
+            )
+        ),
+    ]
 
 
 class SuggestionNames(BaseModel):
@@ -309,6 +382,20 @@ class DocumentDetail(BaseModel):
     unavailable: Annotated[
         tuple[Include, ...],
         Field(description="Included sections the user may not read in Paperless."),
+    ] = ()
+
+
+class DocumentUpdate(DocumentDetail):
+    """The document after an update, and what the update added on its own."""
+
+    implicit_tags: Annotated[
+        tuple[Ref, ...],
+        Field(
+            description=(
+                "Parent tags added because a child tag was added or kept: Paperless tags are "
+                "hierarchical and a child needs its parent."
+            )
+        ),
     ] = ()
 
 

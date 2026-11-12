@@ -1,4 +1,4 @@
-"""The core toolset: everyday reading (and later writing) of documents and taxonomy."""
+"""The core toolset: everyday reading and writing of documents and taxonomy."""
 
 import base64
 from datetime import date
@@ -19,10 +19,13 @@ from mcp.types import (
 from pydantic import Field, JsonValue
 
 from paperless_mcp.domain.documents import (
+    Clearable,
     ContentSlice,
     DocumentDetail,
+    DocumentEdit,
     DocumentQuery,
     DocumentSearchResult,
+    DocumentUpdate,
     FileReport,
     FileVersion,
     Include,
@@ -330,6 +333,111 @@ async def download_document(
         )
         content.append(EmbeddedResource(type="resource", resource=blob))
     return ToolResult(content=content)
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["update_document"])
+@boundary
+async def update_document(  # noqa: PLR0913 -- one parameter per changeable field, described for the LLM
+    ctx: Context,
+    document_id: DocumentId,
+    *,
+    title: Annotated[str | None, Field(description="New title (at most 128 characters).")] = None,
+    correspondent: Named = None,
+    document_type: Named = None,
+    storage_path: Named = None,
+    created: Annotated[date | None, Field(description="New creation date (YYYY-MM-DD).")] = None,
+    archive_serial_number: Annotated[
+        int | None, Field(ge=0, description="New archive serial number; it must be unused.")
+    ] = None,
+    owner: Annotated[
+        NameOrId | None, Field(description="Username or id of the new owning user.")
+    ] = None,
+    clear: Annotated[
+        list[Clearable] | None,
+        Field(
+            description=(
+                "Fields to empty: correspondent, document_type, storage_path, "
+                "archive_serial_number or owner (no owner makes the document visible to every "
+                "user with the document permission)."
+            )
+        ),
+    ] = None,
+    tags_add: Annotated[
+        list[NameOrId] | None, Field(description="Tag names or ids to add; the others stay.")
+    ] = None,
+    tags_remove: Annotated[
+        list[NameOrId] | None, Field(description="Tag names or ids to take off; the others stay.")
+    ] = None,
+    tags_set: Annotated[
+        list[NameOrId] | None,
+        Field(
+            description="Replace all tags with exactly these (not with tags_add or tags_remove)."
+        ),
+    ] = None,
+    create_missing_tags: Annotated[
+        bool,
+        Field(
+            description=(
+                "Create tags in tags_add or tags_set that do not exist yet; they are private to "
+                "you (their creator) until shared. Names of only digits are read as ids."
+            )
+        ),
+    ] = False,
+    confirm: Annotated[
+        bool,
+        Field(
+            description=(
+                "Required to change owner (also to no owner): the new owner takes the document "
+                "over and you may lose access, which you cannot undo yourself."
+            )
+        ),
+    ] = False,
+    custom_fields: Annotated[
+        dict[str, JsonValue] | None,
+        Field(
+            description=(
+                "Custom field values to set, keyed by field name or id; other fields stay. "
+                "Values by data type: string/longtext text; url with scheme; date 'YYYY-MM-DD'; "
+                "boolean true/false; integer; float; monetary 'EUR12.50' (or 12.5); "
+                "documentlink a list of document ids; select the option's label."
+            )
+        ),
+    ] = None,
+    remove_custom_fields: Annotated[
+        list[NameOrId] | None,
+        Field(description="Custom field names or ids to take off the document."),
+    ] = None,
+) -> DocumentUpdate:
+    """Change a document's title, correspondent, type, storage path, dates, owner, tags or custom fields.
+
+    Only what you name changes; everything else stays, also the other custom fields and tags.
+    Names match like in search_documents; an unknown or ambiguous name is an error that lists
+    candidates and nothing is changed. Tags are hierarchical in Paperless: a child tag always
+    comes with its parent (implicit_tags lists parents added for you), and removing a parent
+    while its children stay is refused. Document links are symmetrical: linking A to B also
+    links B to A and needs change permission on B. Asking for what already holds changes
+    nothing. It reads, then writes: a concurrent change of the same document's tags or custom
+    fields in between is overwritten. Tags created with create_missing_tags are private to
+    you; tag names that are only numbers cannot be addressed by name. Returns the document as get_document does, plus implicit_tags.
+    """  # noqa: E501 -- see list_taxonomy; FastMCP sends the docstring as is
+    edit = DocumentEdit(
+        title=title,
+        created=created,
+        archive_serial_number=archive_serial_number,
+        owner=owner,
+        correspondent=correspondent,
+        document_type=document_type,
+        storage_path=storage_path,
+        clear=tuple(clear or ()),
+        tags_add=tuple(tags_add or ()),
+        tags_remove=tuple(tags_remove or ()),
+        tags_set=None if tags_set is None else tuple(tags_set),
+        create_missing_tags=create_missing_tags,
+        confirm=confirm,
+        custom_fields=custom_fields or {},
+        remove_custom_fields=tuple(remove_custom_fields or ()),
+    )
+    return await services(ctx).edits.update(document_id, edit)
 
 
 @provider.resource(

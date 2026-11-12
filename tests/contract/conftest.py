@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import httpx2
 import pytest
-from e2e.helpers import EXPECTED_VERSION, consume, pdf
+from e2e.helpers import EXPECTED_VERSION, consume, pdf, results
 from fakes.accounts import ADMIN, BLIND, READER
 from fakes.paperless import (
     VERSION,
@@ -37,21 +37,27 @@ from fakes.paperless import (
 
 from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
     DocumentReader,
+    DocumentWriter,
     InstanceReader,
     TaskReader,
     TaxonomyReader,
+    TaxonomyWriter,
 )
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
-from paperless_mcp.paperless.documents import PaperlessDocumentReader
+from paperless_mcp.paperless.documents import PaperlessDocumentReader, PaperlessDocumentWriter
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
-from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
+from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Callable
 
     from e2e.helpers import Stack
+
+
+# Every tag a contract test creates starts with this; the live backend deletes them again.
+SCRATCH_TAG = "contract-tag-"
 
 
 @dataclass(frozen=True)
@@ -62,11 +68,22 @@ class Ports:
     taxonomy: TaxonomyReader
     documents: DocumentReader
     tasks: TaskReader
+    document_writes: DocumentWriter
+    taxonomy_writes: TaxonomyWriter
 
 
-def fake_ports(fake: FakePaperless) -> Ports:
-    """The fake implements every port itself."""
-    return Ports(instance=fake, taxonomy=fake, documents=fake, tasks=fake)
+def fake_ports(state: FakeState, user: str) -> Ports:
+    """The fake implements every port itself; only its writer ports may write."""
+    fake = FakePaperless(state, user=user)
+    writer = FakePaperless(state, user=user, allow_writes=True)
+    return Ports(
+        instance=fake,
+        taxonomy=fake,
+        documents=fake,
+        tasks=fake,
+        document_writes=writer,
+        taxonomy_writes=writer,
+    )
 
 
 def live_ports(client: PaperlessClient) -> Ports:
@@ -76,6 +93,8 @@ def live_ports(client: PaperlessClient) -> Ports:
         taxonomy=PaperlessTaxonomyReader(client),
         documents=PaperlessDocumentReader(client),
         tasks=PaperlessTaskReader(client),
+        document_writes=PaperlessDocumentWriter(client),
+        taxonomy_writes=PaperlessTaxonomyWriter(client),
     )
 
 
@@ -106,6 +125,9 @@ class Backend:
     consume: Consume
     # Uploads a document; the live one deletes it again when the test ends, after consumption.
     upload: Upload
+    # A new document of the admin to write to, after its consumption; the live one is deleted when
+    # the test ends. Its tags and custom fields are whatever consumption gave it.
+    new_document: Callable[[], int]
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
     # (`just e2e-latest` runs the suite against a newer release than the pinned one).
     expected_version: str
@@ -148,14 +170,27 @@ def fake_upload(state: FakeState) -> Upload:
     return upload_fake
 
 
+def fake_new_document(state: FakeState) -> Callable[[], int]:
+    def new_document() -> int:
+        [admin] = [user for user in state.users if user.username == ADMIN[0]]
+        number = max(d.id for d in state.documents) + 1
+        state.documents.append(
+            FakeDocument(id=number, title=f"contract-write-{uuid.uuid4().hex}", owner=admin.id)
+        )
+        return number
+
+    return new_document
+
+
 def fake_backend() -> Backend:
     state = seeded()
     return Backend(
-        admin=fake_ports(FakePaperless(state, user=ADMIN[0])),
-        reader=fake_ports(FakePaperless(state, user=READER[0])),
-        blind=fake_ports(FakePaperless(state, user=BLIND[0])),
+        admin=fake_ports(state, ADMIN[0]),
+        reader=fake_ports(state, READER[0]),
+        blind=fake_ports(state, BLIND[0]),
         consume=fake_consume(state),
         upload=fake_upload(state),
+        new_document=fake_new_document(state),
         expected_version=VERSION,
     )
 
@@ -183,6 +218,13 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
         created.append(document)
         return document
 
+    def new_live_document() -> int:
+        title = f"contract-write-{uuid.uuid4().hex}"
+        _, document = consume(stack.admin, title, pdf(title))
+        assert document is not None
+        created.append(document)
+        return document
+
     try:
         async with httpx2.AsyncClient(base_url=stack.base_url, timeout=30.0) as http:
 
@@ -198,8 +240,13 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
                 blind=ports(stack.blind_token),
                 consume=consume_live,
                 upload=upload_live,
+                new_document=new_live_document,
                 expected_version=EXPECTED_VERSION,
             )
     finally:
         for document in created:
             _ = stack.admin.delete(f"/api/documents/{document}/")
+        # Tags the contract tests created (they all start with SCRATCH_TAG).
+        found = stack.admin.get("/api/tags/", params={"name__istartswith": SCRATCH_TAG})
+        for row in results(found):
+            _ = stack.admin.delete(f"/api/tags/{row['id']}/")

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
     from fastmcp import Context
 
+    from paperless_mcp.services.document_edits import DocumentEditor
     from paperless_mcp.services.documents import DocumentService
     from paperless_mcp.services.files import FileService
     from paperless_mcp.services.instance import InstanceService
@@ -46,6 +47,7 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "get_document_thumbnail": "core",
     "download_document": "core",
     "get_task": "core",
+    "update_document": "core",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
@@ -102,6 +104,15 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
+    # Not destructive (decision-6): it never drops what the caller did not name, so it needs no
+    # confirm; what it overwrites is the caller's explicit request and stays in the audit log.
+    "update_document": ToolAnnotations(
+        title="Update document",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
 }
 
 logger = logging.getLogger(__name__)
@@ -118,6 +129,7 @@ class Services:
     taxonomy: TaxonomyResolver
     documents: DocumentService
     files: FileService
+    edits: DocumentEditor
     tasks: TaskService
 
 

@@ -24,21 +24,6 @@ function_hash = "2dc98e42ddf9"
 reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
 
 [[equivalent]]
-mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁget__mutmut_12"
-function_hash = "0b0fb73a898e"
-reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
-
-[[equivalent]]
-mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁget__mutmut_15"
-function_hash = "0b0fb73a898e"
-reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
-
-[[equivalent]]
-mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁget__mutmut_16"
-function_hash = "0b0fb73a898e"
-reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
-
-[[equivalent]]
 mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁ_linked_titles__mutmut_6"
 function_hash = "b9bafd7fbd51"
 reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
@@ -212,3 +197,68 @@ reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated 
 mutant = "paperless_mcp.paperless.disposition.x__plain__mutmut_4"
 function_hash = "c6e884e7a0b8"
 reason = "A value of one quote character gives the empty name either way: value[1:-1] and removeprefix of the quote are both empty."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁdetail__mutmut_10"
+function_hash = "baefb80609d3"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁdetail__mutmut_13"
+function_hash = "baefb80609d3"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁdetail__mutmut_14"
+function_hash = "baefb80609d3"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.custom_values.x__select__mutmut_4"
+function_hash = "4af3b2796255"
+reason = "The field only names the field in the error text _text raises for a non-string; this call is guarded by isinstance(value, str), so _text never raises and the field is never read."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.custom_values.x__url__mutmut_4"
+function_hash = "745262ecf844"
+reason = "Only a non-string value reaches the replacement; both \"\" and \"XXXX\" fail the URL scheme pattern, so the same error is raised either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.custom_values.x_normalise__mutmut_14"
+function_hash = "da97df5c1f02"
+reason = "A field without a data type and one with the data type \"XXXX\" both find no check in the table and raise the same unsupported-type error (the message reads field.data_type, not the lookup key)."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_35"
+function_hash = "177ecdf13c3c"
+reason = "create is only read in the branch for names that do not exist when adding; with adding=False the error is re-raised first, so None and False behave alike."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_36"
+function_hash = "177ecdf13c3c"
+reason = "With adding=None, `not adding` is true exactly as with adding=False, so removal lookups re-raise unknown names the same way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_40"
+function_hash = "177ecdf13c3c"
+reason = "With adding=False an unknown tag is re-raised before create is read, so create=True changes nothing for removals."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_55"
+function_hash = "177ecdf13c3c"
+reason = "For tags_set the plan reads only replace and parents; the remove list is used solely when merging add/remove, which tags_set excludes."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁupdate_document__mutmut_21"
+function_hash = "d04cd501472a"
+reason = "httpx upper-cases the method when it builds the request, so \"patch\" is sent as PATCH."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.taxonomy.xǁPaperlessTaxonomyWriterǁcreate_tag__mutmut_16"
+function_hash = "a19efbc1c607"
+reason = "httpx upper-cases the method when it builds the request, so \"post\" is sent as POST."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_create__mutmut_11"
+function_hash = "ede9da9c5a8e"
+reason = "linked is only read in a truth test (`linked and isinstance(...)`), so None and False behave alike."
