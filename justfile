@@ -254,6 +254,9 @@ drift-check:
         if [[ -n "${DRIFT_REPORT:-}" ]]; then cp "$tmp/report.md" "$DRIFT_REPORT"; fi
     elif (( status != 0 )); then
         exit "$status"
+    elif [[ -n "${DRIFT_REPORT:-}" ]]; then
+        # No drift: drop a report left by an earlier run, so drift-issue closes the issue.
+        rm -f -- "$DRIFT_REPORT"
     fi
 
 # Report the result of `drift-check` (its DRIFT_REPORT file) as the one GitHub issue labelled

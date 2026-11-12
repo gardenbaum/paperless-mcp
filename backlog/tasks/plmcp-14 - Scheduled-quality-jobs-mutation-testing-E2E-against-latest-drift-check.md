@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T16:49:00Z'
+updated_date: '2026-11-12T16:52:00Z'
 labels: []
 milestone: m-1
 dependencies:
@@ -55,6 +55,8 @@ Weekly jobs catch weak tests and upstream drift. Tests written by AI often only 
 Design choices: (1) mutmut 3.8.1 (supports Python 3.14), configured in [tool.mutmut]: source_paths = services/ + paperless/, also_copy for src/, docs/vendor/paperless/ (schema guard) and backlog/decisions/; --no-cov and --ignore=tests/quality; e2e stays deselected via addopts. Full local run: 665 mutants in ~2 min, score 87.4 % (579 killed, 2 timeout, 84 survived), so the full scope is the local proof. Report-only: no threshold; PLMCP-21 gates. (2) Logic in scripts/scheduled_jobs.py (latest stable 3.x tag from git ls-remote, drift comparison ignoring UPSTREAM commit/digest, one-issue dedupe via label paperless-drift, injected runner for gh, mutation score = mutmut badge formula). Tests first in tests/quality (red: 23 failed against a stub, then green). scripts/ added to coverage source, pytest pythonpath, basedpyright include; one reviewed coverage exclusion for 'if __name__ == "__main__":'; ruff INP001 ignored for scripts/** (standalone scripts). No gate weakened. (3) E2E latest: overlay tests/e2e/compose.latest.yaml (image tag from PAPERLESS_E2E_VERSION) with own compose project and port 8011, so the pinned stack is untouched; e2e tests read the expected version from PAPERLESS_E2E_VERSION (default 3.4.2). (4) docs-sync-paperless got PAPERLESS_DOCS_DIR so drift-check regenerates into a temp dir; verified locally: just drift-check -> 'no drift' vs 3.4.2. Drift issue: opened or refreshed, never duplicated. (5) Workflows mutation.yml, e2e-latest.yml, drift.yml: cron + workflow_dispatch, SHA pins as ci.yml, contents: read (drift adds issues: write), actionlint clean. Not verifiable locally: the workflows on GitHub, gh issue creation, e2e-latest against a real stack (shared stack in use).
 
 Review round 1: contract suite expects the version from Backend.expected_version (fake: VERSION, live: PAPERLESS_E2E_VERSION); no other live-path 3.4.2 assertions remain (the rest are fake/recorded-adapter tests). Drift lifecycle: refresh edits and comments, drift-free run closes the issue (new recipe drift-issue, separate step so GH_TOKEN only reaches that step; issues: write at job level). Latest-version resolution skips tags whose GHCR image is missing (docker manifest inspect, falls back to next lower tag); e2e-latest version input validated via 'release' subcommand. mutation recipe uses positional arguments and notes that a selection aggregates earlier results. persist-credentials: false on the three new workflows. Exit code 10 cross-referenced in justfile and script. main() takes err; fmt: skip removed; boundary test at 50 items; LOGS_HINT follows e2e-latest; log upload on failure or cancel. Config notes: ruff per-file ignore INP001 for scripts/** (standalone scripts, no __init__.py) was added in the first commit; basedpyright scope widened from 'src and tests' to include scripts, so decision-8's text 'src and tests' is out of date (widened, not weakened; decision not edited).
+
+Codex P2 (PR #16): drift-check now removes a stale DRIFT_REPORT on a no-drift result, so drift-issue closes instead of refreshing the issue. Verified: a stale report file is removed by a real just drift-check run (no drift vs 3.4.2). Justfile glue has no automated test (shell recipe).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
