@@ -8,7 +8,7 @@ change in the task notes and the commit message (CLAUDE.md).
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 from harness import admin, serve
 
 if TYPE_CHECKING:
@@ -20,10 +20,25 @@ pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-4")]
 
 type Schema = dict[str, object]
 
+# The profiles the surface is reviewed for: server settings per profile. `default` is the
+# shipped default, `all` every toolset, `read-only` every toolset without tools that change data.
+PROFILES: dict[str, tuple[list[str] | None, bool]] = {
+    "default": (None, False),
+    "all": (["all"], False),
+    "read-only": (["all"], True),
+}
+profiles = pytest.mark.parametrize("profile", list(PROFILES))
 
-async def wire_tools() -> list[Schema]:
+
+def profile_server(profile: str) -> FastMCP:
+    toolsets, read_only = PROFILES[profile]
+    # AI on, so that capability gating cannot shrink the surface under review.
+    return serve(admin(ai_enabled=True), toolsets=toolsets, read_only=read_only)
+
+
+async def wire_tools(profile: str = "all") -> list[Schema]:
     """tools/list as sent on the wire: camelCase names (SDK v2 models are snake_case)."""
-    async with Client(serve(admin())) as client:
+    async with Client(profile_server(profile)) as client:
         tools = sorted(await client.list_tools(), key=lambda tool: tool.name)
     return [tool.model_dump(mode="json", by_alias=True, exclude_none=True) for tool in tools]
 
@@ -58,8 +73,9 @@ def incompatible(name: str, input_schema: Schema, output_schema: Schema | None) 
     return problems
 
 
-async def test_the_surface_matches_the_snapshot(snapshot: SnapshotAssertion) -> None:
-    assert await wire_tools() == snapshot
+@profiles
+async def test_the_surface_matches_the_snapshot(snapshot: SnapshotAssertion, profile: str) -> None:
+    assert await wire_tools(profile) == snapshot
 
 
 async def test_every_schema_is_compatible() -> None:
@@ -95,9 +111,30 @@ def test_self_test_incompatible_schemas_are_found() -> None:
     ]
 
 
-async def test_the_resource_templates_match_the_snapshot(snapshot: SnapshotAssertion) -> None:
-    async with Client(serve(admin())) as client:
+@profiles
+async def test_the_resource_templates_match_the_snapshot(
+    snapshot: SnapshotAssertion, profile: str
+) -> None:
+    async with Client(profile_server(profile)) as client:
         templates = sorted(await client.list_resource_templates(), key=lambda t: t.uri_template)
     wire = [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in templates]
+
+    assert wire == snapshot
+
+
+@profiles
+async def test_the_resources_and_prompts_match_the_snapshot(
+    snapshot: SnapshotAssertion, profile: str
+) -> None:
+    server = profile_server(profile)
+    async with Client(server) as client:
+        resources = sorted(await client.list_resources(), key=lambda r: str(r.uri))
+        prompts = sorted(await client.list_prompts(), key=lambda p: p.name)
+    wire = {
+        "resources": [
+            r.model_dump(mode="json", by_alias=True, exclude_none=True) for r in resources
+        ],
+        "prompts": [p.model_dump(mode="json", by_alias=True, exclude_none=True) for p in prompts],
+    }
 
     assert wire == snapshot

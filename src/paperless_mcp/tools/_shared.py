@@ -1,9 +1,10 @@
 """What every toolset module shares: toolsets, the annotation table, services, the error boundary.
 
-A new tool takes four steps: an entry in ``ANNOTATIONS`` (title and hints), the tool function in
-its toolset module with ``tags={TOOLSET}`` and ``annotations=ANNOTATIONS[name]``, ``@boundary``
-directly on the function, and the use case it calls on ``Services``. The registry tests
-(tests/tools/test_registry.py) fail until all four are in place.
+A new tool takes five steps: an entry in ``ANNOTATIONS`` (title and hints), one in
+``TOOL_TOOLSETS``, the tool function in its toolset module with ``tags={TOOLSET}`` and
+``annotations=ANNOTATIONS[name]``, ``@boundary`` directly on the function, and the use case it
+calls on ``Services``. The registry tests
+(tests/tools/test_registry.py) fail until all five are in place.
 """
 
 import functools
@@ -28,6 +29,21 @@ if TYPE_CHECKING:
 
 # Every toolset; each tool carries exactly one of them as its only tag.
 TOOLSETS: Final = frozenset({"core"})
+
+# The toolset of every tool, keyed by tool name. It must equal each tool's tag (registry test); the
+# server uses it to refuse a configuration that leaves no tool before it contacts Paperless.
+TOOL_TOOLSETS: Final[Mapping[str, str]] = {
+    "get_instance_overview": "core",
+    "list_taxonomy": "core",
+    "search_documents": "core",
+    "get_document": "core",
+    "get_document_content": "core",
+    "get_task": "core",
+}
+
+# Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
+# hides such a toolset when the capability is known to be missing.
+TOOLSET_REQUIRES: Final[Mapping[str, str]] = {}
 
 # The one place tool titles and behaviour hints are set (decision-4), keyed by tool name.
 ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {

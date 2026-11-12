@@ -116,3 +116,81 @@ def test_the_startup_timeout_must_be_a_positive_number(
     monkeypatch.setenv("PAPERLESS_MCP_STARTUP_TIMEOUT", value)
 
     assert invalid_fields(ServerSettings) == [("startup_timeout",)]
+
+
+def test_only_the_core_toolset_is_on_by_default() -> None:
+    settings = ServerSettings.model_validate({})
+
+    assert (settings.toolsets, settings.read_only, settings.disabled_tools) == (
+        ("core",),
+        False,
+        (),
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("core", ("core",)),
+        ("core, pdf ,bulk", ("core", "pdf", "bulk")),
+        ("CORE,core", ("core",)),
+        ("all", ("all",)),
+        ('["core","pdf"]', ("core", "pdf")),
+    ],
+)
+def test_toolsets_are_a_comma_separated_list_or_all(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: tuple[str, ...]
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_TOOLSETS", value)
+
+    assert ServerSettings.model_validate({}).toolsets == expected
+
+
+@pytest.mark.parametrize("value", ["", " , ", "all,core"])
+def test_toolsets_must_name_something_and_all_stands_alone(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_TOOLSETS", value)
+
+    assert invalid_fields(ServerSettings) == [("toolsets",)]
+
+
+def test_disabled_tools_are_a_comma_separated_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_DISABLED_TOOLS", "get_task, list_taxonomy,get_task")
+
+    assert ServerSettings.model_validate({}).disabled_tools == ("get_task", "list_taxonomy")
+
+
+def test_an_empty_disabled_tools_list_disables_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_DISABLED_TOOLS", "")
+
+    assert ServerSettings.model_validate({}).disabled_tools == ()
+
+
+@pytest.mark.parametrize(("value", "expected"), [("true", True), ("1", True), ("false", False)])
+def test_read_only_is_a_boolean(
+    monkeypatch: pytest.MonkeyPatch, value: str, *, expected: bool
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_READ_ONLY", value)
+
+    assert ServerSettings.model_validate({}).read_only is expected
+
+
+def test_read_only_must_be_a_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_READ_ONLY", "maybe")
+
+    assert invalid_fields(ServerSettings) == [("read_only",)]
+
+
+@pytest.mark.parametrize("variable", ["PAPERLESS_MCP_TOOLSETS", "PAPERLESS_MCP_DISABLED_TOOLS"])
+def test_malformed_json_names_both_accepted_formats(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    monkeypatch.setenv(variable, '["core", ')
+
+    with pytest.raises(ValidationError) as caught:
+        _ = ServerSettings.model_validate({})
+
+    message = caught.value.errors()[0]["msg"]
+    assert "comma-separated" in message
+    assert "JSON array" in message
