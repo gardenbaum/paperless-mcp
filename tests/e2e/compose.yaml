@@ -21,6 +21,9 @@ services:
       PAPERLESS_ADMIN_USER: admin
       PAPERLESS_ADMIN_PASSWORD: e2e-admin-password
       PAPERLESS_OCR_LANGUAGE: eng
+      # Bind the web server to IPv4: its default `::` fails on hosts without IPv6 (some CI and
+      # sandbox runners), and the published port is IPv4 loopback anyway.
+      PAPERLESS_BIND_ADDR: 0.0.0.0
       PAPERLESS_TASK_WORKERS: "1"
       PAPERLESS_WEBSERVER_WORKERS: "1"
       USERMAP_UID: "1000"
