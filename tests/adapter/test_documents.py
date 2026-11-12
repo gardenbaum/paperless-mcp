@@ -1,11 +1,12 @@
 """PaperlessDocumentReader on responses recorded from the Paperless 3.4.2 E2E stack."""
 
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import httpx2
 import pytest
 
+from adapter.conftest import streaming
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
     DocumentFile,
@@ -706,3 +707,64 @@ async def test_a_thumbnail_larger_than_any_real_one_is_refused(make_client: Clie
 
     with pytest.raises(PaperlessMcpError, match="unexpected response"):
         _ = await PaperlessDocumentReader(make_client(server)).get_document_thumbnail(30)
+
+
+# --- Mutation-testing additions (PLMCP-21)
+
+
+async def test_the_not_found_errors_of_a_search_say_what_to_do_next(
+    make_client: ClientFactory,
+) -> None:
+    def past_the_end(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(404, json={"detail": "Invalid page."})
+
+    reader = PaperlessDocumentReader(make_client(past_the_end))
+    with pytest.raises(NotFound) as raised:
+        _ = await reader.search_documents(DocumentQuery(), page=4, page_size=25)
+
+    assert raised.value.message == "Page 4 is beyond the last page of the results."
+    assert raised.value.hint == "Search with page=1; count and next_page tell how far it goes."
+
+
+async def test_a_disabled_audit_log_is_explained_word_for_word(make_client: ClientFactory) -> None:
+    def answer(_request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            400, text="Audit log is disabled", headers={"Content-Type": "text/html"}
+        )
+
+    with pytest.raises(FeatureUnavailable) as raised:
+        _ = await PaperlessDocumentReader(make_client(answer)).list_document_history(1)
+
+    assert raised.value.message == "The Paperless audit log is disabled on this instance."
+    assert raised.value.hint == "Leave history out of include."
+
+
+async def test_a_note_whose_author_was_deleted_has_no_user() -> None:
+    # Defensive: the schema says an author is never null, but the adapter must not crash on one
+    # (a note whose user was deleted); the plain transport does not hold the response to the schema.
+    orphan = {"id": 2, "note": "left behind", "created": "2026-11-12T17:49:42Z", "user": None}
+    client, _ = streaming(lambda _: httpx2.Response(200, json=[orphan]))
+
+    [note] = await PaperlessDocumentReader(client).list_document_notes(1)
+
+    assert (note.id, note.user) == (2, None)
+
+
+async def test_a_download_without_headers_is_an_unnamed_binary_file() -> None:
+    client, _ = streaming(lambda _: httpx2.Response(200, content=PDF))
+
+    found = await PaperlessDocumentReader(client).get_document_file(1, "original", max_bytes=100)
+
+    assert (found.mime_type, found.filename) == ("application/octet-stream", None)
+
+
+async def test_the_owner_and_the_version_label_of_a_document_are_kept(
+    make_client: ClientFactory,
+) -> None:
+    [version] = cast("list[Json]", DETAIL["versions"])
+    detail = {**DETAIL, "owner": 2, "versions": [{**version, "version_label": "scan 2"}]}
+
+    record = await PaperlessDocumentReader(make_client(Resource(detail))).get_document(1)
+
+    assert record.owner == 2
+    assert [v.version_label for v in record.versions] == ["scan 2"]

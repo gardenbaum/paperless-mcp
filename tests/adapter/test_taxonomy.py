@@ -208,3 +208,43 @@ async def test_a_kind_the_user_may_not_view_is_permission_denied(
 
     with pytest.raises(PermissionDenied):
         _ = await PaperlessTaxonomyReader(make_client(forbidden)).list_taxonomy("user")
+
+
+# --- Mutation-testing additions (PLMCP-21)
+
+
+@pytest.mark.parametrize(
+    ("kind", "path", "base"),
+    [
+        ("correspondent", "/api/correspondents/", CORRESPONDENT),
+        ("document_type", "/api/document_types/", DOCUMENT_TYPE),
+        ("storage_path", "/api/storage_paths/", STORAGE_PATH),
+    ],
+)
+async def test_only_tags_have_a_colour_and_a_parent(
+    make_client: ClientFactory, kind: TaxonomyKind, path: str, base: Json
+) -> None:
+    row_with_tag_fields = {**base, "color": "#a6cee3", "parent": 5}
+    reader = PaperlessTaxonomyReader(make_client(OnePage(path, [row_with_tag_fields])))
+
+    [found] = await reader.list_taxonomy(kind)
+
+    assert (found.colour, found.parent) == (None, None)
+
+
+async def test_the_message_for_too_many_objects_spells_the_kind_with_spaces(
+    make_client: ClientFactory,
+) -> None:
+    rows = [{**DOCUMENT_TYPE, "id": n} for n in range(1, 11)]
+
+    def too_many(request: httpx2.Request) -> httpx2.Response:
+        size = int(request.url.params["page_size"])
+        body = {"count": MAX_ITEMS + 1, "next": None, "previous": None, "results": rows[:size]}
+        return httpx2.Response(200, json=body)
+
+    with pytest.raises(PaperlessMcpError) as raised:
+        _ = await PaperlessTaxonomyReader(make_client(too_many)).list_taxonomy("document_type")
+
+    assert raised.value.message == (
+        f"Paperless has more than {MAX_ITEMS} document types; this server reads up to that."
+    )

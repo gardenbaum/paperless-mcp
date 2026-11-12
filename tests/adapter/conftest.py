@@ -8,7 +8,7 @@ import pytest
 
 from adapter.schema_guard import Handler, SchemaGuardedTransport
 from paperless_mcp.paperless.auth import StaticTokenProvider
-from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
+from paperless_mcp.paperless.client import Jitter, PaperlessClient, RetryPolicy
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -22,7 +22,12 @@ class ClientFactory(Protocol):
     """Builds a PaperlessClient that sends to `handler` through the schema guard."""
 
     def __call__(
-        self, handler: Handler, *, retry: RetryPolicy | None = None, token: str = TOKEN
+        self,
+        handler: Handler,
+        *,
+        retry: RetryPolicy | None = None,
+        token: str = TOKEN,
+        jitter: Jitter | None = None,
     ) -> PaperlessClient: ...
 
 
@@ -67,7 +72,11 @@ async def make_client(sleep: RecordingSleep) -> AsyncIterator[ClientFactory]:
     clients: list[httpx2.AsyncClient] = []
 
     def factory(
-        handler: Handler, *, retry: RetryPolicy | None = None, token: str = TOKEN
+        handler: Handler,
+        *,
+        retry: RetryPolicy | None = None,
+        token: str = TOKEN,
+        jitter: Jitter | None = None,
     ) -> PaperlessClient:
         http = httpx2.AsyncClient(base_url=BASE_URL, transport=SchemaGuardedTransport(handler))
         clients.append(http)
@@ -78,8 +87,19 @@ async def make_client(sleep: RecordingSleep) -> AsyncIterator[ClientFactory]:
             upload_timeout=300.0,
             sleep=sleep,
             now=lambda: NOW,
+            **({} if jitter is None else {"jitter": jitter}),
         )
 
     yield factory
     for http in clients:
         await http.aclose()
+
+
+def streaming(handler: Handler) -> tuple[PaperlessClient, RecordingSleep]:
+    """A client on a plain MockTransport (the schema guard reads whole bodies)."""
+    sleep = RecordingSleep()
+    http = httpx2.AsyncClient(base_url=BASE_URL, transport=httpx2.MockTransport(handler))
+    client = PaperlessClient(
+        http, StaticTokenProvider(TOKEN), retry=RetryPolicy(), upload_timeout=1.0, sleep=sleep
+    )
+    return client, sleep

@@ -5,13 +5,16 @@ Subcommands (see the justfile recipes `e2e-latest`, `drift-check` and `mutation`
 * ``latest``: the highest stable release of a major version, from ``git ls-remote --tags`` output.
 * ``drift``: compare the vendored Paperless reference with a freshly generated one.
 * ``open-issue``: open (or refresh) the one GitHub issue that reports drift.
-* ``mutation-score``: render mutmut's CI/CD statistics as a Markdown job summary.
+* ``mutation-score``: render mutmut's CI/CD statistics as a Markdown job summary and fail below
+  the mutation-score gate.
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
+import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +24,15 @@ from pydantic import BaseModel, TypeAdapter
 
 # The justfile recipe `drift-check` tests for this exit code; keep the two in step.
 DRIFT_EXIT_CODE = 10
+# The justfile recipe `mutation` and the workflow rely on any non-zero code; this one tells a score
+# below the gate (3) and stale equivalents (4) from a job that could not run (1).
+GATE_FAILED_EXIT_CODE = 3
+# Entries of mutation-equivalents.toml that no longer match a surviving mutant of the same function
+# source: the weekly run stays red until the file is reviewed again.
+STALE_EXIT_CODE = 4
+# The mutation-score gate in percent (design 9.2): services/ and paperless/ must reach it. The one
+# place the threshold lives; changing it needs a decision (doc-2).
+MUTATION_GATE = 80.0
 MAX_LISTED = 50
 
 # Stable releases only: pre-releases (v3.5.0-beta.rc1) do not end after the patch number.
@@ -273,39 +285,162 @@ _COUNTS = (
 )
 
 
-_MUTATION_SCOPE_PARTS = (
-    "Scope: `services/` and `paperless/`, non-E2E tests. The score is report-only for now",
-    "(no failing threshold); PLMCP-21 turns it into a gate of 80 %.",
+_FORMULA = (
+    "Score = (killed + timeout) / (total - skipped - equivalent), as mutmut's badge, with the "
+    "survivors reviewed as equivalent left out. Suspicious, no-tests, segfault, interrupted and "
+    "not-checked (type check) mutants stay in the denominator, so they count against the score."
 )
-_MUTATION_SCOPE = " ".join(_MUTATION_SCOPE_PARTS)
+_RESULT = re.compile(r"^\s*(\S+): (\w[\w ]*?)\s*$")
 
 
-def mutation_score(stats: Mapping[str, int]) -> float | None:
-    """Percentage of killed and timed-out mutants among all but the skipped (as mutmut's badge)."""
-    tested = stats.get("total", 0) - stats.get("skipped", 0)
+@dataclass(frozen=True)
+class Verdict:
+    """The mutation score against the gate."""
+
+    stats: Mapping[str, int]
+    score: float | None
+    gate: float
+    equivalent: int
+    stale: tuple[str, ...]
+
+    @property
+    def passed(self) -> bool:
+        """At or above the gate; no score (nothing was tested) cannot pass."""
+        return self.score is not None and self.score >= self.gate
+
+
+def mutation_score(stats: Mapping[str, int], *, equivalent: int = 0) -> float | None:
+    """Percentage of killed and timed-out mutants among all but skipped and equivalent ones."""
+    tested = stats.get("total", 0) - stats.get("skipped", 0) - equivalent
     if tested <= 0:
         return None
     return (stats.get("killed", 0) + stats.get("timeout", 0)) / tested * 100
 
 
-def render_mutation_summary(stats: Mapping[str, int]) -> str:
-    """Markdown job summary for mutmut's ``mutmut-cicd-stats.json``."""
-    score = mutation_score(stats)
-    shown = "n/a" if score is None else f"{score:.1f} %"
-    rows = [f"| {label} | {stats.get(key, 0)} |" for label, key in _COUNTS]
-    return "\n".join(
-        [
-            f"## Mutation score: {shown}",
+def parse_results(text: str) -> dict[str, str]:
+    """The ``mutant: status`` lines of ``mutmut results``."""
+    return {m[1]: m[2] for line in text.splitlines() if (m := _RESULT.match(line))}
+
+
+@dataclass(frozen=True)
+class Equivalent:
+    """A reviewed equivalent mutant: why no test can kill it, and the function it is in."""
+
+    reason: str
+    function_hash: str
+
+
+class _Entry(BaseModel):
+    mutant: str
+    function_hash: str
+    reason: str
+
+
+class _Equivalents(BaseModel):
+    equivalent: list[_Entry] = []
+
+
+def function_of(mutant: str) -> str:
+    """The mangled function a mutant belongs to (its key in mutmut's ``function_hashes``)."""
+    return mutant.rsplit("__mutmut_", 1)[0]
+
+
+def parse_hashes(text: str) -> dict[str, str]:
+    """The source hash of every function mutmut mutated (``function_hashes`` in its stats file).
+
+    Raises:
+        JobError: Not mutmut's stats file.
+    """
+    try:
+        return TypeAdapter(dict[str, str]).validate_python(json.loads(text)["function_hashes"])
+    except (ValueError, KeyError, TypeError) as error:
+        message = "mutmut's stats file has no valid function_hashes"
+        raise JobError(message) from error
+
+
+def parse_equivalents(text: str) -> dict[str, Equivalent]:
+    """The reviewed equivalent mutants (``[[equivalent]]`` tables) with reason and function hash.
+
+    Raises:
+        JobError: Not valid TOML, an entry without a mutant, a function hash or a reason, or a
+            mutant listed twice.
+    """
+    try:
+        entries = _Equivalents.model_validate(tomllib.loads(text)).equivalent
+    except (tomllib.TOMLDecodeError, ValueError) as error:
+        message = f"mutation equivalents file is invalid: {error}"
+        raise JobError(message) from error
+    found: dict[str, Equivalent] = {}
+    for entry in entries:
+        if not entry.reason.strip() or not entry.function_hash.strip():
+            message = f"equivalent mutant {entry.mutant} needs a reason and a function_hash"
+            raise JobError(message)
+        if entry.mutant in found:
+            message = f"equivalent mutant {entry.mutant} is listed twice"
+            raise JobError(message)
+        found[entry.mutant] = Equivalent(entry.reason, entry.function_hash)
+    return found
+
+
+def judge(
+    stats: Mapping[str, int],
+    *,
+    results: Mapping[str, str] | None = None,
+    equivalents: Mapping[str, Equivalent] | None = None,
+    hashes: Mapping[str, str] | None = None,
+    gate: float = MUTATION_GATE,
+) -> Verdict:
+    """The score of ``stats`` against ``gate``.
+
+    A listed equivalent counts only while its mutant survives in ``results`` and its function
+    still has the source hash it was reviewed with (ids are positional: after an edit the same
+    id can name a different mutant). Any other entry is stale and not counted.
+    """
+    survivors = {name for name, status in (results or {}).items() if status == "survived"}
+    known = hashes or {}
+    confirmed = {
+        name
+        for name, entry in (equivalents or {}).items()
+        if name in survivors and known.get(function_of(name)) == entry.function_hash
+    }
+    stale = tuple(sorted(set(equivalents or {}) - confirmed))
+    score = mutation_score(stats, equivalent=len(confirmed))
+    return Verdict(stats=stats, score=score, gate=gate, equivalent=len(confirmed), stale=stale)
+
+
+def render_mutation_summary(verdict: Verdict) -> str:
+    """Markdown job summary of a ``Verdict`` (from mutmut's ``mutmut-cicd-stats.json``)."""
+    stats = verdict.stats
+    shown = "n/a" if verdict.score is None else f"{verdict.score:.1f} %"
+    outcome = "passed" if verdict.passed else "FAILED"
+    counts = {key: stats.get(key, 0) for _, key in _COUNTS}
+    counts["survived"] -= verdict.equivalent
+    rows = [f"| {label} | {counts[key]} |" for label, key in _COUNTS]
+    other = stats.get("total", 0) - sum(counts.values()) - verdict.equivalent
+    lines = [
+        f"## Mutation score: {shown} (gate {verdict.gate:g} %: {outcome})",
+        "",
+        "Scope: `services/` and `paperless/`, non-E2E tests. " + _FORMULA,
+        "",
+        "| Result | Mutants |",
+        "| --- | ---: |",
+        *rows,
+        f"| Survived, reviewed as equivalent (not scored) | {verdict.equivalent} |",
+        f"| Other (not checked, type check) | {other} |",
+        f"| **Total** | **{stats.get('total', 0)}** |",
+        "",
+    ]
+    if verdict.stale:
+        lines += [
+            "### Stale entries in mutation-equivalents.toml",
             "",
-            _MUTATION_SCOPE,
+            "Not a surviving mutant of the function as it was reviewed (killed, renumbered or",
+            "the function changed). Review them again, then delete or update the entries.",
             "",
-            "| Result | Mutants |",
-            "| --- | ---: |",
-            *rows,
-            f"| **Total** | **{stats.get('total', 0)}** |",
+            *(f"- `{name}`" for name in verdict.stale),
             "",
         ]
-    )
+    return "\n".join(lines)
 
 
 class _Args(argparse.Namespace):
@@ -323,6 +458,9 @@ class _Args(argparse.Namespace):
     label: str = ""
     body_file: Path = Path()
     stats: Path = Path()
+    results: Path | None = None
+    equivalents: Path | None = None
+    hashes: Path | None = None
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -347,11 +485,49 @@ def _parser() -> argparse.ArgumentParser:
     _ = close.add_argument("--comment", required=True)
     score = commands.add_parser("mutation-score", help="job summary from mutmut's CI/CD stats")
     _ = score.add_argument("stats", type=Path)
+    _ = score.add_argument("--results", type=Path, help="`mutmut results` output")
+    _ = score.add_argument("--equivalents", type=Path, help="reviewed equivalents (TOML)")
+    _ = score.add_argument("--hashes", type=Path, help="mutmut-stats.json (function hashes)")
     return parser
 
 
 def _say(out: TextIO, text: str) -> None:
     _ = out.write(text if text.endswith("\n") else text + "\n")
+
+
+def _read(path: Path) -> str:
+    try:
+        return path.read_text("utf-8")
+    except OSError as error:
+        message = f"cannot read {path}: run mutmut first (just mutation)"
+        raise JobError(message) from error
+
+
+def _mutation_score(args: _Args, out: TextIO, err: TextIO) -> int:
+    """Print the summary; the exit code is the gate's (3), then the stale entries' (4)."""
+    try:
+        stats = TypeAdapter(dict[str, int]).validate_json(_read(args.stats))
+    except ValueError as error:
+        message = f"{args.stats} is not mutmut's CI/CD stats: run mutmut first (just mutation)"
+        raise JobError(message) from error
+    results = parse_results(_read(args.results)) if args.results else {}
+    equivalents: dict[str, Equivalent] = {}
+    if args.equivalents:
+        if not args.hashes:
+            message = "--equivalents needs --hashes (mutmut-stats.json) to tell edited functions"
+            raise JobError(message)
+        equivalents = parse_equivalents(_read(args.equivalents))
+    hashes = parse_hashes(_read(args.hashes)) if args.hashes else {}
+    verdict = judge(stats, results=results, equivalents=equivalents, hashes=hashes)
+    _say(out, render_mutation_summary(verdict))
+    for name in verdict.stale:
+        _ = err.write(f"scheduled_jobs: stale equivalent {name}\n")
+    if not verdict.passed:
+        shown = "n/a" if verdict.score is None else f"{verdict.score:.1f} %"
+        reason = f"mutation score {shown} is below the gate of {verdict.gate:g} %"
+        _ = err.write(f"scheduled_jobs: {reason}\n")
+        return GATE_FAILED_EXIT_CODE
+    return STALE_EXIT_CODE if verdict.stale else 0
 
 
 def main(
@@ -383,9 +559,8 @@ def main(
             case "open-issue":
                 body = args.body_file.read_text(encoding="utf-8")
                 _say(out, open_issue(runner, title=args.title, label=args.label, body=body))
-            case _:
-                stats = TypeAdapter(dict[str, int]).validate_json(args.stats.read_text("utf-8"))
-                _say(out, render_mutation_summary(stats))
+            case _:  # mutation-score
+                return _mutation_score(args, out, err)
     except JobError as error:
         _ = err.write(f"scheduled_jobs: {error}\n")
         return 1

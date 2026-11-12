@@ -202,3 +202,46 @@ async def test_an_unknown_task_is_not_found_without_waiting() -> None:
         _ = await scenario.service.get("no-such-task", wait_seconds=20)
 
     assert scenario.clock.delays == []
+
+
+# --- Mutation-testing additions (PLMCP-21)
+
+
+class TickingClock:
+    """A clock that moves on with every reading, like real time."""
+
+    def __init__(self) -> None:
+        self.now: float = 1000.0
+
+    def __call__(self) -> float:
+        self.now += 0.5
+        return self.now
+
+    async def sleep(self, delay: float) -> None:
+        self.now += delay
+
+
+async def test_no_wait_reports_no_time_waited_however_long_the_read_took() -> None:
+    scenario = Scenario(after=None)
+    ticking = TickingClock()
+    service = TaskService(_Reader(scenario), sleep=ticking.sleep, clock=ticking)
+
+    report = await service.get(ID)
+
+    assert (report.wait, report.waited_seconds) == ("not_requested", 0.0)
+
+
+async def test_a_wait_of_one_second_is_a_wait() -> None:
+    scenario = Scenario(after=None)
+
+    report = await scenario.service.get(ID, wait_seconds=1)
+
+    assert (report.wait, report.waited_seconds) == ("timed_out", 1.0)
+
+
+async def test_the_finish_time_of_a_task_is_reported() -> None:
+    scenario = Scenario(after=0)
+
+    report = await scenario.service.get(ID, wait_seconds=5)
+
+    assert report.finished == datetime(2026, 11, 12, tzinfo=UTC)

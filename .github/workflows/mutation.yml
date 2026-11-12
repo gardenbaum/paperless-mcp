@@ -1,7 +1,8 @@
 name: Mutation testing
 
-# Weekly and on demand (design 9.2, 9.5). Report-only: the score goes to the job summary and an
-# artifact, nothing fails below a threshold until PLMCP-21 makes 80 % a gate.
+# Weekly and on demand (design 9.2, 9.5). The score goes to the job summary and an artifact; the
+# run fails below the 80 % gate (MUTATION_GATE in scripts/scheduled_jobs.py, PLMCP-21) and while
+# an entry of mutation-equivalents.toml is stale, after the summary is published.
 on:
   schedule:
     - cron: "23 3 * * 0"
@@ -37,11 +38,14 @@ jobs:
       - name: Sync dependencies
         run: uv sync --locked
 
-      - name: Run mutmut on services/ and paperless/
+      - name: Run mutmut on services/ and paperless/ (fails below the gate)
         run: just mutation
 
+      # Runs when the gate failed, too: that is when the numbers matter most.
       - name: Publish the mutation score
-        run: cat mutants/summary.md >> "$GITHUB_STEP_SUMMARY"
+        if: always()
+        run: |
+          if [ -f mutants/summary.md ]; then cat mutants/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}

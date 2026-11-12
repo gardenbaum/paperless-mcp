@@ -11,7 +11,14 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from adapter.conftest import BASE_URL, NOW, TOKEN, ClientFactory, RecordingSleep, tag
+from adapter.conftest import (
+    NOW,
+    TOKEN,
+    ClientFactory,
+    RecordingSleep,
+    streaming,
+    tag,
+)
 from paperless_mcp.domain.errors import (
     AuthenticationFailed,
     Conflict,
@@ -27,7 +34,6 @@ from paperless_mcp.domain.errors import (
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import (
     Method,
-    PaperlessClient,
     RetryPolicy,
     retry_after,
     utc_now,
@@ -36,7 +42,6 @@ from paperless_mcp.paperless.client import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from adapter.schema_guard import Handler
 
 pytestmark = pytest.mark.anyio
 
@@ -430,16 +435,6 @@ class Chunks(httpx2.AsyncByteStream):
         self.closed = True
 
 
-def streaming(handler: Handler) -> tuple[PaperlessClient, RecordingSleep]:
-    """A client on a plain MockTransport (the schema guard reads whole bodies)."""
-    sleep = RecordingSleep()
-    http = httpx2.AsyncClient(base_url=BASE_URL, transport=httpx2.MockTransport(handler))
-    client = PaperlessClient(
-        http, StaticTokenProvider(TOKEN), retry=RetryPolicy(), upload_timeout=1.0, sleep=sleep
-    )
-    return client, sleep
-
-
 async def test_a_download_within_the_limit_is_returned_whole_with_its_headers() -> None:
     body = Chunks(b"abc", b"def")
     client, _ = streaming(
@@ -548,3 +543,150 @@ async def test_an_error_response_whose_body_fails_is_still_the_transport_error()
         _ = await client.download("/api/documents/1/download/", max_bytes=100)
 
     assert body.closed
+
+
+# --- Mutation-testing additions (PLMCP-21)
+
+CLIENT_LOGGER = "paperless_mcp.paperless.client"
+
+
+async def test_form_data_and_files_reach_the_wire_through_request(
+    make_client: ClientFactory,
+) -> None:
+    script = Script(httpx2.Response(200, json="0b7c3a8e-task-id"))
+
+    _ = await make_client(script).request(
+        "POST",
+        "/api/documents/post_document/",
+        data={"title": "Invoice"},
+        files={"document": ("invoice.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+
+    body = script.requests[0].content
+    assert b'name="title"' in body
+    assert b"Invoice" in body
+    assert b'filename="invoice.pdf"' in body
+
+
+async def test_form_data_and_files_reach_the_wire_through_call_and_a_plain_post_has_none() -> None:
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(200, json=tag(1, "x"))
+
+    client, _ = streaming(handler)
+
+    _ = await client.call(
+        "POST",
+        "/api/documents/post_document/",
+        TagStub,
+        data={"title": "Invoice"},
+        files={"document": ("invoice.pdf", b"%PDF-1.4", "application/pdf")},
+    )
+    _ = await client.call("POST", "/api/tags/", TagStub, json={"name": "x"})
+
+    assert b'name="title"' in seen[0].content
+    assert b'filename="invoice.pdf"' in seen[0].content
+    assert seen[1].content == b'{"name":"x"}'
+    assert "multipart" not in seen[1].headers["Content-Type"]
+
+
+async def test_request_reads_the_whole_body_before_returning() -> None:
+    body = Chunks(b'{"ok": ', b"true}")
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=body))
+
+    response = await client.request("GET", "/api/tags/")
+
+    assert response.content == b'{"ok": true}'
+
+
+async def test_a_retry_after_equal_to_the_budget_is_still_waited_for(
+    make_client: ClientFactory, sleep: RecordingSleep
+) -> None:
+    script = Script(answer(503, **{"Retry-After": "10"}), answer(200, TAG_PAGE))
+
+    _ = await make_client(script, retry=RetryPolicy(attempts=2, budget=10.0)).request(
+        "GET", "/api/tags/"
+    )
+
+    assert sleep.delays == [10.0]
+
+
+async def test_a_second_wait_that_exactly_uses_up_the_budget_is_allowed(
+    make_client: ClientFactory, sleep: RecordingSleep
+) -> None:
+    script = Script(
+        answer(503, **{"Retry-After": "4"}),
+        answer(503, **{"Retry-After": "6"}),
+        answer(200, TAG_PAGE),
+    )
+
+    _ = await make_client(script, retry=RetryPolicy(attempts=3, budget=10.0)).request(
+        "GET", "/api/tags/"
+    )
+
+    assert sleep.delays == [4.0, 6.0]
+
+
+async def test_backoff_doubles_with_every_attempt_below_a_jittered_cap(
+    make_client: ClientFactory, sleep: RecordingSleep
+) -> None:
+    script = Script(answer(503), answer(503), answer(503), answer(200, TAG_PAGE))
+    policy = RetryPolicy(attempts=4, budget=1000.0, backoff=2.0)
+
+    # The injected jitter takes the cap itself: caps of 2, 4 and 8 seconds.
+    _ = await make_client(script, retry=policy, jitter=lambda cap: cap).request("GET", "/api/tags/")
+
+    assert sleep.delays == [2.0, 4.0, 8.0]
+
+
+async def test_the_default_jitter_is_a_random_wait_between_zero_and_the_cap(
+    make_client: ClientFactory, sleep: RecordingSleep
+) -> None:
+    script = Script(*(answer(503) for _ in range(12)), answer(200, TAG_PAGE))
+    policy = RetryPolicy(attempts=13, budget=1e9, backoff=1.0)
+
+    _ = await make_client(script, retry=policy).request("GET", "/api/tags/")
+
+    assert all(0.0 <= delay <= 2.0**n for n, delay in enumerate(sleep.delays))
+    assert len(set(sleep.delays)) > 1
+
+
+async def test_retries_and_attempts_are_logged_with_method_path_and_delay(
+    make_client: ClientFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=CLIENT_LOGGER)
+    script = Script(answer(503, **{"Retry-After": "2"}), answer(200, TAG_PAGE))
+
+    _ = await make_client(script).request("GET", "/api/tags/")
+
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.DEBUG, "GET /api/tags/ -> 503 (attempt 1)"),
+        (logging.WARNING, "Paperless answered 503 to GET /api/tags/; retrying in 2.0s"),
+        (logging.DEBUG, "GET /api/tags/ -> 200 (attempt 2)"),
+    ]
+
+
+async def test_a_failed_request_is_logged_with_the_error_type_only(
+    make_client: ClientFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=CLIENT_LOGGER)
+
+    with pytest.raises(UpstreamTimeout):
+        _ = await make_client(raising(httpx2.ReadTimeout)).request("GET", "/api/tags/")
+
+    assert [r.getMessage() for r in caplog.records] == ["GET /api/tags/ failed: ReadTimeout"]
+
+
+async def test_a_download_that_breaks_midway_is_logged_with_path_and_error_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=CLIENT_LOGGER)
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=Failing(httpx2.ReadError, b"a")))
+
+    with pytest.raises(UpstreamUnreachable):
+        _ = await client.download("/api/documents/1/download/", max_bytes=100)
+
+    messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert messages == ["GET /api/documents/1/download/ failed: ReadError"]

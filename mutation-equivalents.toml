@@ -1,0 +1,214 @@
+# Mutants that survive mutmut but cannot be killed by any test, reviewed one by one (PLMCP-21).
+#
+# `scripts/scheduled_jobs.py mutation-score` leaves a listed mutant out of the score only while it
+# still shows up as "survived" in `mutmut results` and its function still has the source hash
+# (`function_hash`, from mutants/mutmut-stats.json) it was reviewed with, because ids are positional.
+# An entry that does not match (killed, renumbered, function edited) is stale: it is not counted and
+# the run exits 4 until the entry is reviewed again (new hash if still equivalent, else removed). Every entry needs a reason
+# that says why no test can tell the mutant from the original. Prefer a test that kills the mutant;
+# add an entry here only after `mutmut show <mutant>` proved the change has no effect.
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁ_ids__mutmut_22"
+function_hash = "2dc98e42ddf9"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁ_ids__mutmut_25"
+function_hash = "2dc98e42ddf9"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁ_ids__mutmut_26"
+function_hash = "2dc98e42ddf9"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁget__mutmut_12"
+function_hash = "0b0fb73a898e"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁget__mutmut_15"
+function_hash = "0b0fb73a898e"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁget__mutmut_16"
+function_hash = "0b0fb73a898e"
+reason = "zip() always gets two sequences of equal length here (one result per input), so strict= can never raise."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁ_linked_titles__mutmut_6"
+function_hash = "b9bafd7fbd51"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁ_linked_titles__mutmut_10"
+function_hash = "b9bafd7fbd51"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.xǁDocumentServiceǁ_linked_titles__mutmut_11"
+function_hash = "b9bafd7fbd51"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.x__fields__mutmut_15"
+function_hash = "b09d5523b3c9"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.x__fields__mutmut_19"
+function_hash = "b09d5523b3c9"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.documents.x__fields__mutmut_20"
+function_hash = "b09d5523b3c9"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__messages__mutmut_3"
+function_hash = "e19025773131"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__messages__mutmut_7"
+function_hash = "e19025773131"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__messages__mutmut_8"
+function_hash = "e19025773131"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__messages__mutmut_17"
+function_hash = "e19025773131"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__messages__mutmut_21"
+function_hash = "e19025773131"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__messages__mutmut_22"
+function_hash = "e19025773131"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__details__mutmut_2"
+function_hash = "e79e18bb0b87"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__details__mutmut_6"
+function_hash = "e79e18bb0b87"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.errors.x__details__mutmut_7"
+function_hash = "e79e18bb0b87"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentReaderǁ_file__mutmut_22"
+function_hash = "5b94a1da0677"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated spelling of Content-Type or Content-Disposition reads the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentReaderǁ_file__mutmut_23"
+function_hash = "5b94a1da0677"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated spelling of Content-Type or Content-Disposition reads the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentReaderǁ_file__mutmut_29"
+function_hash = "5b94a1da0677"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated spelling of Content-Type or Content-Disposition reads the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentReaderǁ_file__mutmut_30"
+function_hash = "5b94a1da0677"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated spelling of Content-Type or Content-Disposition reads the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁrequest__mutmut_16"
+function_hash = "fc5e72e6430c"
+reason = "stream=None is falsy like stream=False, and httpx2 treats both as 'read the body now'."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁdownload__mutmut_9"
+function_hash = "2dcbf2a82a73"
+reason = "httpx2.Request upper-cases the method, so 'get' sends the same request as 'GET'."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_build__mutmut_19"
+function_hash = "76861ea63095"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: 'Accept' and 'accept' set the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_build__mutmut_20"
+function_hash = "76861ea63095"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: 'Accept' and 'accept' set the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁget__mutmut_10"
+function_hash = "3064b7b18af2"
+reason = "httpx2.Request upper-cases the method, so 'get' sends the same request as 'GET'."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_retry_delay__mutmut_16"
+function_hash = "8de6e3debb89"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: 'Retry-After' and 'retry-after' read the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_retry_delay__mutmut_17"
+function_hash = "8de6e3debb89"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: 'Retry-After' and 'retry-after' read the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_retry_delay__mutmut_18"
+function_hash = "8de6e3debb89"
+reason = "Retry-After defaulting to 'XXXX' is as unparsable as the empty default, so both fall back to the jittered backoff."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.pagination.x_collect__mutmut_16"
+function_hash = "22d810c9e441"
+reason = "count is assigned in the first loop iteration (cap >= 1 guarantees one), so its initial value is never read."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.pagination.x_collect__mutmut_17"
+function_hash = "22d810c9e441"
+reason = "count is assigned in the first loop iteration (cap >= 1 guarantees one), so its initial value is never read."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.instance.xǁPaperlessInstanceReaderǁget_overview__mutmut_7"
+function_hash = "15f1a08b9427"
+reason = "httpx2.Request upper-cases the method, so 'get' sends the same request as 'GET'."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.instance.xǁPaperlessInstanceReaderǁget_overview__mutmut_17"
+function_hash = "15f1a08b9427"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated key reads the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.instance.xǁPaperlessInstanceReaderǁget_overview__mutmut_18"
+function_hash = "15f1a08b9427"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated key reads the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.instance.xǁPaperlessInstanceReaderǁget_overview__mutmut_22"
+function_hash = "15f1a08b9427"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated key reads the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.instance.xǁPaperlessInstanceReaderǁget_overview__mutmut_23"
+function_hash = "15f1a08b9427"
+reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated key reads the same header."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.disposition.x__plain__mutmut_4"
+function_hash = "c6e884e7a0b8"
+reason = "A value of one quote character gives the empty name either way: value[1:-1] and removeprefix of the quote are both empty."

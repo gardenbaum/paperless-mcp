@@ -1,5 +1,6 @@
 """TaxonomyResolver: name-or-id resolution (decision-5) and its per-credential cache."""
 
+import re
 import unicodedata
 from typing import TYPE_CHECKING
 
@@ -290,3 +291,54 @@ async def test_a_denied_kind_is_not_asked_again_within_the_ttl(
     assert await resolver.items("user")
 
     assert reader.loads == [("reader", "user"), ("reader", "user"), ("admin", "user")]
+
+
+# --- Mutation-testing additions (PLMCP-21)
+
+
+def test_a_negative_number_is_an_id_that_does_not_exist() -> None:
+    with pytest.raises(NotFound) as raised:
+        _ = pick("tag", items("a"), -5)
+
+    assert raised.value.message == "No tag has id -5."
+    assert raised.value.hint == "Call list_taxonomy(kind='tag') to see the ids."
+
+
+def test_an_unknown_id_says_so_and_names_the_object_called_that() -> None:
+    with pytest.raises(NotFound) as raised:
+        _ = pick("document_type", items("a", "7"), "7")
+
+    assert raised.value.message == "No document type has id 7."
+    assert raised.value.hint == "A document type is named '7'; pass its id 2 instead."
+
+
+def test_at_most_five_names_are_suggested_joined_by_commas() -> None:
+    pool = items(*(f"Invoice{letter}" for letter in "ABCDEFG"))
+
+    with pytest.raises(NotFound) as raised:
+        _ = pick("tag", pool, "Invoice")
+
+    pattern = r"Did you mean ('Invoice[A-G]', ){4}'Invoice[A-G]'\? Or call list_taxonomy.*names\."
+    assert re.fullmatch(pattern, raised.value.hint or "")
+
+
+class Denying:
+    """A TaxonomyReader whose permission error carries a hint."""
+
+    async def list_taxonomy(self, kind: TaxonomyKind) -> list[TaxonomyItem]:
+        message = f"No {kind} for you."
+        raise PermissionDenied(message, hint="Ask an administrator.")
+
+
+@pytest.mark.anyio
+async def test_a_denial_keeps_its_message_and_hint_when_served_from_the_cache(
+    credentials: Credentials, clock: Clock
+) -> None:
+    resolver = TaxonomyResolver(Denying(), credentials, ttl=TTL, clock=clock)
+    seen: list[tuple[str, str | None]] = []
+    for _ in range(2):
+        with pytest.raises(PermissionDenied) as raised:
+            _ = await resolver.items("user")
+        seen.append((raised.value.message, raised.value.hint))
+
+    assert seen == [("No user for you.", "Ask an administrator.")] * 2

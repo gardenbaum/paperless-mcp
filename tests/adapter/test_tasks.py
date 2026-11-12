@@ -155,3 +155,17 @@ async def test_a_blank_id_is_not_found_without_asking_paperless(
         _ = await PaperlessTaskReader(make_client(server)).get_task(blank)
 
     assert server.sent == []
+
+
+# --- Mutation-testing additions (PLMCP-21)
+
+
+@pytest.mark.parametrize("asked", ["nope", "  "])
+async def test_the_not_found_error_names_the_id_asked_for_and_says_where_ids_come_from(
+    make_client: ClientFactory, asked: str
+) -> None:
+    with pytest.raises(NotFound) as raised:
+        _ = await PaperlessTaskReader(make_client(Tasks())).get_task(asked)
+
+    assert raised.value.message == f"No task {asked} exists that this user may see."
+    assert raised.value.hint == "Use the task id an upload returned; it is a UUID."

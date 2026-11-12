@@ -56,7 +56,7 @@ just --list                   # all recipes
 Scheduled quality jobs (weekly GitHub workflows, each also a recipe and a manual dispatch):
 
 ```sh
-just mutation                 # mutmut on services/ and paperless/ (report-only), a few minutes
+just mutation                 # mutmut on services/ and paperless/, fails below the 80 % gate, a few minutes
 just e2e-latest               # E2E suite against the latest stable paperless-ngx 3.x image
 just drift-check              # vendored Paperless schema and docs vs. the latest 3.x release
 ```
