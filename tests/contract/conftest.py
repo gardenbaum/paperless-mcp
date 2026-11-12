@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, cast
 
 import httpx2
 import pytest
-from fakes.accounts import ADMIN, READER
+from fakes.accounts import ADMIN, BLIND, READER
 from fakes.paperless import FakePaperless, seeded
 
 from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
@@ -67,10 +67,14 @@ def live_ports(client: PaperlessClient) -> Ports:
 
 @dataclass(frozen=True)
 class Backend:
-    """One Paperless, seen through the seeded superuser and the seeded restricted user."""
+    """One Paperless, seen through the seeded superuser, restricted user and blind user.
+
+    The blind user may sign in but holds no model permission (tests/fakes/accounts.py).
+    """
 
     admin: Ports
     reader: Ports
+    blind: Ports
 
 
 def fake_backend() -> Backend:
@@ -78,6 +82,7 @@ def fake_backend() -> Backend:
     return Backend(
         admin=fake_ports(FakePaperless(state, user=ADMIN[0])),
         reader=fake_ports(FakePaperless(state, user=READER[0])),
+        blind=fake_ports(FakePaperless(state, user=BLIND[0])),
     )
 
 
@@ -96,4 +101,8 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
                 PaperlessClient(http, credentials, retry=RetryPolicy(), upload_timeout=60.0)
             )
 
-        yield Backend(admin=ports(stack.admin_token), reader=ports(stack.reader_token))
+        yield Backend(
+            admin=ports(stack.admin_token),
+            reader=ports(stack.reader_token),
+            blind=ports(stack.blind_token),
+        )

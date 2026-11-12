@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from e2e.helpers import BASE_URL, Stack, client, seed, token_for, wait_ready
-from fakes.accounts import READER
+from fakes.accounts import BLIND, READER
 
 from paperless_mcp.observability import QUIET_LOGGERS
 
@@ -42,6 +42,7 @@ def stack() -> Iterator[Stack]:
     with client(admin_token) as admin:
         seeded = seed(admin)
         reader_token = token_for(*READER)
+        blind_token = token_for(*BLIND)
         with client(reader_token) as reader:
             yield Stack(
                 base_url=BASE_URL,
@@ -50,4 +51,5 @@ def stack() -> Iterator[Stack]:
                 seeded=seeded,
                 admin_token=admin_token,
                 reader_token=reader_token,
+                blind_token=blind_token,
             )

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from paperless_mcp.domain.documents import DocumentQuery
-from paperless_mcp.domain.errors import NotFound, Validation
+from paperless_mcp.domain.errors import NotFound, PermissionDenied, Validation
 
 if TYPE_CHECKING:
     from contract.conftest import Backend, Ports
@@ -198,3 +198,23 @@ async def test_ordering_by_title(backend: Backend) -> None:
 
     assert [hit.title for hit in ascending] == sorted(hit.title for hit in ascending)
     assert [hit.id for hit in descending] == [hit.id for hit in reversed(ascending)]
+
+
+@pytest.mark.contract(CONTRACT)
+async def test_a_user_without_view_document_is_denied(backend: Backend) -> None:
+    with pytest.raises(PermissionDenied):
+        _ = await search(backend.blind, SEEDED)
+
+
+@pytest.mark.contract(CONTRACT)
+async def test_ordering_by_archive_serial_number_is_numeric(backend: Backend) -> None:
+    ports = backend.admin
+    by_asn = [PUBLIC, PRIVATE]  # ASN 2, then ASN 10: a string sort would put 10 first
+
+    ascending = await search(ports, SEEDED.model_copy(update={"ordering": "archive_serial_number"}))
+    descending = await search(
+        ports, SEEDED.model_copy(update={"ordering": "-archive_serial_number"})
+    )
+
+    assert [hit.title for hit in ascending] == by_asn
+    assert [hit.title for hit in descending] == by_asn[::-1]

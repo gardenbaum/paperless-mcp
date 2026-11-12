@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-11T20:22:00Z'
+updated_date: '2026-11-12T16:56:00Z'
 labels: []
 milestone: m-1
 dependencies:
@@ -59,6 +59,8 @@ Deliberate changes: (1) TaxonomyItem.select_options is now (id, label) pairs ins
 Test order: contract tests were red first (missing module); adapter, service and tool tests were written before their code except the adapter tests, which followed the adapter draft.
 
 Review (independent agent, live checks): fixed (1) owner by id no longer needs the user list (view_user); a username without it is PermissionDenied with a hint to pass the id; (2) live 403 for an unknown or hidden more_like_id (text/html) is now NotFound naming the id, mirrored by the fake, with a contract test; new schema-guard deviation for GET /api/documents/ 403; (3) a page beyond the last is NotFound with a hint; (4) note_highlights is used when only a note matches; (5) the fake orders by modified and archive_serial_number; (6) the fake ignores AND/OR/NOT in full text. Accepted, not fixed: the fake's custom_field_query rejects gt on monetary and documentlink contains (Paperless accepts them); more-like results depend on the live search index, so test_more_like_finds_other_documents may flake on a freshly seeded stack; tags in both tags_any and tags_none are not rejected (the result is just empty).
+
+Review fixes: FakePaperless.search_documents now enforces the global view_document permission (PermissionDenied, as live 403); new seeded account e2e-blind (view_uisettings only) on fake and live, Backend.blind / Stack.blind_token. _ordered sorts by native value, so archive_serial_number is numeric; seeded ASNs 2 (public) and 10 (private). Contract tests added for both, red on the fake first, green on fake and live 3.4.2. Seed change: the private document's text now repeats '2026' because Paperless's more-like-this keeps only the 12 best-scoring terms and the new ASN pushed the one shared term out (live more_like returned nothing; the baseline seed was already flaky there). No gate, snapshot or decision weakened. Note: tests/e2e compose binds IPv6 and fails in IPv6-less sandboxes (PAPERLESS_BIND_ADDR=0.0.0.0 override used locally, not committed).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

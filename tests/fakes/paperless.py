@@ -25,7 +25,16 @@ from typing import TYPE_CHECKING, Concatenate, cast
 
 from pydantic import JsonValue
 
-from fakes.accounts import ADMIN, READER, READER_PERMISSIONS
+from fakes.accounts import (
+    ADMIN,
+    BLIND,
+    BLIND_PERMISSIONS,
+    PRIVATE_ASN,
+    PRIVATE_CONTENT,
+    PUBLIC_ASN,
+    READER,
+    READER_PERMISSIONS,
+)
 from fakes.custom_field_query import compile_query
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
@@ -46,6 +55,8 @@ from paperless_mcp.paperless.documents import beyond_last_page, unseen_document
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+
+    from _typeshed import SupportsRichComparison
 
     from paperless_mcp.domain.taxonomy import TaxonomyKind
 
@@ -217,6 +228,7 @@ def seeded() -> FakeState:
     """A fresh state with the objects and users of the E2E seed."""
     admin = FakeUser(id=2, username=ADMIN[0], is_superuser=True, is_staff=True)
     reader = FakeUser(id=3, username=READER[0], permissions=frozenset(READER_PERMISSIONS))
+    blind = FakeUser(id=4, username=BLIND[0], permissions=frozenset(BLIND_PERMISSIONS))
     fields = [
         FakeCustomField(id=number, name=f"e2e-{data_type}", data_type=data_type)
         for number, data_type in enumerate(CUSTOM_FIELD_TYPES, start=1)
@@ -232,7 +244,7 @@ def seeded() -> FakeState:
         )
     )
     return FakeState(
-        users=[admin, reader],
+        users=[admin, reader, blind],
         tags=[
             FakeTag(id=1, name="e2e-finance"),
             FakeTag(id=2, name="e2e-invoices", parent=1),
@@ -254,13 +266,15 @@ def seeded() -> FakeState:
                 correspondent=1,
                 document_type=1,
                 storage_path=1,
+                archive_serial_number=PUBLIC_ASN,
                 custom_fields={f.id: SEED_VALUES[f.data_type] for f in fields},
             ),
             FakeDocument(
                 id=2,
                 title="e2e-private-note",
-                content="E2E private admin only note",
+                content=PRIVATE_CONTENT,
                 owner=admin.id,
+                archive_serial_number=PRIVATE_ASN,
                 tags=[3],
             ),
         ],
@@ -435,7 +449,11 @@ class FakePaperless:
         Raises:
             Validation: Both `query` and `more_like`, or a bad `custom_field_query`.
             NotFound: `page` is beyond the last page.
+            PermissionDenied: The user lacks the global `view_document` permission (HTTP 403).
         """
+        if not self.user.has("view_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
         if query.query is not None and query.more_like is not None:
             message = (
                 "Paperless rejected the request: "
@@ -526,9 +544,10 @@ def _ordered(
         )
     name = ordering.removeprefix("-")
 
-    def key(document: FakeDocument) -> tuple[bool, str, int]:
-        value = cast("object", getattr(document, name))
-        return (value is None, str(value), document.id)
+    def key(document: FakeDocument) -> tuple[bool, SupportsRichComparison, int]:
+        # The native value, so numbers sort as numbers (ASN 2 before 10); None sorts last.
+        value = cast("SupportsRichComparison | None", getattr(document, name))
+        return (value is None, 0 if value is None else value, document.id)
 
     return sorted(documents, key=key, reverse=ordering.startswith("-"))
 
