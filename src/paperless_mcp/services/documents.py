@@ -4,25 +4,34 @@ Rows name what they refer to and render custom field values readably, without th
 kind the user may not list leaves its names null instead of failing the search.
 """
 
+import asyncio
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from paperless_mcp.domain.documents import (
+    ContentSlice,
+    DocumentDetail,
+    DocumentHistory,
     DocumentSearchResult,
     DocumentSummary,
     FieldValue,
     Ref,
+    SuggestionNames,
 )
-from paperless_mcp.domain.errors import PermissionDenied, Validation
+from paperless_mcp.domain.errors import FeatureUnavailable, PermissionDenied, Validation
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
     from datetime import date
 
     from pydantic import JsonValue
 
     from paperless_mcp.domain.documents import (
+        CustomFieldValue,
         DocumentHit,
         DocumentQuery,
+        DocumentRecord,
+        Include,
         NameFilters,
         NameOrId,
     )
@@ -38,6 +47,14 @@ REFERRED: tuple[TaxonomyKind, ...] = (
     "storage_path",
     "custom_field",
 )
+# Characters of the OCR text per slice unless the caller asks otherwise (design 7).
+DEFAULT_SLICE = 20_000
+# Newest audit log entries returned with include history; the rest is counted.
+HISTORY_LIMIT = 50
+# Most distinct linked documents whose titles a document read looks up.
+LINK_LIMIT = 100
+# The order sections are fetched and reported in.
+SECTIONS: tuple[Include, ...] = ("notes", "history", "metadata", "versions", "suggestions")
 MONETARY = re.compile(r"([A-Z]{3})(-?\d+(?:\.\d+)?)")
 
 
@@ -139,31 +156,178 @@ class DocumentService:
     def _summary(
         self, hit: DocumentHit, known: dict[TaxonomyKind, dict[int, TaxonomyItem]]
     ) -> DocumentSummary:
-        def ref(kind: TaxonomyKind, number: int) -> Ref:
-            item = known[kind].get(number)
-            return Ref(id=number, name=item.name if item else None)
-
-        def maybe(kind: TaxonomyKind, number: int | None) -> Ref | None:
-            return None if number is None else ref(kind, number)
-
-        fields = known["custom_field"]
         return DocumentSummary(
             id=hit.id,
             title=hit.title,
             created=hit.created,
             added=hit.added,
-            correspondent=maybe("correspondent", hit.correspondent),
-            document_type=maybe("document_type", hit.document_type),
-            storage_path=maybe("storage_path", hit.storage_path),
-            tags=tuple(ref("tag", tag) for tag in hit.tags),
-            custom_fields=tuple(
-                FieldValue(
-                    id=value.field,
-                    name=item.name if (item := fields.get(value.field)) else None,
-                    value=_readable(value.value, item),
-                )
-                for value in hit.custom_fields
-            ),
+            correspondent=_maybe(known, "correspondent", hit.correspondent),
+            document_type=_maybe(known, "document_type", hit.document_type),
+            storage_path=_maybe(known, "storage_path", hit.storage_path),
+            tags=tuple(_ref(known, "tag", tag) for tag in hit.tags),
+            custom_fields=_fields(known, hit.custom_fields),
             highlights=hit.highlights,
-            web_url=f"{self._web_url}/documents/{hit.id}/details",
+            web_url=self._link(hit.id),
         )
+
+    def _link(self, document_id: int) -> str:
+        return f"{self._web_url}/documents/{document_id}/details"
+
+    async def get(self, document_id: int, include: Collection[Include] = ()) -> DocumentDetail:
+        """One document with names, readable custom fields and the sections in ``include``.
+
+        A section the user may not read in Paperless (notes and the audit log need their own
+        permissions, and the audit log can be switched off) is named in ``unavailable``
+        instead of failing the call.
+
+        Raises:
+            NotFound: No such document, or the user may not see it.
+            PermissionDenied: The user may not view documents at all.
+        """
+        record = await self._reader.get_document(document_id)
+        kinds: tuple[TaxonomyKind, ...] = (*REFERRED, "user")
+        loaded = await asyncio.gather(*(self._known(kind) for kind in kinds))
+        known = dict(zip(kinds, loaded, strict=True))
+        titles = await self._linked_titles(record, known)
+        wanted: list[Include] = [section for section in SECTIONS if section in include]
+        sections: dict[str, object] = {}
+        unavailable: list[Include] = []
+        for section in wanted:
+            try:
+                sections.update(await self._section(section, record, known))
+            except PermissionDenied, FeatureUnavailable:
+                unavailable.append(section)
+        return DocumentDetail(
+            id=record.id,
+            title=record.title,
+            created=record.created,
+            added=record.added,
+            modified=record.modified,
+            archive_serial_number=record.archive_serial_number,
+            owner=_maybe(known, "user", record.owner),
+            correspondent=_maybe(known, "correspondent", record.correspondent),
+            document_type=_maybe(known, "document_type", record.document_type),
+            storage_path=_maybe(known, "storage_path", record.storage_path),
+            tags=tuple(_ref(known, "tag", tag) for tag in record.tags),
+            custom_fields=_fields(known, record.custom_fields, titles),
+            original_file_name=record.original_file_name,
+            mime_type=record.mime_type,
+            page_count=record.page_count,
+            notes_count=record.notes_count,
+            web_url=self._link(record.id),
+        ).model_copy(update={**sections, "unavailable": tuple(unavailable)})
+
+    async def _linked_titles(
+        self, record: DocumentRecord, known: dict[TaxonomyKind, dict[int, TaxonomyItem]]
+    ) -> dict[int, str]:
+        """Titles of the documents the document-link fields of ``record`` point to."""
+        linked = [
+            number
+            for value in record.custom_fields
+            if _is_link(known, value)
+            for number in cast("list[int]", value.value)
+        ]
+        return await self._reader.get_document_titles(list(dict.fromkeys(linked))[:LINK_LIMIT])
+
+    async def _section(
+        self,
+        section: Include,
+        record: DocumentRecord,
+        known: dict[TaxonomyKind, dict[int, TaxonomyItem]],
+    ) -> dict[str, object]:
+        """The fields of the detail one ``include`` section fills."""
+        reader, number = self._reader, record.id
+        match section:
+            case "notes":
+                return {"notes": await reader.list_document_notes(number)}
+            case "history":
+                entries = await reader.list_document_history(number)
+                shown = entries[:HISTORY_LIMIT]
+                return {
+                    "history": DocumentHistory(
+                        total=len(entries), truncated=len(shown) < len(entries), entries=shown
+                    )
+                }
+            case "metadata":
+                return {"file_metadata": await reader.get_document_metadata(number)}
+            case "versions":
+                return {"versions": record.versions}
+            case "suggestions":
+                found = await reader.get_document_suggestions(number)
+                return {
+                    "suggestions": SuggestionNames(
+                        correspondents=tuple(
+                            _ref(known, "correspondent", n) for n in found.correspondents
+                        ),
+                        tags=tuple(_ref(known, "tag", n) for n in found.tags),
+                        document_types=tuple(
+                            _ref(known, "document_type", n) for n in found.document_types
+                        ),
+                        storage_paths=tuple(
+                            _ref(known, "storage_path", n) for n in found.storage_paths
+                        ),
+                        dates=found.dates,
+                    )
+                }
+
+    async def content(self, document_id: int, *, offset: int, max_chars: int) -> ContentSlice:
+        """``max_chars`` characters of the OCR text from ``offset``.
+
+        An offset at or past the end gives an empty slice, so callers can always read
+        ``total_chars``. ``next_offset`` is null once the slice reaches the end.
+
+        Raises:
+            NotFound: No such document, or the user may not see it.
+        """
+        text = await self._reader.get_document_content(document_id)
+        end = offset + max_chars
+        return ContentSlice(
+            document_id=document_id,
+            offset=offset,
+            content=text[offset:end],
+            total_chars=len(text),
+            next_offset=end if end < len(text) else None,
+            web_url=self._link(document_id),
+        )
+
+
+def _ref(
+    known: dict[TaxonomyKind, dict[int, TaxonomyItem]], kind: TaxonomyKind, number: int
+) -> Ref:
+    item = known[kind].get(number)
+    return Ref(id=number, name=item.name if item else None)
+
+
+def _maybe(
+    known: dict[TaxonomyKind, dict[int, TaxonomyItem]], kind: TaxonomyKind, number: int | None
+) -> Ref | None:
+    return None if number is None else _ref(known, kind, number)
+
+
+def _is_link(known: dict[TaxonomyKind, dict[int, TaxonomyItem]], value: CustomFieldValue) -> bool:
+    """Whether ``value`` is a document-link field holding a list of document ids."""
+    item = known["custom_field"].get(value.field)
+    return bool(item and item.data_type == "documentlink" and isinstance(value.value, list))
+
+
+def _fields(
+    known: dict[TaxonomyKind, dict[int, TaxonomyItem]],
+    values: tuple[CustomFieldValue, ...],
+    titles: dict[int, str] | None = None,
+) -> tuple[FieldValue, ...]:
+    """Custom field values, readable; with ``titles`` document links name their documents."""
+    fields = known["custom_field"]
+
+    def render(value: CustomFieldValue) -> JsonValue:
+        if titles is not None and _is_link(known, value):
+            return [{"id": n, "name": titles.get(n)} for n in cast("list[int]", value.value)]
+        return _readable(value.value, fields.get(value.field))
+
+    return tuple(
+        FieldValue(
+            id=value.field,
+            name=item.name if (item := fields.get(value.field)) else None,
+            value=render(value),
+        )
+        for value in values
+    )

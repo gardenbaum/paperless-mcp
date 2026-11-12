@@ -8,18 +8,36 @@ import json
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, RootModel
 
-from paperless_mcp.domain.documents import CustomFieldValue, DocumentHit, DocumentPage
-from paperless_mcp.domain.errors import NotFound, PermissionDenied
+from paperless_mcp.domain.documents import (
+    CustomFieldValue,
+    DocumentHit,
+    DocumentPage,
+    DocumentRecord,
+    DocumentVersion,
+    FileMetadata,
+    HistoryEntry,
+    Note,
+    Suggestions,
+)
+from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
 from paperless_mcp.paperless.pagination import Page
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from paperless_mcp.domain.documents import DocumentQuery
     from paperless_mcp.paperless.client import PaperlessClient, Params
 
 PATH = "/api/documents/"
 FIELDS = "id,title,created,added,correspondent,document_type,storage_path,tags,custom_fields"
+# A single document without its content (the OCR text can be a million characters).
+DETAIL_FIELDS = (
+    "id,title,created,added,modified,archive_serial_number,owner,correspondent,document_type,"
+    "storage_path,tags,custom_fields,original_file_name,mime_type,page_count,"
+    "notes,versions"
+)
 
 
 class _Value(BaseModel):
@@ -43,6 +61,89 @@ class _Row(BaseModel):
     tags: list[int]
     custom_fields: list[_Value]
     search_hit: _Hit | None = Field(default=None, alias="__search_hit__")
+
+
+class _Version(BaseModel):
+    id: int
+    added: datetime
+    version_label: str | None = None
+    is_root: bool
+
+
+class _User(BaseModel):
+    username: str
+
+
+class _Note(BaseModel):
+    id: int
+    note: str
+    created: datetime | None = None
+    user: _User | None = None
+
+
+class _Detail(BaseModel):
+    id: int
+    title: str
+    created: date
+    added: datetime
+    modified: datetime
+    archive_serial_number: int | None
+    owner: int | None
+    correspondent: int | None
+    document_type: int | None
+    storage_path: int | None
+    tags: list[int]
+    custom_fields: list[_Value]
+    original_file_name: str | None
+    mime_type: str
+    page_count: int | None
+    notes: list[_Note]
+    versions: list[_Version]
+
+
+class _Title(BaseModel):
+    id: int
+    title: str
+
+
+class _Content(BaseModel):
+    content: str
+
+
+class _HistoryRow(BaseModel):
+    id: int
+    timestamp: datetime
+    action: str
+    changes: dict[str, JsonValue]
+    actor: _User | None = None
+
+
+class _Metadata(BaseModel):
+    original_filename: str
+    original_mime_type: str
+    original_size: int
+    original_checksum: str
+    media_filename: str
+    has_archive_version: bool
+    archive_size: int | None = None
+    archive_checksum: str | None = None
+    archive_media_filename: str | None = None
+
+
+class _Suggestions(BaseModel):
+    correspondents: list[int]
+    tags: list[int]
+    document_types: list[int]
+    storage_paths: list[int]
+    dates: list[str]
+
+
+class _Notes(RootModel[list[_Note]]):
+    pass
+
+
+class _History(RootModel[list[_HistoryRow]]):
+    pass
 
 
 def _csv(ids: tuple[int, ...]) -> str | None:
@@ -89,6 +190,23 @@ def beyond_last_page(page: int) -> NotFound:
     """The error for a page past the end of the results."""
     message = f"Page {page} is beyond the last page of the results."
     return NotFound(message, hint="Search with page=1; count and next_page tell how far it goes.")
+
+
+def _note(row: _Note) -> Note:
+    return Note(
+        id=row.id, note=row.note, created=row.created, user=row.user.username if row.user else None
+    )
+
+
+def _entry(row: _HistoryRow) -> HistoryEntry:
+    """An audit log entry; ``content`` holds the OCR text, which never leaves the adapter."""
+    return HistoryEntry(
+        id=row.id,
+        timestamp=row.timestamp,
+        action=row.action,
+        actor=row.actor.username if row.actor else None,
+        changes={name: change for name, change in row.changes.items() if name != "content"},
+    )
 
 
 def _hit(row: _Row) -> DocumentHit:
@@ -141,3 +259,96 @@ class PaperlessDocumentReader:
             next_page=found.next_page,
             hits=tuple(_hit(row) for row in found.results),
         )
+
+    async def get_document(self, document_id: int) -> DocumentRecord:
+        """See ``DocumentReader.get_document``.
+
+        Paperless answers 404 to a document that does not exist and to one the user may not see.
+        """
+        row = await self._one(document_id, "", _Detail, {"fields": DETAIL_FIELDS})
+        return DocumentRecord(
+            id=row.id,
+            title=row.title,
+            created=row.created,
+            added=row.added,
+            modified=row.modified,
+            archive_serial_number=row.archive_serial_number,
+            owner=row.owner,
+            correspondent=row.correspondent,
+            document_type=row.document_type,
+            storage_path=row.storage_path,
+            tags=tuple(row.tags),
+            custom_fields=tuple(
+                CustomFieldValue(field=v.field, value=v.value) for v in row.custom_fields
+            ),
+            original_file_name=row.original_file_name,
+            mime_type=row.mime_type,
+            page_count=row.page_count,
+            notes_count=len(row.notes),
+            versions=tuple(
+                DocumentVersion(
+                    id=v.id, added=v.added, version_label=v.version_label, is_root=v.is_root
+                )
+                for v in row.versions
+            ),
+        )
+
+    async def get_document_content(self, document_id: int) -> str:
+        """See ``DocumentReader.get_document_content``."""
+        return (await self._one(document_id, "", _Content, {"fields": "content"})).content
+
+    async def list_document_notes(self, document_id: int) -> tuple[Note, ...]:
+        """See ``DocumentReader.list_document_notes``."""
+        found = await self._one(document_id, "notes/", _Notes)
+        return tuple(_note(row) for row in found.root)
+
+    async def list_document_history(self, document_id: int) -> tuple[HistoryEntry, ...]:
+        """See ``DocumentReader.list_document_history``.
+
+        The endpoint answers a bare list although the schema says paginated, and 400 "Audit log
+        is disabled" when the instance runs with PAPERLESS_AUDIT_LOG_ENABLED=false (the only
+        400 this endpoint has).
+        """
+        try:
+            found = await self._one(document_id, "history/", _History)
+        except Validation:
+            message = "The Paperless audit log is disabled on this instance."
+            raise FeatureUnavailable(message, hint="Leave history out of include.") from None
+        return tuple(_entry(row) for row in found.root)
+
+    async def get_document_metadata(self, document_id: int) -> FileMetadata:
+        """See ``DocumentReader.get_document_metadata``."""
+        row = await self._one(document_id, "metadata/", _Metadata)
+        return FileMetadata.model_validate(row.model_dump())
+
+    async def get_document_suggestions(self, document_id: int) -> Suggestions:
+        """See ``DocumentReader.get_document_suggestions``."""
+        row = await self._one(document_id, "suggestions/", _Suggestions)
+        return Suggestions(
+            correspondents=tuple(row.correspondents),
+            tags=tuple(row.tags),
+            document_types=tuple(row.document_types),
+            storage_paths=tuple(row.storage_paths),
+            dates=tuple(row.dates),
+        )
+
+    async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
+        """See ``DocumentReader.get_document_titles``; ``id__in`` leaves hidden ids out."""
+        wanted = sorted(set(document_ids))
+        if not wanted:
+            return {}
+        sent: Params = {
+            "id__in": ",".join(map(str, wanted)),
+            "fields": "id,title",
+            "page_size": len(wanted),
+        }
+        found = await self._client.get(PATH, Page[_Title], params=sent)
+        return {row.id: row.title for row in found.results}
+
+    async def _one[M: BaseModel](
+        self, document_id: int, tail: str, model: type[M], params: Params | None = None
+    ) -> M:
+        try:
+            return await self._client.get(f"{PATH}{document_id}/{tail}", model, params=params)
+        except NotFound:
+            raise unseen_document(document_id) from None

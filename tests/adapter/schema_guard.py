@@ -42,6 +42,14 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
         "`fields=` drops properties the schema requires, and custom field values can be booleans "
         "and id lists, which the value's oneOf omits (PLMCP-10)"
     ),
+    ("GET", "/api/documents/{id}/", 200): (
+        "`fields=` drops properties the schema requires, and custom field values can be booleans "
+        "and id lists, which the value's oneOf omits (PLMCP-11)"
+    ),
+    ("GET", "/api/documents/{id}/history/", 200): (
+        "3.4.2 answers a bare list, not the paginated envelope of the schema, and a null actor "
+        "for system changes (PLMCP-11)"
+    ),
     ("GET", "/api/documents/", 403): (
         "an unknown or hidden more_like_id is answered with HttpResponseForbidden, text/html "
         "(PLMCP-10)"

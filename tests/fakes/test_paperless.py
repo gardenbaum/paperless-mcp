@@ -17,6 +17,7 @@ from fakes.paperless import (
     seeded,
     write,
 )
+from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-8")]
 
@@ -137,3 +138,38 @@ async def test_the_seed_matches_the_e2e_seed_manifest() -> None:
         "document_types": (reader.document_types, admin.document_types - reader.document_types),
         "storage_paths": (reader.storage_paths, admin.storage_paths - reader.storage_paths),
     } == SEEDED_OBJECTS
+
+
+LOG_VIEWER = FakeUser(
+    id=10, username="log-viewer", permissions=frozenset({"view_document", "view_logentry"})
+)
+
+
+async def test_the_history_needs_ownership_not_just_an_object_level_view_grant() -> None:
+    # Live 3.4.2: a user with view_document + view_logentry and a view grant on a document
+    # owned by someone else reads the document but gets 403 on /history/ (views.py `history`).
+    state = state_with(LOG_VIEWER)
+    state.documents[1].viewers.add(LOG_VIEWER.id)
+    fake = FakePaperless(state, user=LOG_VIEWER.username)
+
+    assert (await fake.get_document(2)).id == 2
+    with pytest.raises(PermissionDenied):
+        _ = await fake.list_document_history(2)
+    assert await fake.list_document_history(1)
+
+
+async def test_a_missing_document_is_not_found_even_without_the_log_permission() -> None:
+    state = state_with(FakeUser(id=11, username="plain", permissions=frozenset({"view_document"})))
+
+    with pytest.raises(NotFound):
+        _ = await FakePaperless(state, user="plain").list_document_history(999_999)
+
+
+async def test_a_disabled_audit_log_is_a_feature_error_before_anything_else() -> None:
+    state = seeded()
+    state.audit_log_enabled = False
+
+    with pytest.raises(FeatureUnavailable) as raised:
+        _ = await FakePaperless(state, user="admin").list_document_history(999_999)
+
+    assert raised.value.hint

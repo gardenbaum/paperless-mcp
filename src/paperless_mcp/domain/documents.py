@@ -9,6 +9,7 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
+type Include = Literal["notes", "history", "metadata", "versions", "suggestions"]
 type Ordering = Literal[
     "created",
     "-created",
@@ -155,3 +156,170 @@ class DocumentSearchResult(BaseModel):
     page: int
     next_page: Annotated[int | None, Field(description="The next page, null on the last one.")]
     documents: tuple[DocumentSummary, ...]
+
+
+class Note(BaseModel):
+    """A note on a document."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    id: int
+    note: str
+    created: datetime | None
+    user: Annotated[str | None, Field(description="Username of the author, if known.")]
+
+
+class DocumentVersion(BaseModel):
+    """One file version of a document."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    id: int
+    added: datetime
+    version_label: str | None
+    is_root: Annotated[bool, Field(description="True for the original upload.")]
+
+
+class HistoryEntry(BaseModel):
+    """One change of a document in its audit log; the OCR text is never part of it."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    id: int
+    timestamp: datetime
+    action: str
+    actor: Annotated[str | None, Field(description="Username; null for system changes.")]
+    changes: Annotated[
+        dict[str, JsonValue],
+        Field(description="Changed attribute to its old and new value, or to the m2m change."),
+    ]
+
+
+class FileMetadata(BaseModel):
+    """What Paperless knows about the files of a document."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    original_filename: str
+    original_mime_type: str
+    original_size: Annotated[int, Field(description="Bytes.")]
+    original_checksum: str
+    media_filename: str
+    has_archive_version: bool
+    archive_size: Annotated[int | None, Field(description="Bytes; null without archive version.")]
+    archive_checksum: str | None
+    archive_media_filename: str | None
+
+
+class Suggestions(BaseModel):
+    """The classifier's suggestions for a document, as ids (dates as Paperless sends them)."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    correspondents: tuple[int, ...]
+    tags: tuple[int, ...]
+    document_types: tuple[int, ...]
+    storage_paths: tuple[int, ...]
+    dates: tuple[str, ...]
+
+
+class DocumentRecord(BaseModel):
+    """One document with ids where Paperless has them; no content, notes only counted."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    id: int
+    title: str
+    created: date
+    added: datetime
+    modified: datetime
+    archive_serial_number: int | None
+    owner: int | None
+    correspondent: int | None
+    document_type: int | None
+    storage_path: int | None
+    tags: tuple[int, ...]
+    custom_fields: tuple[CustomFieldValue, ...]
+    original_file_name: str | None
+    mime_type: str
+    page_count: int | None
+    notes_count: int
+    versions: tuple[DocumentVersion, ...]
+
+
+class SuggestionNames(BaseModel):
+    """Suggestions with names; a name is null if the user may not see that object."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    correspondents: tuple[Ref, ...]
+    tags: tuple[Ref, ...]
+    document_types: tuple[Ref, ...]
+    storage_paths: tuple[Ref, ...]
+    dates: tuple[str, ...]
+
+
+class DocumentHistory(BaseModel):
+    """The newest changes of a document, newest first."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    total: Annotated[int, Field(description="How many changes the document has in total.")]
+    truncated: Annotated[bool, Field(description="Older changes exist beyond the entries.")]
+    entries: tuple[HistoryEntry, ...]
+
+
+class DocumentDetail(BaseModel):
+    """A document with names, readable custom fields and what ``include`` asked for."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    id: int
+    title: str
+    created: date
+    added: datetime
+    modified: datetime
+    archive_serial_number: int | None
+    owner: Annotated[Ref | None, Field(description="Null: no owner, visible to every user.")]
+    correspondent: Ref | None
+    document_type: Ref | None
+    storage_path: Ref | None
+    tags: tuple[Ref, ...]
+    custom_fields: tuple[FieldValue, ...]
+    original_file_name: str | None
+    mime_type: str
+    page_count: int | None
+    notes_count: int
+    web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+    notes: Annotated[tuple[Note, ...] | None, Field(description="Only with include notes.")] = None
+    history: Annotated[DocumentHistory | None, Field(description="Only with include history.")] = (
+        None
+    )
+    file_metadata: Annotated[
+        FileMetadata | None, Field(description="Only with include metadata.")
+    ] = None
+    versions: Annotated[
+        tuple[DocumentVersion, ...] | None, Field(description="Only with include versions.")
+    ] = None
+    suggestions: Annotated[
+        SuggestionNames | None, Field(description="Only with include suggestions.")
+    ] = None
+    unavailable: Annotated[
+        tuple[Include, ...],
+        Field(description="Included sections the user may not read in Paperless."),
+    ] = ()
+
+
+class ContentSlice(BaseModel):
+    """A slice of the OCR text of a document."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    document_id: int
+    offset: Annotated[int, Field(description="Where the slice starts, in characters.")]
+    content: str
+    total_chars: Annotated[int, Field(description="Length of the whole text.")]
+    next_offset: Annotated[
+        int | None, Field(description="Offset of the next slice, null at the end of the text.")
+    ]
+    web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]

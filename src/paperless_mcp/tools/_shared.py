@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, cast
 
-from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ResourceError, ToolError
 from mcp.types import ToolAnnotations
 
 from paperless_mcp.domain.errors import PaperlessMcpError
@@ -45,6 +45,18 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
     ),
     "search_documents": ToolAnnotations(
         title="Search documents",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "get_document": ToolAnnotations(
+        title="Get document",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "get_document_content": ToolAnnotations(
+        title="Get document content",
         read_only_hint=True,
         idempotent_hint=True,
         open_world_hint=False,
@@ -102,5 +114,32 @@ def boundary[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R
             logger.debug("%s failed", name, exc_info=True)
             message = f"Internal error in {name}; the server log has details."
             raise ToolError(message) from None
+
+    return guarded
+
+
+def resource_boundary[**P, R](resource: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    """The error boundary of a resource, like ``boundary`` for tools.
+
+    A domain error becomes a ``ResourceError`` with its client-safe message and hint, logged at
+    INFO. Any other exception is a bug: the client gets a generic message and the log gets only
+    the exception type at ERROR (the traceback at DEBUG).
+    """
+    name = resource.__name__
+
+    @functools.wraps(resource)
+    async def guarded(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return await resource(*args, **kwargs)
+        except ResourceError:
+            raise
+        except PaperlessMcpError as error:
+            logger.info("%s: %s", name, error.describe())
+            raise ResourceError(error.describe()) from None
+        except Exception as error:
+            logger.error("%s failed: %s", name, type(error).__name__)  # noqa: TRY400 -- no traceback above DEBUG
+            logger.debug("%s failed", name, exc_info=True)
+            message = f"Internal error in {name}; the server log has details."
+            raise ResourceError(message) from None
 
     return guarded

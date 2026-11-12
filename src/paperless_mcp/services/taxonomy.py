@@ -11,7 +11,7 @@ import time
 import unicodedata
 from typing import TYPE_CHECKING
 
-from paperless_mcp.domain.errors import Ambiguous, NotFound
+from paperless_mcp.domain.errors import Ambiguous, NotFound, PermissionDenied
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -100,7 +100,9 @@ class TaxonomyResolver:
         self._clock: Callable[[], float] = clock
         # shortcut: entries are replaced, never evicted; bound the cache once many credentials
         # exist (PLMCP-37).
-        self._cache: dict[tuple[str, TaxonomyKind], tuple[float, list[TaxonomyItem]]] = {}
+        self._cache: dict[
+            tuple[str, TaxonomyKind], tuple[float, list[TaxonomyItem] | PermissionDenied]
+        ] = {}
 
     async def items(
         self, kind: TaxonomyKind, name_contains: str | None = None
@@ -116,9 +118,14 @@ class TaxonomyResolver:
         now = self._clock()
         cached = self._cache.get(key)
         if cached is None or now - cached[0] >= self._ttl:
-            cached = (now, await self._reader.list_taxonomy(kind))
+            try:
+                cached = (now, await self._reader.list_taxonomy(kind))
+            except PermissionDenied as error:
+                cached = (now, error)  # a denial holds as long as rows do: do not ask again
             self._cache[key] = cached
         rows = cached[1]
+        if isinstance(rows, PermissionDenied):
+            raise PermissionDenied(rows.message, hint=rows.hint)
         if name_contains is None:
             return list(rows)
         needle = fold(name_contains)

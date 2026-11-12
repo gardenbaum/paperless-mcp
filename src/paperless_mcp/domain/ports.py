@@ -12,7 +12,17 @@ read-only tests of tools, find writes by that name alone.
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from paperless_mcp.domain.documents import DocumentPage, DocumentQuery
+    from collections.abc import Collection
+
+    from paperless_mcp.domain.documents import (
+        DocumentPage,
+        DocumentQuery,
+        DocumentRecord,
+        FileMetadata,
+        HistoryEntry,
+        Note,
+        Suggestions,
+    )
     from paperless_mcp.domain.instance import InstanceOverview
     from paperless_mcp.domain.tasks import TaskStatus
     from paperless_mcp.domain.taxonomy import TaxonomyItem, TaxonomyKind
@@ -55,6 +65,69 @@ class DocumentReader(Protocol):
         Raises:
             Validation: Paperless rejected the query (e.g. a bad ``custom_field_query``).
             NotFound: ``page`` is beyond the last page.
+        """
+        ...
+
+    async def get_document(self, document_id: int) -> DocumentRecord:
+        """One document without its content.
+
+        Raises:
+            NotFound: No such document, or the user may not see it.
+            PermissionDenied: The user lacks the global ``view_document`` permission.
+        """
+        ...
+
+    async def get_document_content(self, document_id: int) -> str:
+        """The whole OCR text of a document; services slice it.
+
+        Raises:
+            NotFound: No such document, or the user may not see it.
+            PermissionDenied: The user lacks the global ``view_document`` permission.
+        """
+        ...
+
+    async def list_document_notes(self, document_id: int) -> tuple[Note, ...]:
+        """The notes of a document, in Paperless order.
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user may not view notes (a separate permission in Paperless).
+        """
+        ...
+
+    async def list_document_history(self, document_id: int) -> tuple[HistoryEntry, ...]:
+        """The audit log of a document, newest first, without the OCR text.
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user may not view the audit log (it needs ``view_logentry``
+                and a document that is unowned or the user's own; a view grant is not enough).
+            FeatureUnavailable: The instance has the audit log switched off.
+        """
+        ...
+
+    async def get_document_metadata(self, document_id: int) -> FileMetadata:
+        """The file facts of a document.
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user may not see the document.
+        """
+        ...
+
+    async def get_document_suggestions(self, document_id: int) -> Suggestions:
+        """The classifier's suggestions (ids) for a document.
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user may not see the document.
+        """
+        ...
+
+    async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
+        """The titles of those documents the user may see; missing and hidden ones are left out.
+
+        One request for at most as many documents as ``document_ids`` holds distinct ids.
         """
         ...
 
