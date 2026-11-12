@@ -1,11 +1,11 @@
 ---
 id: PLMCP-11
 title: get_document and sliced get_document_content
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T18:15:00Z'
+updated_date: '2026-11-12T18:19:00Z'
 labels: []
 milestone: m-1
 dependencies:
@@ -24,20 +24,20 @@ Reading one document must be cheap in tokens and readable for an LLM: names inst
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 get_document returns names, custom fields of every data type rendered readably (select label, monetary with currency, date, document link, boolean, url, integer, float, string, long text), notes count and web_url
-- [ ] #2 include adds notes, history (without OCR text), file metadata, versions and classic suggestions on request
-- [ ] #3 get_document_content returns a slice by offset and max_chars (default 20000) with total_chars and next_offset; an offset past the end returns an empty slice with total_chars
-- [ ] #4 A document with more than 1000000 characters is served slice by slice
-- [ ] #5 paperless://documents/{id} and paperless://documents/{id}/content resources exist
-- [ ] #6 Missing documents and documents the credential cannot see return client-safe NotFound errors with a hint
-- [ ] #7 FakePaperless and the contract suite cover every new port method
+- [x] #1 get_document returns names, custom fields of every data type rendered readably (select label, monetary with currency, date, document link, boolean, url, integer, float, string, long text), notes count and web_url
+- [x] #2 include adds notes, history (without OCR text), file metadata, versions and classic suggestions on request
+- [x] #3 get_document_content returns a slice by offset and max_chars (default 20000) with total_chars and next_offset; an offset past the end returns an empty slice with total_chars
+- [x] #4 A document with more than 1000000 characters is served slice by slice
+- [x] #5 paperless://documents/{id} and paperless://documents/{id}/content resources exist
+- [x] #6 Missing documents and documents the credential cannot see return client-safe NotFound errors with a hint
+- [x] #7 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -69,4 +69,14 @@ Minor 5: get_document_content fetches the whole text from Paperless for every sl
 Minor 6: referred kinds are fetched with asyncio.gather; TaxonomyResolver now caches a PermissionDenied per credential and kind for the TTL, so a denied /api/users/ is not repeated (test added).
 Minor 7: tools/_shared.resource_boundary (domain errors -> ResourceError with message+hint logged at INFO; other exceptions masked, type-only ERROR log) used by the taxonomy and both document resources; tests for both paths. Minor 8: hint asserted in resource test. Minor 9: try right after ensure_document. Minor 10: docstrings fixed (get_document_content raises PermissionDenied; history raises FeatureUnavailable and states the ownership rule; notes order claim). Minor 11 and 12: recorded as known gaps per the coordinator.
 Snapshot regenerated deliberately: 5 insertions / 4 deletions in test_surface.ambr (max_chars limit 20000 text/schema, get_document description for document links and audit log).
+
+Rebased onto origin/main (33a232a, PLMCP-13): conflicts in domain/ports.py, tools/_shared.py, tools/core.py and tests/fakes/paperless.py resolved by keeping both sides (TaskReader and the task tool stay; the new DocumentReader methods stay in DocumentReader). Surface snapshot re-generated with --snapshot-update on the rebased branch: no diff against the merged one. After the rebase just check green (452 passed, 99.93%, diff-cover 100%) and flock just e2e green (82 passed).
+
+Known gaps (review minors 11, 12): suggestions are tested live only for the empty case (no trained classifier on the E2E stack); the id-to-name mapping is covered through the fake. A monetary value stored without a currency code passes through unchanged, so 'monetary with currency' holds when Paperless stores a code; history 'changes' keep raw ids for tags and correspondents.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+get_document (core) returns one document with names instead of ids (correspondent, type, storage path, tags, owner when the user may list users), custom fields rendered by data type (select label, monetary with currency, dates, booleans, urls, numbers, text, document links as id and title), notes count, versions and web_url; include adds notes, history (newest 50, OCR text dropped), file metadata (scalar facts), versions and classic suggestions; a section the credential may not read or that is disabled (audit log off) is listed in unavailable instead of failing. get_document_content returns a slice by offset and max_chars (default and max 20000, as the design's token economy) with total_chars and next_offset; an offset past the end is an empty slice; a document over 1 000 000 characters is served slice by slice (E2E). Resources paperless://documents/{id} and .../content{?offset,max_chars} behind a new resource error boundary (also used by the taxonomy resource). Missing and hidden documents are NotFound with a hint. Seven new DocumentReader methods with adapter, FakePaperless (history ownership rule verified live) and contract tests on fake and live 3.4.2; new FeatureUnavailable error; TaxonomyResolver caches a PermissionDenied per credential and kind. Verified: just check 452 passed, 99.93 %; just e2e 82 passed. Independent review: 4 Important and 8 Minor fixed, 2 recorded as known gaps. Deliberate: two schema-guard deviations (GET /api/documents/{id}/ with fields=, /history/ bare list), surface snapshot (two tools, two resource templates), a seeded note. DoD #1 left unchecked: the E2E file and the content-resource range test were green on their first run. DoD #4 is checked by the merge itself.
+<!-- SECTION:FINAL_SUMMARY:END -->
