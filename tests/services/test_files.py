@@ -241,3 +241,35 @@ async def test_an_empty_thumbnail_is_an_error() -> None:
 
     with pytest.raises(PaperlessMcpError, match="empty thumbnail"):
         _ = await files(Empty(seeded(), user=ADMIN[0])).thumbnail(1)
+
+
+# --- Mutation-testing additions (PLMCP-21)
+
+
+async def test_an_original_over_the_limit_keeps_its_own_name_and_type() -> None:
+    fake = fake_with(original=b"x" * (LIMIT + 1), file_name="photo.png", mime_type="image/png")
+
+    delivery = await files(fake).download(7, "original")
+
+    assert (delivery.report.filename, delivery.report.mime_type) == ("photo.png", "image/png")
+
+
+async def test_the_note_on_a_withheld_file_tells_the_administrator_the_setting_to_raise() -> None:
+    fake = fake_with(original=b"x" * (LIMIT + 1))
+
+    delivery = await files(fake).download(7, "original")
+
+    assert delivery.report.note is not None
+    assert delivery.report.note.endswith(
+        "or ask the administrator to raise PAPERLESS_MCP_MAX_DOWNLOAD_BYTES."
+    )
+
+
+async def test_an_archive_over_the_limit_is_a_pdf_whatever_the_original_was() -> None:
+    fake = fake_with(
+        original=b"x", archive=b"x" * (LIMIT + 1), file_name="photo.png", mime_type="image/png"
+    )
+
+    delivery = await files(fake).download(7, "archive")
+
+    assert (delivery.report.filename, delivery.report.mime_type) == ("photo.pdf", "application/pdf")

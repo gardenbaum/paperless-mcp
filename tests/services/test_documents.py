@@ -17,7 +17,7 @@ from paperless_mcp.domain.documents import (
 )
 from paperless_mcp.domain.errors import Ambiguous, NotFound, PermissionDenied, Validation
 from paperless_mcp.paperless.auth import StaticTokenProvider
-from paperless_mcp.services.documents import DEFAULT_SLICE, DocumentService
+from paperless_mcp.services.documents import DEFAULT_SLICE, DocumentService, document_link
 from paperless_mcp.services.taxonomy import TaxonomyResolver
 
 pytestmark = pytest.mark.anyio
@@ -443,3 +443,142 @@ async def test_only_the_first_hundred_linked_documents_are_titled() -> None:
     assert isinstance(links, list)
     assert len(links) == 151
     assert links[0] == {"id": 2, "name": "e2e-private-note"}
+
+
+# --- Mutation-testing additions (PLMCP-21): wording, boundaries and filters are pinned down.
+
+
+@pytest.mark.parametrize(
+    ("web_url", "expected"),
+    [
+        ("https://p.example/", "https://p.example/documents/7/details"),
+        ("https://p.example///", "https://p.example/documents/7/details"),
+        ("https://p.example/X/", "https://p.example/X/documents/7/details"),  # only slashes go
+    ],
+)
+def test_a_document_link_drops_only_trailing_slashes_of_the_base(
+    web_url: str, expected: str
+) -> None:
+    assert document_link(web_url, 7) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        DocumentQuery(created_to=date(2026, 1, 1)),
+        DocumentQuery(created_from=date(2026, 1, 1)),
+        DocumentQuery(created_from=date(2026, 1, 1), created_to=date(2026, 1, 1)),
+        DocumentQuery(added_from=date(2026, 1, 1), added_to=date(2026, 1, 1)),
+    ],
+)
+async def test_open_and_single_day_date_ranges_are_not_contradictions(query: DocumentQuery) -> None:
+    found = await admin().search(NameFilters(), query, page=1, page_size=25)
+
+    assert found.page == 1
+
+
+async def test_contradictions_are_explained_word_for_word() -> None:
+    both = DocumentQuery(query="x", more_like=1)
+    with pytest.raises(Validation) as raised:
+        _ = await admin().search(NameFilters(), both, page=1, page_size=25)
+    assert raised.value.message == "Pass either query or more_like_id, not both."
+    assert raised.value.hint == "Search similar documents first, then filter by title or tags."
+
+    backwards = DocumentQuery(created_from=date(2026, 2, 1), created_to=date(2026, 1, 1))
+    with pytest.raises(Validation) as raised:
+        _ = await admin().search(NameFilters(), backwards, page=1, page_size=25)
+    assert raised.value.hint == "Swap them, or leave one out for an open created range."
+
+    clash = NameFilters(tags_all=("e2e-finance", "e2e-inbox"), tags_none=(1, 4))
+    with pytest.raises(Validation) as raised:
+        _ = await admin().search(clash, DocumentQuery(), page=1, page_size=25)
+    assert raised.value.message == "Tags both required and excluded: 'e2e-finance', 'e2e-inbox'."
+    assert raised.value.hint == "Remove them from tags_all or from tags_none."
+
+
+async def test_every_name_filter_narrows_the_search_on_its_own() -> None:
+    search = admin()
+
+    assert await titles(search, NameFilters(document_type="e2e-invoice")) == ["e2e-public-invoice"]
+    assert await titles(search, NameFilters(storage_path="e2e-archive")) == ["e2e-public-invoice"]
+    assert sorted(await titles(search, NameFilters(tags_any=("e2e-finance", "e2e-private")))) == [
+        "e2e-private-note",
+        "e2e-public-invoice",
+    ]
+    assert await titles(search, NameFilters(tags_any=("e2e-finance",))) == ["e2e-public-invoice"]
+    assert await titles(search, NameFilters(tags_none=("e2e-finance",))) == ["e2e-private-note"]
+    assert await titles(search, NameFilters(tags_all=("e2e-finance",))) == ["e2e-public-invoice"]
+
+
+async def test_an_owner_name_without_the_user_list_gets_the_exact_advice() -> None:
+    search = service(FakePaperless(seeded(), user=READER[0]))
+
+    with pytest.raises(PermissionDenied) as raised:
+        _ = await titles(search, NameFilters(owner="admin"))
+
+    assert raised.value.hint == "Pass the owner's user id instead of the username."
+    assert raised.value.message  # the resolver's own message is kept
+    assert raised.value.message != "None"
+
+
+async def test_a_select_value_without_a_matching_option_stays_as_it_is() -> None:
+    state = seeded()
+    state.documents[0].custom_fields[10] = "opt-removed"
+
+    found = await service(FakePaperless(state, user=ADMIN[0])).search(
+        NameFilters(), DocumentQuery(title_contains="public"), page=1, page_size=25
+    )
+
+    values = {value.name: value.value for value in found.documents[0].custom_fields}
+    assert values["e2e-select"] == "opt-removed"
+
+
+async def test_only_monetary_fields_get_a_space_after_the_currency() -> None:
+    state = seeded()
+    state.documents[0].custom_fields[1] = "EUR12.50"  # a text field that looks like money
+
+    detail = await service(FakePaperless(state, user=ADMIN[0])).get(1)
+
+    values = {value.name: value.value for value in detail.custom_fields}
+    assert values["e2e-string"] == "EUR12.50"
+    assert values["e2e-monetary"] == "EUR 12.50"
+
+
+async def test_only_document_link_fields_are_expanded_to_titles() -> None:
+    state = seeded()
+    state.documents[0].custom_fields[1] = [2]  # a list in a text field is not a link
+
+    detail = await service(FakePaperless(state, user=ADMIN[0])).get(1)
+
+    values = {value.name: value.value for value in detail.custom_fields}
+    assert values["e2e-string"] == [2]
+
+
+async def test_a_list_in_a_field_the_user_cannot_see_is_not_expanded_to_titles() -> None:
+    state = seeded()
+    state.users.append(
+        FakeUser(id=10, username="docs-only", permissions=frozenset({"view_document"}))
+    )
+
+    detail = await service(FakePaperless(state, user="docs-only")).get(1)
+
+    assert FieldValue(id=8, name=None, value=[2]) in detail.custom_fields
+
+
+async def test_suggested_document_types_are_named() -> None:
+    state = seeded()
+    state.documents[0].suggestions = Suggestions(
+        correspondents=(),
+        tags=(),
+        document_types=(1, 88),
+        storage_paths=(),
+        dates=(),
+    )
+
+    detail = await service(FakePaperless(state, user=ADMIN[0])).get(1, ("suggestions",))
+
+    assert detail.suggestions is not None
+    assert detail.suggestions.document_types == (
+        Ref(id=1, name="e2e-invoice"),
+        Ref(id=88, name=None),
+    )

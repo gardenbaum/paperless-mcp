@@ -1,6 +1,6 @@
 """PaperlessInstanceReader on responses recorded from the Paperless 3.4.2 E2E stack."""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx2
 import pytest
@@ -233,3 +233,47 @@ async def test_other_failures_are_not_hidden(
 ) -> None:
     with pytest.raises(error):
         _ = await reader(make_client, responses).get_overview()
+
+
+async def test_every_component_keeps_its_own_error_message(make_client: ClientFactory) -> None:
+    tasks = cast("Json", STATUS["tasks"])
+    status = {
+        **STATUS,
+        "database": {**cast("Json", STATUS["database"]), "status": "ERROR", "error": "db down"},
+        "tasks": {
+            **tasks,
+            "redis_error": "redis down",
+            "celery_error": "celery down",
+            "index_error": "index down",
+            "classifier_error": "classifier down",
+            "sanity_check_error": "sanity down",
+            "llmindex_error": "llm down",
+        },
+    }
+
+    overview = await reader(
+        make_client, instance(status=httpx2.Response(200, json=status))
+    ).get_overview()
+
+    system = overview.system_status
+    assert system is not None
+    assert [
+        component.error
+        for component in (
+            system.database,
+            system.redis,
+            system.celery,
+            system.search_index,
+            system.classifier,
+            system.sanity_check,
+            system.llm_index,
+        )
+    ] == [
+        "db down",
+        "redis down",
+        "celery down",
+        "index down",
+        "classifier down",
+        "sanity down",
+        "llm down",
+    ]

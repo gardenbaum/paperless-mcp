@@ -19,6 +19,8 @@ from paperless_mcp.paperless.disposition import filename
         ("attachment; filename*=x-unknown''a.pdf; filename=\"fallback.pdf\"", "fallback.pdf"),
         ('attachment; filename*=no-quotes.pdf; filename="fallback.pdf"', "fallback.pdf"),
         ("attachment; filename*=UTF-8''x%C3%A4.pdf; filename=\"x.pdf\"", "xä.pdf"),
+        # the value is everything after the second quote, even if it holds another quote
+        ("attachment; filename*=UTF-8''na'me.pdf", "na'me.pdf"),
         ("attachment; filename=\"x.pdf\"; filename*=UTF-8''x%C3%A4.pdf", "xä.pdf"),
         ('attachment; filename="../../etc/passwd"', "passwd"),
         ('attachment; filename="..\\\\evil.pdf"', "evil.pdf"),
@@ -61,6 +63,7 @@ from paperless_mcp.paperless.disposition import filename
         "malformed extended falls back",
         "extended wins (first)",
         "extended wins (last)",
+        "quote inside the extended value",
         "slashes dropped",
         "backslashes dropped",
         "encoded slash dropped",

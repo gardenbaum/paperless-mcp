@@ -151,3 +151,29 @@ async def test_a_malformed_link_is_an_unexpected_response(make_client: ClientFac
 
     with pytest.raises(PaperlessMcpError, match="unexpected response"):
         _ = await make_client(broken).get("/api/tags/", Page[TagStub])
+
+
+# --- Mutation-testing additions (PLMCP-21)
+
+
+async def test_collect_accepts_a_cap_of_one_and_reads_one_page_of_one(
+    make_client: ClientFactory,
+) -> None:
+    server = TagServer(total=5)
+
+    collected = await collect(make_client(server), "/api/tags/", Page[TagStub], cap=1)
+
+    assert ([item.id for item in collected.items], collected.truncated) == ([1], True)
+    assert [(r.url.params["page"], r.url.params["page_size"]) for r in server.requests] == [
+        ("1", "1")
+    ]
+
+
+async def test_collect_does_not_read_another_page_once_the_cap_is_reached(
+    make_client: ClientFactory,
+) -> None:
+    server = TagServer(total=40)
+
+    _ = await collect(make_client(server), "/api/tags/", Page[TagStub], cap=10)
+
+    assert len(server.requests) == 1
