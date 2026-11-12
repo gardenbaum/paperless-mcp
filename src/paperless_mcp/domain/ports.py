@@ -15,7 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Collection
 
     from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer
-
     from paperless_mcp.domain.documents import (
         DocumentFile,
         DocumentPage,

@@ -85,8 +85,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
 ) -> FastMCP:
     """The assembled server, with `reader` in place of the Paperless adapter.
 
-    `taxonomy`, `documents`, `tasks`, `ai` and the two writers default to `reader` if that is a fake,
-    else to the seeded admin's fake (which refuses writes unless it was created to allow them).
+    `taxonomy`, `documents`, `tasks`, `ai` and the two writers default to `reader` if that is a
+    fake, else to the seeded admin's fake (which refuses writes unless created to allow them).
     `sleep` and `clock` replace the real ones the task wait uses. `toolsets`, `read_only` and
     `disabled_tools` go to the server settings; `catalogue` replaces the tools the server
     offers, to try toolsets that do not exist yet. `max_download_bytes` replaces the download

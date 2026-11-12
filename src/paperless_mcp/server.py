@@ -25,8 +25,8 @@ from paperless_mcp.paperless.documents import PaperlessDocumentReader, Paperless
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
-from paperless_mcp.services.document_edits import DocumentEditor
 from paperless_mcp.services.ai import AiService
+from paperless_mcp.services.document_edits import DocumentEditor
 from paperless_mcp.services.documents import DocumentService
 from paperless_mcp.services.files import FileService
 from paperless_mcp.services.instance import InstanceService

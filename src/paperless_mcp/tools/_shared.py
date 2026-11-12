@@ -22,8 +22,8 @@ if TYPE_CHECKING:
 
     from fastmcp import Context
 
-    from paperless_mcp.services.document_edits import DocumentEditor
     from paperless_mcp.services.ai import AiService
+    from paperless_mcp.services.document_edits import DocumentEditor
     from paperless_mcp.services.documents import DocumentService
     from paperless_mcp.services.files import FileService
     from paperless_mcp.services.instance import InstanceService
