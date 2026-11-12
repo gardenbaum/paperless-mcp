@@ -210,7 +210,7 @@ async def test_a_bad_value_changes_nothing_and_a_restricted_user_is_refused(
     assert bad.is_error
     assert "e2e-integer" in str(bad.content)
     assert denied.is_error
-    assert "may not change this document" in str(denied.content)
+    assert "may not perform this action" in str(denied.content)
     title = obj(parse(stack.admin.get(f"/api/documents/{document}/", params={"fields": "title"})))
     assert str(title["title"]).startswith("plmcp16-")
     public = obj(

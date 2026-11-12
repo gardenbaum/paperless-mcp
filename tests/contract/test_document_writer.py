@@ -46,8 +46,13 @@ async def test_a_patch_changes_what_it_sets_and_returns_the_document(backend: Ba
     after = await ports.document_writes.update_document(document, DocumentPatch(title="Renamed"))
 
     assert after.title == "Renamed"
-    assert after == await read(ports, document)
-    assert after.model_copy(update={"title": before.title, "modified": before.modified}) == before
+    # An update's answer does not say whether the user may change the document; a read does.
+    assert after.user_can_change is None
+    assert after == (await read(ports, document)).model_copy(update={"user_can_change": None})
+    unchanged = after.model_copy(
+        update={"title": before.title, "modified": before.modified, "user_can_change": True}
+    )
+    assert unchanged == before
     assert after.modified >= before.modified
 
 
@@ -312,17 +317,15 @@ async def test_a_document_link_is_mirrored_on_the_linked_document_and_unlinked_w
 
 
 @pytest.mark.contract(CONTRACT)
-async def test_a_document_reports_whether_the_user_may_change_it(backend: Backend) -> None:
+async def test_a_read_reports_the_object_permission_to_change_not_the_global_one(
+    backend: Backend,
+) -> None:
     document = backend.new_document()
-    public = (
-        (
-            await backend.admin.documents.search_documents(
-                DocumentQuery(title_contains="e2e-public"), page=1, page_size=1
-            )
-        )
-        .hits[0]
-        .id
+    found = await backend.admin.documents.search_documents(
+        DocumentQuery(title_contains="e2e-public"), page=1, page_size=1
     )
 
     assert (await read(backend.admin, document)).user_can_change is True
-    assert (await read(backend.reader, public)).user_can_change is False
+    # The public document is unowned, so the reader may change it as far as objects go; the
+    # missing change_document permission is a separate 403 on the update.
+    assert (await read(backend.reader, found.hits[0].id)).user_can_change is True

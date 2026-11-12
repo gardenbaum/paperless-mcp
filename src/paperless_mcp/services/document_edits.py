@@ -214,7 +214,7 @@ class DocumentEditor:
         """
         _check(edit)
         current = await self._reader.get_document(document_id)
-        if not current.user_can_change:
+        if current.user_can_change is False:
             message = "The Paperless user may not change this document."
             raise PermissionDenied(message, hint="Ask the document's owner for change permission.")
         scalars = await self._scalars(edit)

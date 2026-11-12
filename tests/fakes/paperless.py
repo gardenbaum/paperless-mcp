@@ -117,14 +117,17 @@ class FakeUser:
         """Django's `has_perm`: superusers have every permission."""
         return self.is_superuser or permission in self.permissions
 
-    def may_change(self, document: Owned) -> bool:
-        """Whether the user may change `document`: `change_document` and ownership.
+    def may_change_object(self, document: Owned) -> bool:
+        """Paperless's `user_can_change`: object permissions only, not the global permission.
 
         Known gap: object-level change grants are not modelled, so a user who does not own a
-        document and is not a superuser cannot change it here.
+        document, is not a superuser and has it shared for viewing cannot change it here.
         """
-        owns = self.is_superuser or document.owner in {None, self.id}
-        return owns and self.has("change_document")
+        return self.is_superuser or document.owner in {None, self.id}
+
+    def may_change(self, document: Owned) -> bool:
+        """Whether a PATCH of `document` is allowed: `change_document` and the object."""
+        return self.has("change_document") and self.may_change_object(document)
 
 
 @dataclass(kw_only=True)
@@ -704,7 +707,7 @@ class FakePaperless:
             self._mirror_links(document, cast("dict[int, JsonValue]", changes["custom_fields"]))
         document.__dict__.update(changes)
         document.modified = datetime.now(UTC)
-        return _record(document, self.user)
+        return _record(document, self.user, report_change=False)  # an update's answer omits it
 
     def _changes(self, document: FakeDocument, patch: DocumentPatch) -> dict[str, object]:
         """The attributes `patch` sets, validated like the serializer; nothing is applied."""
@@ -976,7 +979,9 @@ def _ordered(
     return sorted(documents, key=key, reverse=ordering.startswith("-"))
 
 
-def _record(document: FakeDocument, user: FakeUser) -> DocumentRecord:
+def _record(
+    document: FakeDocument, user: FakeUser, *, report_change: bool = True
+) -> DocumentRecord:
     return DocumentRecord(
         id=document.id,
         title=document.title,
@@ -998,7 +1003,7 @@ def _record(document: FakeDocument, user: FakeUser) -> DocumentRecord:
         page_count=document.page_count,
         notes_count=len(document.notes),
         versions=tuple(document.versions),
-        user_can_change=user.may_change(document),
+        user_can_change=user.may_change_object(document) if report_change else None,
     )
 
 

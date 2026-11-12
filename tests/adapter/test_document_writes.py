@@ -51,6 +51,7 @@ async def test_only_the_fields_the_patch_sets_are_sent_and_the_document_comes_ba
     assert "content" not in DETAIL_FIELDS.split(",")
     assert (record.id, record.title, record.tags) == (1, "e2e-public-invoice", (1, 3, 2))
     assert record.notes_count == 1
+    assert record.user_can_change is None  # an update's answer does not carry it
 
 
 async def test_every_field_has_its_paperless_name_and_none_clears(

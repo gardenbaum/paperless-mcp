@@ -665,21 +665,16 @@ async def test_links_are_mirrored_on_the_linked_document_and_dropped_from_the_ol
     assert setup.state.documents[1].custom_fields[link] == []
 
 
-async def test_a_link_to_a_document_the_user_may_not_change_says_what_is_needed() -> None:
-    setup = Setup(can_change=False)
+def as_editor() -> Setup:
+    """A setup acting as a user who owns document 4 and may only view document 3."""
+    setup = Setup()
     editor = FakeUser(
         id=9,
         username="editor",
         permissions=frozenset(
             {
-                "view_document",
-                "change_document",
-                "view_customfield",
-                "view_tag",
-                "view_correspondent",
-                "view_documenttype",
-                "view_storagepath",
-                "view_user",
+                *("view_document", "change_document", "view_customfield", "view_tag", "add_tag"),
+                *("view_correspondent", "view_documenttype", "view_storagepath", "view_user"),
             }
         ),
     )
@@ -695,11 +690,25 @@ async def test_a_link_to_a_document_the_user_may_not_change_says_what_is_needed(
         setup.taxonomy,
         documents=DocumentService(setup.fake, setup.taxonomy, web_url=WEB),
     )
+    return setup
+
+
+async def test_a_link_to_a_document_the_user_may_not_change_says_what_is_needed() -> None:
+    setup = as_editor()
 
     with pytest.raises(PermissionDenied) as raised:
         _ = await setup.update(4, custom_fields={"e2e-documentlink": [3]})
 
     assert "change permission" in raised.value.describe()
+
+
+async def test_a_document_the_user_may_only_view_is_refused_before_any_tag_is_created() -> None:
+    setup = as_editor()
+
+    with pytest.raises(PermissionDenied, match="may not change this document"):
+        _ = await setup.update(3, tags_add=["e2e-new"], create_missing_tags=True)
+
+    assert len(setup.state.tags) == 4
 
 
 async def test_links_are_compared_as_sets() -> None:

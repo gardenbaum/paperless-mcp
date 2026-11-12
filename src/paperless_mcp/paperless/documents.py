@@ -110,6 +110,11 @@ class _Detail(BaseModel):
     page_count: int | None
     notes: list[_Note]
     versions: list[_Version]
+
+
+class _Readable(_Detail):
+    """What a read of one document sends beyond an update's answer."""
+
     user_can_change: bool
 
 
@@ -242,7 +247,7 @@ def _hit(row: _Row) -> DocumentHit:
     )
 
 
-def _record(row: _Detail) -> DocumentRecord:
+def _record(row: _Detail, *, can_change: bool | None) -> DocumentRecord:
     return DocumentRecord(
         id=row.id,
         title=row.title,
@@ -268,7 +273,7 @@ def _record(row: _Detail) -> DocumentRecord:
             )
             for v in row.versions
         ),
-        user_can_change=row.user_can_change,
+        user_can_change=can_change,
     )
 
 
@@ -307,7 +312,8 @@ class PaperlessDocumentReader:
 
         Paperless answers 404 to a document that does not exist and to one the user may not see.
         """
-        return _record(await self._one(document_id, "", _Detail, {"fields": DETAIL_FIELDS}))
+        row = await self._one(document_id, "", _Readable, {"fields": DETAIL_FIELDS})
+        return _record(row, can_change=row.user_can_change)
 
     async def get_document_content(self, document_id: int) -> str:
         """See ``DocumentReader.get_document_content``."""
@@ -440,4 +446,4 @@ class PaperlessDocumentWriter:
             )
         except NotFound:
             raise unseen_document(document_id) from None
-        return _record(row)
+        return _record(row, can_change=None)

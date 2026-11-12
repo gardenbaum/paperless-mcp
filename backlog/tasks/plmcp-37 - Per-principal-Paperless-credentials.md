@@ -4,6 +4,7 @@ title: Per-principal Paperless credentials
 status: To Do
 assignee: []
 created_date: '2026-11-09T19:26:00Z'
+updated_date: '2026-11-12T19:42:00Z'
 labels: []
 milestone: m-6
 dependencies:
@@ -35,3 +36,9 @@ Several people should use one server with their own Paperless permissions. Where
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Deferred from PLMCP-16 (multi-user): update_document reads a document and then PATCHes the merged tag and custom field lists, so with several principals a concurrent change in between is overwritten. Route tag and custom-field list changes through bulk_edit modify_tags / modify_custom_fields (server-side add/remove, validated; verified live in PLMCP-16) to avoid the race; see the PLMCP-16 notes.
+<!-- SECTION:NOTES:END -->

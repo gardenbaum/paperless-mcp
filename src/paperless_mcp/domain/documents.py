@@ -311,7 +311,15 @@ class DocumentRecord(BaseModel):
     page_count: int | None
     notes_count: int
     versions: tuple[DocumentVersion, ...]
-    user_can_change: bool
+    user_can_change: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Whether object permissions let the user change the document; null where "
+                "Paperless does not say (the answer to an update)."
+            )
+        ),
+    ]
 
 
 class SuggestionNames(BaseModel):

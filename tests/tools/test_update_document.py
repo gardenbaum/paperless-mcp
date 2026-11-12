@@ -106,7 +106,7 @@ async def test_unknown_tags_are_created_when_asked() -> None:
 async def test_a_user_without_the_change_permission_gets_a_permission_error() -> None:
     fake = FakePaperless(seeded(), user="e2e-reader", allow_writes=True)
 
-    assert "may not change this document" in await failure(fake, title="x")
+    assert "may not perform this action" in await failure(fake, title="x")
 
 
 async def test_the_tool_is_offered_by_default_and_hidden_in_read_only_mode() -> None:
