@@ -250,17 +250,149 @@ def test_mutation_score_is_none_without_tested_mutants() -> None:
     assert scheduled_jobs.mutation_score({}) is None
 
 
-def test_mutation_summary_shows_the_score_the_counts_and_that_it_is_report_only() -> None:
-    summary = scheduled_jobs.render_mutation_summary(STATS)
+def test_the_gate_is_eighty_percent() -> None:
+    assert scheduled_jobs.MUTATION_GATE == 80.0
 
-    assert "Mutation score: 80.0 %" in summary
+
+def test_mutation_summary_shows_the_score_the_counts_and_the_gate() -> None:
+    summary = scheduled_jobs.render_mutation_summary(scheduled_jobs.judge(STATS))
+
+    assert "Mutation score: 80.0 % (gate 80 %: passed)" in summary
     assert "| Survived | 20 |" in summary
     assert "| Killed | 70 |" in summary
-    assert "report-only" in summary
+    assert "report-only" not in summary
 
 
-def test_mutation_summary_without_tested_mutants_says_so() -> None:
-    assert "Mutation score: n/a" in scheduled_jobs.render_mutation_summary({"total": 0})
+def test_mutation_summary_without_tested_mutants_fails_the_gate() -> None:
+    verdict = scheduled_jobs.judge({"total": 0})
+
+    assert not verdict.passed
+    assert "Mutation score: n/a (gate 80 %: FAILED)" in scheduled_jobs.render_mutation_summary(
+        verdict
+    )
+
+
+def test_a_score_just_below_the_gate_fails_and_exactly_at_it_passes() -> None:
+    at_gate = {"total": 100, "killed": 80, "survived": 20}
+    below = {"total": 1000, "killed": 799, "survived": 201}
+
+    assert scheduled_jobs.judge(at_gate).passed
+    assert not scheduled_jobs.judge(below).passed
+    assert not scheduled_jobs.judge({**below, "killed": 700, "timeout": 99}).passed
+    assert scheduled_jobs.judge({**below, "killed": 700, "timeout": 100}).passed
+
+
+def test_the_gate_is_a_parameter_with_the_constant_as_default() -> None:
+    stats = {"total": 100, "killed": 90, "survived": 10}
+
+    assert scheduled_jobs.judge(stats, gate=95.0).gate == 95.0
+    assert not scheduled_jobs.judge(stats, gate=95.0).passed
+    assert scheduled_jobs.judge(stats).gate == scheduled_jobs.MUTATION_GATE
+
+
+@pytest.mark.parametrize(
+    "status", ["suspicious", "no_tests", "segfault", "check_was_interrupted_by_user"]
+)
+def test_mutants_that_were_not_properly_judged_count_against_the_score(status: str) -> None:
+    stats = {"total": 100, "killed": 80, status: 20}
+
+    verdict = scheduled_jobs.judge(stats)
+
+    assert verdict.score == 80.0
+    assert verdict.passed
+    assert not scheduled_jobs.judge({**stats, "killed": 79, status: 21}).passed
+
+
+RESULTS = """\
+    paperless_mcp.services.a.x_f__mutmut_1: survived
+    paperless_mcp.services.a.x_f__mutmut_2: survived
+    paperless_mcp.paperless.b.x_g__mutmut_3: timeout
+    paperless_mcp.paperless.b.x_g__mutmut_4: suspicious
+"""
+EQUIVALENTS_TOML = """\
+[[equivalent]]
+mutant = "paperless_mcp.services.a.x_f__mutmut_1"
+reason = "the argument is ignored at run time"
+
+[[equivalent]]
+mutant = "paperless_mcp.services.a.x_f__mutmut_9"
+reason = "was renumbered away"
+"""
+
+
+def test_results_are_read_as_mutant_and_status() -> None:
+    assert scheduled_jobs.parse_results(RESULTS) == {
+        "paperless_mcp.services.a.x_f__mutmut_1": "survived",
+        "paperless_mcp.services.a.x_f__mutmut_2": "survived",
+        "paperless_mcp.paperless.b.x_g__mutmut_3": "timeout",
+        "paperless_mcp.paperless.b.x_g__mutmut_4": "suspicious",
+    }
+    assert scheduled_jobs.parse_results("") == {}
+
+
+def test_equivalents_are_read_with_their_reasons() -> None:
+    assert scheduled_jobs.parse_equivalents(EQUIVALENTS_TOML) == {
+        "paperless_mcp.services.a.x_f__mutmut_1": "the argument is ignored at run time",
+        "paperless_mcp.services.a.x_f__mutmut_9": "was renumbered away",
+    }
+    assert scheduled_jobs.parse_equivalents("") == {}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '[[equivalent]]\nmutant = "m"\n',
+        '[[equivalent]]\nmutant = "m"\nreason = "  "\n',
+        '[[equivalent]]\nreason = "r"\n',
+        '[[equivalent]]\nmutant = "m"\nreason = "r"\n[[equivalent]]\nmutant = "m"\nreason = "s"\n',
+        "not = [valid",
+    ],
+    ids=["no reason", "blank reason", "no mutant", "duplicate", "bad toml"],
+)
+def test_an_equivalent_without_a_reason_or_a_duplicate_is_refused(text: str) -> None:
+    with pytest.raises(scheduled_jobs.JobError):
+        _ = scheduled_jobs.parse_equivalents(text)
+
+
+def test_reviewed_equivalent_survivors_leave_the_denominator_like_skipped_mutants() -> None:
+    stats = {"total": 100, "killed": 76, "survived": 24}
+    results = {f"m{n}": "survived" for n in range(24)}
+    equivalents = {f"m{n}": "reason" for n in range(4)}
+
+    without = scheduled_jobs.judge(stats, results=results)
+    with_equivalents = scheduled_jobs.judge(stats, results=results, equivalents=equivalents)
+
+    assert (without.score, without.passed) == (76.0, False)
+    assert with_equivalents.score == pytest.approx(76 / 96 * 100)
+    assert with_equivalents.equivalent == 4
+    assert with_equivalents.stale == ()
+
+
+def test_only_survivors_can_be_equivalent_and_the_rest_is_reported_as_stale() -> None:
+    stats = {"total": 10, "killed": 6, "timeout": 1, "survived": 1, "suspicious": 2}
+    results = {"m1": "survived", "m2": "timeout", "m3": "suspicious"}
+    equivalents = {"m1": "r", "m2": "r", "m3": "r", "gone": "r"}
+
+    verdict = scheduled_jobs.judge(stats, results=results, equivalents=equivalents)
+
+    assert verdict.equivalent == 1
+    assert verdict.stale == ("gone", "m2", "m3")
+    assert verdict.score == pytest.approx(7 / 9 * 100)
+
+
+def test_the_summary_names_the_formula_the_equivalents_and_the_stale_entries() -> None:
+    stats = {"total": 10, "killed": 9, "survived": 1}
+    verdict = scheduled_jobs.judge(
+        stats, results={"m1": "survived"}, equivalents={"m1": "r", "gone": "r"}
+    )
+
+    summary = scheduled_jobs.render_mutation_summary(verdict)
+
+    assert "| Survived, reviewed as equivalent (not scored) | 1 |" in summary
+    assert "(killed + timeout) / (total - skipped - equivalent)" in summary
+    assert "Stale entries in mutation-equivalents.toml" in summary
+    assert "- `gone`" in summary
+    assert "Stale" not in scheduled_jobs.render_mutation_summary(scheduled_jobs.judge(STATS))
 
 
 def run_main(
@@ -328,14 +460,55 @@ def test_main_open_issue_passes_title_label_and_report_to_gh(tmp_path: Path) -> 
     assert gh.calls[-1][-1] == "the report"
 
 
-def test_main_mutation_score_prints_the_summary(tmp_path: Path) -> None:
+def test_main_mutation_score_prints_the_summary_and_passes_at_the_gate(tmp_path: Path) -> None:
     stats = tmp_path / "stats.json"
     _ = stats.write_text(json.dumps(STATS))
 
     code, out, _ = run_main(["mutation-score", str(stats)])
 
     assert code == 0
-    assert "Mutation score: 80.0 %" in out
+    assert "Mutation score: 80.0 % (gate 80 %: passed)" in out
+
+
+def test_main_mutation_score_prints_the_summary_and_exits_nonzero_below_the_gate(
+    tmp_path: Path,
+) -> None:
+    stats = tmp_path / "stats.json"
+    _ = stats.write_text(json.dumps({"total": 10, "killed": 7, "survived": 3}))
+
+    code, out, err, _ = run_main_err(["mutation-score", str(stats)])
+
+    assert code == scheduled_jobs.GATE_FAILED_EXIT_CODE
+    assert scheduled_jobs.GATE_FAILED_EXIT_CODE not in {0, 1, scheduled_jobs.DRIFT_EXIT_CODE}
+    assert "Mutation score: 70.0 % (gate 80 %: FAILED)" in out
+    assert "below the gate" in err
+
+
+def test_main_mutation_score_takes_the_gate_results_and_equivalents(tmp_path: Path) -> None:
+    stats = tmp_path / "stats.json"
+    _ = stats.write_text(json.dumps({"total": 10, "killed": 7, "survived": 3}))
+    results = tmp_path / "survivors.txt"
+    _ = results.write_text("    m1: survived\n    m2: survived\n    m3: survived\n")
+    equivalents = tmp_path / "equivalents.toml"
+    _ = equivalents.write_text(
+        '[[equivalent]]\nmutant = "m1"\nreason = "r"\n[[equivalent]]\nmutant = "m2"\nreason = "r"\n'
+    )
+
+    code, out, _, _ = run_main_err(
+        [
+            "mutation-score",
+            str(stats),
+            "--results",
+            str(results),
+            "--equivalents",
+            str(equivalents),
+            "--gate",
+            "85",
+        ]
+    )
+
+    assert code == 0  # 7 of 8 is 87.5 %
+    assert "Mutation score: 87.5 % (gate 85 %: passed)" in out
 
 
 def test_a_report_with_exactly_the_limit_lists_everything_without_a_more_line(
