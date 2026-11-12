@@ -10,7 +10,12 @@ import pytest
 from mcp.types import ToolAnnotations
 
 from paperless_mcp.domain.errors import InvalidConfiguration
-from paperless_mcp.tools.selection import hidden_tools, selected_toolsets, unavailable_toolsets
+from paperless_mcp.tools.selection import (
+    hidden_tools,
+    selected_toolsets,
+    unavailable_toolsets,
+    visible_tools,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -83,3 +88,23 @@ def test_toolsets_without_a_requirement_are_always_available() -> None:
 
 def test_an_unreachable_paperless_leaves_every_toolset_visible() -> None:
     assert unavailable_toolsets(ai_enabled=None, requires=REQUIRES) == frozenset()
+
+
+def test_an_unknown_name_suggests_the_close_match_and_lists_the_known_ones() -> None:
+    with pytest.raises(InvalidConfiguration) as tool:
+        _ = hidden_tools(TABLE, read_only=False, disabled=("fnid",))
+    with pytest.raises(InvalidConfiguration) as toolset:
+        _ = selected_toolsets(("cor",), KNOWN)
+
+    assert "Did you mean find?" in tool.value.message
+    assert "change, find, plain" in tool.value.message
+    assert "Did you mean core?" in toolset.value.message
+
+
+TOOL_TOOLSETS = {"find": "core", "change": "core", "other": "bulk"}
+
+
+def test_visible_tools_follow_toolsets_and_hidden_names() -> None:
+    assert visible_tools(TOOL_TOOLSETS, {"core"}, {"change"}) == {"find"}
+    assert visible_tools(TOOL_TOOLSETS, {"core", "bulk"}, set[str]()) == set(TOOL_TOOLSETS)
+    assert visible_tools(TOOL_TOOLSETS, {"bulk"}, {"other"}) == set()

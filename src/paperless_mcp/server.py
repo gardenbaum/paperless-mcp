@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Final
 
 from fastmcp import FastMCP
 from fastmcp.server.lifespan import lifespan
+from fastmcp.server.transforms.visibility import Visibility
 
 from paperless_mcp import __version__
 from paperless_mcp.domain.errors import InvalidConfiguration
@@ -31,11 +32,17 @@ from paperless_mcp.tools import core
 from paperless_mcp.tools._shared import (
     ANNOTATIONS,
     SERVICES,
+    TOOL_TOOLSETS,
     TOOLSET_REQUIRES,
     TOOLSETS,
     Services,
 )
-from paperless_mcp.tools.selection import hidden_tools, selected_toolsets, unavailable_toolsets
+from paperless_mcp.tools.selection import (
+    hidden_tools,
+    selected_toolsets,
+    unavailable_toolsets,
+    visible_tools,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -65,6 +72,11 @@ INSTRUCTIONS = (
     "to learn the instance and what the current user may do."
 )
 
+NO_TOOLS = (
+    "No tools are left to offer: PAPERLESS_MCP_TOOLSETS, PAPERLESS_MCP_READ_ONLY,"
+    " PAPERLESS_MCP_DISABLED_TOOLS and the capabilities of this Paperless leave no tool."
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,12 +87,14 @@ class Catalogue:
     Attributes:
         providers: One FastMCP provider per toolset module.
         annotations: The central annotation table, keyed by tool name.
+        tool_toolsets: The toolset of every tool, keyed by tool name.
         toolsets: Every toolset name.
         requires: Toolsets that need a Paperless capability, mapped to it.
     """
 
     providers: Sequence[Provider]
     annotations: Mapping[str, ToolAnnotations]
+    tool_toolsets: Mapping[str, str]
     toolsets: frozenset[str]
     requires: Mapping[str, str]
 
@@ -88,6 +102,7 @@ class Catalogue:
 CATALOGUE: Final = Catalogue(
     providers=(core.provider,),
     annotations=ANNOTATIONS,
+    tool_toolsets=TOOL_TOOLSETS,
     toolsets=TOOLSETS,
     requires=TOOLSET_REQUIRES,
 )
@@ -138,7 +153,8 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
         selection leaves no tool.
 
     Raises:
-        InvalidConfiguration: A toolset or a disabled tool in the settings does not exist.
+        InvalidConfiguration: A toolset or a disabled tool in the settings does not exist, or
+            the settings alone leave no tool.
     """
     credentials = StaticTokenProvider(paperless.token.get_secret_value())
     web_url = str(paperless.public_url or paperless.url)
@@ -149,6 +165,10 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
     hidden = hidden_tools(
         catalogue.annotations, read_only=settings.read_only, disabled=settings.disabled_tools
     )
+    if not visible_tools(catalogue.tool_toolsets, enabled, hidden):
+        raise InvalidConfiguration(NO_TOOLS)
+    # The one rule that hides toolsets whose capability is missing; each start replaces its tags.
+    capability_rule = Visibility(enabled=False, tags=set())
 
     @lifespan
     async def start(running: FastMCP) -> AsyncIterator[dict[str, object]]:
@@ -176,7 +196,7 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                     overview.paperless_version,
                     overview.api_version,
                 )
-            await _hide_unavailable(running, catalogue, overview, enabled)
+            await _hide_unavailable(running, capability_rule, catalogue, overview, enabled)
             yield {SERVICES: services}
 
     server = FastMCP(
@@ -192,11 +212,13 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
     _ = server.enable(tags=set(enabled), only=True)
     if hidden:
         _ = server.disable(names=set(hidden), components={"tool"})
+    server.add_transform(capability_rule)
     return server
 
 
 async def _hide_unavailable(
     server: FastMCP,
+    rule: Visibility,
     catalogue: Catalogue,
     overview: InstanceOverview | None,
     enabled: frozenset[str],
@@ -204,13 +226,9 @@ async def _hide_unavailable(
     """Hide toolsets whose capability Paperless lacks; fail if nothing is left to offer."""
     ai_enabled = overview.ai_enabled if overview else None
     unavailable = unavailable_toolsets(ai_enabled=ai_enabled, requires=catalogue.requires)
+    rule.tags = set(unavailable)
     if unavailable:
-        _ = server.disable(tags=set(unavailable))
         for toolset in sorted(unavailable & enabled):
             logger.warning("Toolset %s is hidden: Paperless does not offer what it needs", toolset)
     if not await server.list_tools():
-        message = (
-            "No tools are left to offer: PAPERLESS_MCP_TOOLSETS, PAPERLESS_MCP_READ_ONLY,"
-            " PAPERLESS_MCP_DISABLED_TOOLS and the capabilities of this Paperless leave no tool."
-        )
-        raise InvalidConfiguration(message)
+        raise InvalidConfiguration(NO_TOOLS)

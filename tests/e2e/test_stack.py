@@ -16,8 +16,13 @@ def test_instance_reports_api_version_10(stack: Stack) -> None:
 
 
 def test_seeding_is_idempotent(stack: Stack, reseed: Seeded) -> None:
+    # Idempotence of the seed itself: reseeding returns the same manifest and creates no second
+    # copy of a seed document. Instance-wide totals are not asserted: other tests leave documents.
     assert reseed == stack.seeded
-    assert obj(parse(stack.admin.get("/api/documents/")))["count"] == 2
+    for document in (stack.seeded.public_document, stack.seeded.private_document):
+        title = str(obj(parse(stack.admin.get(f"/api/documents/{document}/")))["title"])
+        found = results(stack.admin.get("/api/documents/", params={"title__iexact": title}))
+        assert [num(d["id"]) for d in found] == [document]
 
 
 def test_seeded_taxonomy_and_all_custom_field_types(stack: Stack) -> None:

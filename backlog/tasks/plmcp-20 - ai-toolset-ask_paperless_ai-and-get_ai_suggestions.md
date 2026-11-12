@@ -4,6 +4,7 @@ title: 'ai toolset: ask_paperless_ai and get_ai_suggestions'
 status: To Do
 assignee: []
 created_date: '2026-11-09T19:25:00Z'
+updated_date: '2026-11-12T18:39:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -27,6 +28,7 @@ Paperless 3.x ships its own AI (RAG chat over documents and AI suggestions), so 
 - [ ] #3 The toolset is hidden when Paperless AI is disabled
 - [ ] #4 Adapter tests are schema-guarded; just e2e-ai runs against an AI backend the developer provides via environment; CI needs no AI backend
 - [ ] #5 FakePaperless and the contract suite cover every new port method
+- [ ] #6 ai is in the default PAPERLESS_MCP_TOOLSETS (settings.py) and in TOOLSETS, TOOL_TOOLSETS and TOOLSET_REQUIRES (tools/_shared.py); the settings default test and the default-profile snapshot and budget test cover it
 <!-- AC:END -->
 
 ## Definition of Done

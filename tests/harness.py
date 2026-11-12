@@ -44,18 +44,19 @@ def paperless_settings(url: str = URL, token: str = TOKEN) -> PaperlessSettings:
 def server_settings(
     startup_timeout: float = 2.0,
     *,
-    toolsets: Sequence[str] = ("core",),
+    toolsets: Sequence[str] | None = None,
     read_only: bool = False,
     disabled_tools: Sequence[str] = (),
 ) -> ServerSettings:
-    return ServerSettings.model_validate(
-        {
-            "startup_timeout": startup_timeout,
-            "toolsets": ",".join(toolsets),
-            "read_only": read_only,
-            "disabled_tools": ",".join(disabled_tools),
-        }
-    )
+    """Server settings; `toolsets=None` leaves the setting at its shipped default."""
+    given: dict[str, object] = {
+        "startup_timeout": startup_timeout,
+        "read_only": read_only,
+        "disabled_tools": ",".join(disabled_tools),
+    }
+    if toolsets is not None:
+        given["toolsets"] = ",".join(toolsets)
+    return ServerSettings.model_validate(given)
 
 
 def serve(  # noqa: PLR0913 -- one keyword per seam of the server
@@ -68,7 +69,7 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     clock: Callable[[], float] = time.monotonic,
     startup_timeout: float = 2.0,
     catalogue: Catalogue = CATALOGUE,
-    toolsets: Sequence[str] = ("core",),
+    toolsets: Sequence[str] | None = None,
     read_only: bool = False,
     disabled_tools: Sequence[str] = (),
 ) -> FastMCP:
@@ -100,8 +101,11 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     )
 
 
-def admin() -> FakePaperless:
-    return FakePaperless(seeded(), user=ADMIN[0])
+def admin(*, ai_enabled: bool = False) -> FakePaperless:
+    """The seeded admin's fake; `ai_enabled` is what Paperless reports for AI."""
+    state = seeded()
+    state.ai_enabled = ai_enabled
+    return FakePaperless(state, user=ADMIN[0])
 
 
 class FailsAfterProbe:

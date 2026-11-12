@@ -62,19 +62,6 @@ def test_a_wrong_token_stops_the_console_script_with_a_clear_message(stack: Stac
     assert "Traceback" not in finished.stderr
 
 
-def run_script(stack: Stack, **env: str) -> subprocess.CompletedProcess[str]:
-    """The console script with stdin closed: it ends at once, so only startup failures show."""
-    return subprocess.run(  # noqa: S603 -- our own console script, no shell
-        [console_script()],
-        env={"PAPERLESS_URL": stack.base_url, "PAPERLESS_TOKEN": stack.admin_token, **env},
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-
-
 async def listed_tools(stack: Stack, **env: str) -> set[str]:
     transport = StdioTransport(
         console_script(),
@@ -97,18 +84,3 @@ async def test_the_environment_selects_the_tools_over_stdio(stack: Stack) -> Non
     assert "get_instance_overview" in default
     assert read_only == default
     assert trimmed == default - {"get_task", "list_taxonomy"}
-
-
-@pytest.mark.decision("decision-4")
-def test_filters_that_leave_no_tool_stop_the_console_script_with_a_clear_message(
-    stack: Stack,
-) -> None:
-    finished = run_script(
-        stack,
-        PAPERLESS_MCP_DISABLED_TOOLS="get_instance_overview,list_taxonomy,search_documents,get_task",
-    )
-
-    assert finished.returncode == 1
-    assert finished.stdout == ""
-    assert "paperless-mcp: No tools are left to offer" in finished.stderr
-    assert "Traceback" not in finished.stderr

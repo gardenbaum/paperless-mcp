@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T18:30:00Z'
+updated_date: '2026-11-12T18:39:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -59,4 +59,6 @@ Design: settings ServerSettings.toolsets/read_only/disabled_tools (comma list or
 Decisions: (1) Unknown toolset in PAPERLESS_MCP_TOOLSETS or unknown tool in PAPERLESS_MCP_DISABLED_TOOLS is a startup error (InvalidConfiguration) naming the offender and the known names, raised by create_server. (2) Capability detection happens once at startup from the probe overview: only ai_enabled == False hides a toolset; null (user may not view UI settings) and an unreachable Paperless at startup leave it visible so a transient outage does not hide it for the process lifetime; its tools report errors themselves. An explicitly selected toolset hidden by a missing capability logs a WARNING. (3) Zero tools after all filters/capabilities fails startup with one message naming the three variables. (4) Default is core only (AC #1); design says core+ai: PLMCP-20 must add 'ai' to the toolsets default in settings.py, to TOOLSETS and to TOOLSET_REQUIRES. (5) Resources carry the toolset tag, so an unselected toolset also hides its resources.
 
 Deliberate snapshot change: tests/tools/__snapshots__/test_surface.ambr regenerated because the surface tests are now parametrized by profile (default, all, read-only); old unparametrised entries replaced by 6 new ones. Content is unchanged: all three profiles are identical today (core is the only toolset and all its tools are read-only). No gate or decision weakened.
+
+Review round 1: tests take the default profile from ServerSettings (toolsets=None in the harness) and run budget, registry and profile snapshots on a fake with ai_enabled=True. Capability hiding is now one Visibility rule registered in create_server whose tags each lifespan entry replaces (no accumulation; a server follows AI on/off across starts). Filters that alone leave no tool fail in create_server before any request, via the new TOOL_TOOLSETS table (registry-tested against tags); the lifespan keeps the capability case. Registry tags rule covers resources, templates and prompts. ALL_TOOLSETS lives in domain/toolsets.py (tools may not import settings). Malformed JSON and unknown names give clear messages with suggestions. Deliberate snapshot change: 3 new entries (resources and prompts per profile), nothing else changed. test_seeding_is_idempotent no longer asserts instance-wide document counts.
 <!-- SECTION:NOTES:END -->

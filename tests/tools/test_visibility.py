@@ -16,7 +16,7 @@ from mcp.types import ToolAnnotations
 
 from paperless_mcp.domain.errors import InvalidConfiguration
 from paperless_mcp.server import CATALOGUE, create_server
-from paperless_mcp.tools._shared import ANNOTATIONS, boundary
+from paperless_mcp.tools._shared import ANNOTATIONS, TOOL_TOOLSETS, boundary
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -59,6 +59,12 @@ SYNTHETIC = replace(
         "bulk_change": WRITE,
         "bulk_preview": READ,
     },
+    tool_toolsets={
+        **TOOL_TOOLSETS,
+        "ask_something": "ai",
+        "bulk_change": "bulk",
+        "bulk_preview": "bulk",
+    },
     toolsets=CATALOGUE.toolsets | {"ai", "bulk"},
     requires={"ai": "ai"},
 )
@@ -71,9 +77,7 @@ async def names(server: FastMCP) -> set[str]:
 
 
 def with_ai(*, enabled: bool) -> FakePaperless:
-    state = seeded()
-    state.ai_enabled = enabled
-    return FakePaperless(state, user="admin")
+    return admin(ai_enabled=enabled)
 
 
 async def test_the_default_profile_offers_only_the_core_toolset() -> None:
@@ -127,28 +131,32 @@ async def test_an_unknown_disabled_tool_stops_the_server_from_being_built() -> N
         _ = serve(admin(), disabled_tools=["get_taks"])
 
 
-async def test_startup_fails_clearly_when_the_filters_leave_no_tool() -> None:
-    empty = serve(
-        admin(),
-        catalogue=SYNTHETIC,
-        toolsets=["bulk"],
-        disabled_tools=["bulk_change", "bulk_preview"],
-    )
-    read_only_empty = serve(
-        admin(),
-        catalogue=replace(SYNTHETIC, annotations={**SYNTHETIC.annotations, "bulk_preview": WRITE}),
-        toolsets=["bulk"],
-        read_only=True,
-    )
+async def test_disabling_every_tool_of_the_toolsets_stops_the_server_from_being_built() -> None:
+    with pytest.raises(InvalidConfiguration) as caught:
+        _ = serve(
+            admin(),
+            catalogue=SYNTHETIC,
+            toolsets=["bulk"],
+            disabled_tools=["bulk_change", "bulk_preview"],
+        )
 
-    for blocked in (empty, read_only_empty):
-        with pytest.raises(RuntimeError) as caught:
-            async with Client(blocked):
-                pass
-        cause = caught.value.__cause__
-        assert isinstance(cause, InvalidConfiguration)
-        assert "No tools are left" in cause.message
-        assert "PAPERLESS_MCP_TOOLSETS" in cause.message
+    assert "No tools are left" in caught.value.message
+    assert "PAPERLESS_MCP_TOOLSETS" in caught.value.message
+
+
+async def test_read_only_mode_over_writing_tools_only_stops_the_server_from_being_built() -> None:
+    writing_only = replace(SYNTHETIC, annotations={**SYNTHETIC.annotations, "bulk_preview": WRITE})
+
+    with pytest.raises(InvalidConfiguration, match="No tools are left"):
+        _ = serve(admin(), catalogue=writing_only, toolsets=["bulk"], read_only=True)
+
+
+async def test_the_zero_tool_check_does_not_wait_for_paperless() -> None:
+    with pytest.raises(InvalidConfiguration, match="No tools are left"):
+        _ = create_server(
+            paperless_settings(refused_url()),
+            server_settings(disabled_tools=list(CORE)),
+        )
 
 
 async def test_a_toolset_whose_capability_is_missing_is_hidden() -> None:
@@ -192,3 +200,22 @@ async def test_a_missing_capability_can_leave_nothing_and_stops_the_start() -> N
             pass
 
     assert isinstance(caught.value.__cause__, InvalidConfiguration)
+
+
+async def test_one_server_follows_the_capability_of_each_start() -> None:
+    state = seeded()
+    state.ai_enabled = False
+    fake = FakePaperless(state, user="admin")
+    server = serve(fake, catalogue=SYNTHETIC, toolsets=["core", "ai"])
+
+    first = await names(server)
+    state.ai_enabled = True
+    second = await names(server)
+    state.ai_enabled = False
+    third = await names(server)
+
+    assert ("ask_something" in first, "ask_something" in second, "ask_something" in third) == (
+        False,
+        True,
+        False,
+    )

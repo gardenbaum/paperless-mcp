@@ -15,13 +15,14 @@ from harness import admin, serve
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from paperless_mcp.tools._shared import ANNOTATIONS, TOOLSETS, boundary
+from paperless_mcp.tools._shared import ANNOTATIONS, TOOL_TOOLSETS, TOOLSETS, boundary
 from paperless_mcp.tools.selection import hidden_tools
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from fastmcp.tools import Tool
+    from fastmcp.utilities.components import FastMCPComponent
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-4")]
 
@@ -55,8 +56,16 @@ def off_table(tools: list[Tool], table: Mapping[str, ToolAnnotations]) -> list[s
     return mismatched + sorted(set(table) - names)
 
 
-def not_one_toolset(tools: list[Tool]) -> list[str]:
-    return [t.name for t in tools if len(t.tags) != 1 or not t.tags <= TOOLSETS]
+def not_one_toolset(components: Sequence[FastMCPComponent]) -> list[str]:
+    """Tools, resources, templates and prompts without exactly one toolset tag."""
+    return [c.name for c in components if len(c.tags) != 1 or not c.tags <= TOOLSETS]
+
+
+def off_toolset_table(tools: list[Tool], table: Mapping[str, str]) -> list[str]:
+    """Tools whose tag is not their toolset in the central table, and stale table entries."""
+    names = {t.name for t in tools}
+    wrong = [t.name for t in tools if table.get(t.name) not in t.tags]
+    return wrong + sorted(set(table) - names)
 
 
 def unguarded(tools: list[Tool]) -> list[str]:
@@ -111,9 +120,25 @@ def over_budget(tools: list[Tool]) -> list[str]:
     return [t.name for t in tools] if len(tools) > TOOL_BUDGET else []
 
 
+def full_server() -> FastMCP:
+    """Every toolset on, and a Paperless that offers every capability."""
+    return serve(admin(ai_enabled=True), toolsets=["all"])
+
+
 async def server_tools() -> list[Tool]:
     """The tools of the server with every toolset on: what the rules below apply to."""
-    return list(await serve(admin(), toolsets=["all"]).list_tools())
+    return list(await full_server().list_tools())
+
+
+async def server_components() -> list[FastMCPComponent]:
+    """Every tool, resource, resource template and prompt of the full server."""
+    server = full_server()
+    return [
+        *await server.list_tools(),
+        *await server.list_resources(),
+        *await server.list_resource_templates(),
+        *await server.list_prompts(),
+    ]
 
 
 def writing(tools: list[Tool]) -> list[str]:
@@ -131,8 +156,12 @@ async def test_every_tool_has_its_annotations_from_the_central_table() -> None:
     assert off_table(await server_tools(), ANNOTATIONS) == []
 
 
-async def test_every_tool_has_exactly_one_toolset_tag() -> None:
-    assert not_one_toolset(await server_tools()) == []
+async def test_every_component_has_exactly_one_toolset_tag() -> None:
+    assert not_one_toolset(await server_components()) == []
+
+
+async def test_every_tool_is_in_the_toolset_table_under_its_tag() -> None:
+    assert off_toolset_table(await server_tools(), TOOL_TOOLSETS) == []
 
 
 async def test_every_tool_goes_through_the_error_boundary() -> None:
@@ -150,11 +179,11 @@ async def test_no_tool_takes_a_filesystem_path_outside_the_stdio_allowlist() -> 
 
 
 async def test_the_default_profile_stays_within_the_tool_budget() -> None:
-    assert over_budget(list(await serve(admin()).list_tools())) == []
+    assert over_budget(list(await serve(admin(ai_enabled=True)).list_tools())) == []
 
 
 async def test_read_only_mode_leaves_only_tools_with_the_read_only_hint() -> None:
-    tools = list(await serve(admin(), toolsets=["all"], read_only=True).list_tools())
+    tools = list(await serve(admin(ai_enabled=True), toolsets=["all"], read_only=True).list_tools())
 
     assert tools != []
     assert writing(tools) == []
@@ -195,6 +224,16 @@ async def empty_trash(
     return confirm
 
 
+@offenders.resource("data://untagged")
+async def untagged_resource() -> str:
+    return "data"
+
+
+@offenders.prompt(tags={"core", "bulk"})
+async def double_tagged_prompt() -> str:
+    return "prompt"
+
+
 async def offending_tools() -> list[Tool]:
     return list(await FastMCP(providers=[offenders]).list_tools())
 
@@ -213,7 +252,29 @@ async def test_self_test_annotations_off_the_table_and_stale_entries_are_found()
 
 
 async def test_self_test_missing_or_extra_toolset_tags_are_found() -> None:
-    assert set(not_one_toolset(await offending_tools())) >= {"bare", "delete_everything"}
+    server = FastMCP(providers=[offenders])
+    components = [
+        *await server.list_tools(),
+        *await server.list_resources(),
+        *await server.list_prompts(),
+    ]
+
+    assert set(not_one_toolset(components)) >= {
+        "bare",
+        "delete_everything",
+        "untagged_resource",
+        "double_tagged_prompt",
+    }
+
+
+async def test_self_test_tools_off_the_toolset_table_are_found() -> None:
+    table = {"delete_everything": "bulk", "ghost": "core"}
+
+    found = off_toolset_table(await offending_tools(), table)
+
+    assert "ghost" in found
+    assert "bare" in found
+    assert "delete_everything" not in found
 
 
 async def test_self_test_tools_without_the_boundary_are_found() -> None:
@@ -242,6 +303,8 @@ async def test_self_test_tools_without_the_read_only_hint_are_found() -> None:
     assert set(found) >= {"bare", "delete_everything", "drop_without_confirm", "empty_trash"}
 
 
+# Synthetic check of the hiding rule alone; that create_server applies it to the real server is
+# proven in test_visibility.py (read-only mode over a catalogue with writing tools).
 async def test_self_test_read_only_mode_hides_what_the_table_marks_as_writing() -> None:
     table = {"bare": ToolAnnotations(), "delete_everything": ToolAnnotations(read_only_hint=True)}
     server = FastMCP(providers=[offenders])

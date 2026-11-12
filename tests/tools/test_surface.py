@@ -22,8 +22,8 @@ type Schema = dict[str, object]
 
 # The profiles the surface is reviewed for: server settings per profile. `default` is the
 # shipped default, `all` every toolset, `read-only` every toolset without tools that change data.
-PROFILES: dict[str, tuple[list[str], bool]] = {
-    "default": (["core"], False),
+PROFILES: dict[str, tuple[list[str] | None, bool]] = {
+    "default": (None, False),
     "all": (["all"], False),
     "read-only": (["all"], True),
 }
@@ -32,7 +32,8 @@ profiles = pytest.mark.parametrize("profile", list(PROFILES))
 
 def profile_server(profile: str) -> FastMCP:
     toolsets, read_only = PROFILES[profile]
-    return serve(admin(), toolsets=toolsets, read_only=read_only)
+    # AI on, so that capability gating cannot shrink the surface under review.
+    return serve(admin(ai_enabled=True), toolsets=toolsets, read_only=read_only)
 
 
 async def wire_tools(profile: str = "all") -> list[Schema]:
@@ -117,5 +118,23 @@ async def test_the_resource_templates_match_the_snapshot(
     async with Client(profile_server(profile)) as client:
         templates = sorted(await client.list_resource_templates(), key=lambda t: t.uri_template)
     wire = [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in templates]
+
+    assert wire == snapshot
+
+
+@profiles
+async def test_the_resources_and_prompts_match_the_snapshot(
+    snapshot: SnapshotAssertion, profile: str
+) -> None:
+    server = profile_server(profile)
+    async with Client(server) as client:
+        resources = sorted(await client.list_resources(), key=lambda r: str(r.uri))
+        prompts = sorted(await client.list_prompts(), key=lambda p: p.name)
+    wire = {
+        "resources": [
+            r.model_dump(mode="json", by_alias=True, exclude_none=True) for r in resources
+        ],
+        "prompts": [p.model_dump(mode="json", by_alias=True, exclude_none=True) for p in prompts],
+    }
 
     assert wire == snapshot

@@ -180,3 +180,17 @@ def test_read_only_must_be_a_boolean(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PAPERLESS_MCP_READ_ONLY", "maybe")
 
     assert invalid_fields(ServerSettings) == [("read_only",)]
+
+
+@pytest.mark.parametrize("variable", ["PAPERLESS_MCP_TOOLSETS", "PAPERLESS_MCP_DISABLED_TOOLS"])
+def test_malformed_json_names_both_accepted_formats(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    monkeypatch.setenv(variable, '["core", ')
+
+    with pytest.raises(ValidationError) as caught:
+        _ = ServerSettings.model_validate({})
+
+    message = caught.value.errors()[0]["msg"]
+    assert "comma-separated" in message
+    assert "JSON array" in message

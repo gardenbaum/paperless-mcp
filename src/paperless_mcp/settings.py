@@ -14,10 +14,9 @@ from typing import Annotated, ClassVar, Literal, cast
 from pydantic import Field, HttpUrl, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+from paperless_mcp.domain.toolsets import ALL_TOOLSETS
 
-# The value of ``PAPERLESS_MCP_TOOLSETS`` that selects every toolset.
-ALL_TOOLSETS = "all"
+type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
 def _names(value: object, *, lower: bool) -> object:
@@ -25,7 +24,13 @@ def _names(value: object, *, lower: bool) -> object:
     if not isinstance(value, str):
         return value
     text = value.strip()
-    parsed = cast("list[object]", json.loads(text) if text.startswith("[") else text.split(","))
+    try:
+        parsed = cast("list[object]", json.loads(text) if text.startswith("[") else text.split(","))
+    except ValueError:
+        message = (
+            'not valid JSON; use a comma-separated list (core,pdf) or a JSON array (["core","pdf"])'
+        )
+        raise ValueError(message) from None
     names = [str(item).strip() for item in parsed]
     names = [name.lower() if lower else name for name in names if name]
     return tuple(dict.fromkeys(names))
