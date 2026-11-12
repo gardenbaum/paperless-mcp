@@ -16,6 +16,8 @@ from fakes.accounts import ADMIN, READER, READER_PERMISSIONS
 PORT = os.environ.get("PAPERLESS_E2E_PORT", "8010")
 BASE_URL = f"http://127.0.0.1:{PORT}"
 API_VERSION = 10
+# The release the stack runs: the pinned one, or the one `just e2e-latest` started.
+EXPECTED_VERSION = os.environ.get("PAPERLESS_E2E_VERSION", "3.4.2")
 READY_TIMEOUT = 300.0
 CONSUME_TIMEOUT = 180.0
 # Every custom field data type of 3.4.2 except `select`, which needs options (see seed()).

@@ -46,6 +46,8 @@ docs-sync-paperless:
     trap 'rm -rf "$tmp"' EXIT
     version="${PAPERLESS_VERSION_OVERRIDE:-{{PAPERLESS_VERSION}}}"
     repo="${PAPERLESS_REPO:-https://github.com/paperless-ngx/paperless-ngx}"
+    # PAPERLESS_DOCS_DIR: write elsewhere (drift-check generates a fresh copy to compare).
+    target="${PAPERLESS_DOCS_DIR:-docs/vendor/paperless}"
     image="ghcr.io/paperless-ngx/paperless-ngx:$version"
     git -c advice.detachedHead=false clone --quiet --depth 1 --branch "v$version" --filter=blob:none --sparse "$repo" "$tmp/src"
     git -C "$tmp/src" sparse-checkout set docs
@@ -64,10 +66,10 @@ docs-sync-paperless:
         cp "$tmp/src/docs/$f" "$tmp/out/$f"
     done
     echo "$(git -C "$tmp/src" rev-parse HEAD) v$version image-digest $digest" > "$tmp/out/UPSTREAM"
-    rm -rf docs/vendor/paperless
-    mkdir -p docs/vendor
-    mv "$tmp/out" docs/vendor/paperless
-    echo "Paperless docs synced: $(cat docs/vendor/paperless/UPSTREAM)"
+    rm -rf "$target"
+    mkdir -p "$(dirname "$target")"
+    mv "$tmp/out" "$target"
+    echo "Paperless docs synced: $(cat "$target/UPSTREAM")"
 
 # Install or update the development environment.
 install:
@@ -167,6 +169,28 @@ e2e-up:
 e2e: e2e-up
     uv run pytest -m e2e --no-cov
 
+# Run the E2E tests against the latest stable paperless-ngx 3.x image (weekly job; design 9.2),
+# not the pinned one. Own compose project and port (8011), so a stack from `e2e-up` is untouched.
+# PAPERLESS_E2E_VERSION pins a release instead of resolving the highest 3.x.y tag; the tests read
+# the expected version from it. Container logs of a failed run land in e2e-containers.log.
+e2e-latest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo="${PAPERLESS_REPO:-https://github.com/paperless-ngx/paperless-ngx}"
+    PAPERLESS_E2E_VERSION="${PAPERLESS_E2E_VERSION:-$(git ls-remote --tags --refs "$repo" | uv run python scripts/scheduled_jobs.py latest --major 3)}"
+    export PAPERLESS_E2E_VERSION
+    export PAPERLESS_E2E_PORT="${PAPERLESS_E2E_PORT:-8011}"
+    compose=(docker compose -p paperless-mcp-e2e-latest -f tests/e2e/compose.yaml -f tests/e2e/compose.latest.yaml)
+    cleanup() {
+        local status=$?
+        if (( status != 0 )); then "${compose[@]}" logs --no-color > e2e-containers.log || true; fi
+        "${compose[@]}" down --volumes --remove-orphans
+    }
+    trap cleanup EXIT
+    echo "E2E against paperless-ngx $PAPERLESS_E2E_VERSION on port $PAPERLESS_E2E_PORT"
+    "${compose[@]}" up -d
+    uv run pytest -m e2e --no-cov
+
 # Stop the E2E stack and delete its volumes, so the next start is a fresh instance.
 e2e-down:
     docker compose -f tests/e2e/compose.yaml down --volumes --remove-orphans
@@ -188,6 +212,44 @@ audit:
     # The export pins and hashes every transitive dependency: audit it as-is, without resolving.
     # (`${ignore[@]+...}`: an empty array is "unbound" under `set -u` in macOS's bash 3.2.)
     uvx pip-audit==2.10.1 --strict --disable-pip --requirement "$requirements" ${ignore[@]+"${ignore[@]}"}
+
+# Mutation testing of services/ and paperless/ with mutmut (weekly job; design 9.2): non-E2E
+# tests only, takes a few minutes. Report-only until PLMCP-21 adds the 80 % gate. Extra arguments
+# select mutants, e.g. `just mutation 'paperless_mcp.services.instance*'`. Delete mutants/ to
+# start from scratch. Writes mutants/summary.md (the score as Markdown) and mutants/survivors.txt.
+mutation *selection:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    uv run mutmut run {{selection}}
+    uv run mutmut export-cicd-stats
+    uv run mutmut results > mutants/survivors.txt
+    uv run python scripts/scheduled_jobs.py mutation-score mutants/mutmut-cicd-stats.json | tee mutants/summary.md
+
+# Compare the vendored Paperless schema and docs with the latest stable 3.x release (weekly job;
+# design 9.5). Needs docker and the network; changes nothing in the repository. DRIFT_REPORT=path
+# also copies the report there; DRIFT_OPEN_ISSUE=1 opens (or refreshes) the one open GitHub issue
+# labelled paperless-drift through `gh`.
+drift-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    repo="${PAPERLESS_REPO:-https://github.com/paperless-ngx/paperless-ngx}"
+    latest="$(git ls-remote --tags --refs "$repo" | uv run python scripts/scheduled_jobs.py latest --major 3)"
+    PAPERLESS_VERSION_OVERRIDE="$latest" PAPERLESS_DOCS_DIR="$tmp/fresh" {{just_executable()}} docs-sync-paperless
+    status=0
+    uv run python scripts/scheduled_jobs.py drift docs/vendor/paperless "$tmp/fresh" --report "$tmp/report.md" || status=$?
+    if (( status == 10 )); then
+        cat "$tmp/report.md"
+        if [[ -n "${DRIFT_REPORT:-}" ]]; then cp "$tmp/report.md" "$DRIFT_REPORT"; fi
+        if [[ "${DRIFT_OPEN_ISSUE:-}" == "1" ]]; then
+            uv run python scripts/scheduled_jobs.py open-issue \
+                --title "Vendored Paperless reference differs from the latest 3.x release" \
+                --label paperless-drift --body-file "$tmp/report.md"
+        fi
+    elif (( status != 0 )); then
+        exit "$status"
+    fi
 
 # Run every pre-commit hook on all files.
 precommit:

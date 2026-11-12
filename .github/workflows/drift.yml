@@ -1,0 +1,59 @@
+name: Paperless drift check
+
+# Weekly and on demand (design 9.5, 14): regenerate the vendored Paperless schema and docs from
+# the latest stable 3.x release and open a GitHub issue when they differ from docs/vendor/paperless.
+# At most one issue stays open (label paperless-drift); a later run refreshes it.
+on:
+  schedule:
+    - cron: "13 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      open_issue:
+        description: "Open or refresh the GitHub issue when drift is found (off: report only)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: drift
+  cancel-in-progress: false
+
+env:
+  # renovate: datasource=pypi depName=rust-just
+  RUST_JUST_VERSION: "1.59.0"
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      - name: Install just
+        run: uv tool install "rust-just==${RUST_JUST_VERSION}"
+
+      - name: Sync dependencies
+        run: uv sync --locked
+
+      - name: Compare the vendored reference with the latest 3.x release
+        run: just drift-check
+        env:
+          DRIFT_REPORT: drift-report.md
+          DRIFT_OPEN_ISSUE: ${{ (github.event_name == 'schedule' || inputs.open_issue) && '1' || '' }}
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Publish the drift report
+        run: |
+          if [ -f drift-report.md ]; then
+            cat drift-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No drift: the vendored Paperless reference matches the latest 3.x release." >> "$GITHUB_STEP_SUMMARY"
+          fi

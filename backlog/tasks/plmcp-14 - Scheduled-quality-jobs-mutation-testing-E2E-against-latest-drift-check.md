@@ -1,9 +1,11 @@
 ---
 id: PLMCP-14
 title: 'Scheduled quality jobs: mutation testing, E2E against latest, drift check'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:25:00Z'
+updated_date: '2026-11-12T16:38:00Z'
 labels: []
 milestone: m-1
 dependencies:
@@ -35,3 +37,20 @@ Weekly jobs catch weak tests and upstream drift. Tests written by AI often only 
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Add scripts/paperless_release.py (pure, tested): latest stable 3.x tag from git ls-remote output, drift comparison of two vendored dirs (ignoring UPSTREAM commit/digest), issue dedupe via injected gh runner, mutation score from mutmut stats. Tests first under tests/scripts (red then green); scripts/ added to coverage source, pythonpath and basedpyright.
+2. mutmut as dev dep (uv add --dev), [tool.mutmut] for services/ and paperless/, non-e2e tests only.
+3. E2E override: tests/e2e/compose.latest.yaml (image tag from PAPERLESS_E2E_VERSION), own compose project + port so it never touches the shared stack; e2e tests read expected version from PAPERLESS_E2E_VERSION.
+4. docs-sync-paperless gets PAPERLESS_DOCS_DIR output override. Recipes: mutation, e2e-latest, drift-check.
+5. Workflows: mutation.yml, e2e-latest.yml, drift.yml (weekly cron + workflow_dispatch, SHA-pinned, least privilege; drift has issues: write, report-only mutation summary + artifact).
+6. Validate with actionlint, local mutmut proof on one module, just check.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Design choices: (1) mutmut 3.8.1 (supports Python 3.14), configured in [tool.mutmut]: source_paths = services/ + paperless/, also_copy for src/, docs/vendor/paperless/ (schema guard) and backlog/decisions/; --no-cov and --ignore=tests/quality; e2e stays deselected via addopts. Full local run: 665 mutants in ~2 min, score 87.4 % (579 killed, 2 timeout, 84 survived), so the full scope is the local proof. Report-only: no threshold; PLMCP-21 gates. (2) Logic in scripts/scheduled_jobs.py (latest stable 3.x tag from git ls-remote, drift comparison ignoring UPSTREAM commit/digest, one-issue dedupe via label paperless-drift, injected runner for gh, mutation score = mutmut badge formula). Tests first in tests/quality (red: 23 failed against a stub, then green). scripts/ added to coverage source, pytest pythonpath, basedpyright include; one reviewed coverage exclusion for 'if __name__ == "__main__":'; ruff INP001 ignored for scripts/** (standalone scripts). No gate weakened. (3) E2E latest: overlay tests/e2e/compose.latest.yaml (image tag from PAPERLESS_E2E_VERSION) with own compose project and port 8011, so the pinned stack is untouched; e2e tests read the expected version from PAPERLESS_E2E_VERSION (default 3.4.2). (4) docs-sync-paperless got PAPERLESS_DOCS_DIR so drift-check regenerates into a temp dir; verified locally: just drift-check -> 'no drift' vs 3.4.2. Drift issue: opened or refreshed, never duplicated. (5) Workflows mutation.yml, e2e-latest.yml, drift.yml: cron + workflow_dispatch, SHA pins as ci.yml, contents: read (drift adds issues: write), actionlint clean. Not verifiable locally: the workflows on GitHub, gh issue creation, e2e-latest against a real stack (shared stack in use).
+<!-- SECTION:NOTES:END -->
