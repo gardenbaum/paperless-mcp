@@ -56,7 +56,9 @@ async def test_custom_fields_carry_data_type_and_select_options(backend: Backend
     fields = by_name(await backend.reader.taxonomy.list_taxonomy("custom_field"))
 
     select, text = fields["e2e-select"], fields["e2e-string"]
-    assert (select.data_type, select.select_options) == ("select", ("alpha", "beta"))
+    assert select.data_type == "select"
+    assert [option.label for option in select.select_options or ()] == ["alpha", "beta"]
+    assert all(option.id for option in select.select_options or ())
     assert (text.data_type, text.select_options) == ("string", None)
     assert len([name for name in fields if name.startswith("e2e-")]) >= 10
 

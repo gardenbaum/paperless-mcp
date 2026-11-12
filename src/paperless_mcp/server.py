@@ -16,8 +16,10 @@ from paperless_mcp import __version__
 from paperless_mcp.observability import CallLogging
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import RetryPolicy, connect
+from paperless_mcp.paperless.documents import PaperlessDocumentReader
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
+from paperless_mcp.services.documents import DocumentService
 from paperless_mcp.services.instance import InstanceService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
 from paperless_mcp.tools import core
@@ -26,7 +28,7 @@ from paperless_mcp.tools._shared import SERVICES, Services
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
-    from paperless_mcp.domain.ports import InstanceReader, TaxonomyReader
+    from paperless_mcp.domain.ports import DocumentReader, InstanceReader, TaxonomyReader
     from paperless_mcp.paperless.client import PaperlessClient
     from paperless_mcp.settings import PaperlessSettings, ServerSettings
 
@@ -51,11 +53,16 @@ class Ports:
 
     instance: InstanceReader
     taxonomy: TaxonomyReader
+    documents: DocumentReader
 
 
 def paperless_ports(client: PaperlessClient) -> Ports:
     """The Paperless adapter for every port, all on ``client``."""
-    return Ports(instance=PaperlessInstanceReader(client), taxonomy=PaperlessTaxonomyReader(client))
+    return Ports(
+        instance=PaperlessInstanceReader(client),
+        taxonomy=PaperlessTaxonomyReader(client),
+        documents=PaperlessDocumentReader(client),
+    )
 
 
 def create_server(
@@ -76,6 +83,7 @@ def create_server(
         Paperless rejects the token or API version 10.
     """
     credentials = StaticTokenProvider(paperless.token.get_secret_value())
+    web_url = str(paperless.public_url or paperless.url)
 
     @lifespan
     async def start(_server: FastMCP) -> AsyncIterator[dict[str, object]]:
@@ -87,9 +95,11 @@ def create_server(
             retry=RetryPolicy(),
         ) as client:
             adapters = ports(client)
+            taxonomy = TaxonomyResolver(adapters.taxonomy, credentials, ttl=TAXONOMY_TTL)
             services = Services(
                 instance=InstanceService(adapters.instance),
-                taxonomy=TaxonomyResolver(adapters.taxonomy, credentials, ttl=TAXONOMY_TTL),
+                taxonomy=taxonomy,
+                documents=DocumentService(adapters.documents, taxonomy, web_url=web_url),
             )
             overview = await services.instance.probe(settings.startup_timeout)
             if overview is None:

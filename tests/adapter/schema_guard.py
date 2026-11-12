@@ -38,6 +38,14 @@ UNDECLARED_QUERY_PARAMETERS: Mapping[tuple[str, str], Mapping[str, str]] = {
 # reason. Their bodies are not checked; the live contract suite (tests/contract) checks the
 # adapter against the real ones instead.
 WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
+    ("GET", "/api/documents/", 200): (
+        "`fields=` drops properties the schema requires, and custom field values can be booleans "
+        "and id lists, which the value's oneOf omits (PLMCP-10)"
+    ),
+    ("GET", "/api/documents/", 403): (
+        "an unknown or hidden more_like_id is answered with HttpResponseForbidden, text/html "
+        "(PLMCP-10)"
+    ),
     ("GET", "/api/status/", 200): (
         "3.4.2 nests index, classifier and sanity check under `tasks` and sends null errors; "
         "the schema has them top-level and non-nullable (PLMCP-7)"

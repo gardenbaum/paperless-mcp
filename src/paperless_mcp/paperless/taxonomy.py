@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from pydantic import AliasChoices, BaseModel, Field
 
 from paperless_mcp.domain.errors import PaperlessMcpError
-from paperless_mcp.domain.taxonomy import TaxonomyItem
+from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyItem
 from paperless_mcp.paperless.pagination import MAX_ITEMS, Page, collect
 
 if TYPE_CHECKING:
@@ -30,6 +30,7 @@ PATHS: dict[TaxonomyKind, str] = {
 
 
 class _Option(BaseModel):
+    id: str
     label: str
 
 
@@ -60,7 +61,9 @@ def _item(kind: TaxonomyKind, row: _Row) -> TaxonomyItem:
         parent=row.parent if tag else None,
         data_type=row.data_type,
         select_options=(
-            tuple(option.label for option in options or ()) if row.data_type == "select" else None
+            tuple(SelectOption(id=option.id, label=option.label) for option in options or ())
+            if row.data_type == "select"
+            else None
         ),
     )
 

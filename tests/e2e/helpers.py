@@ -11,7 +11,16 @@ from typing import cast
 
 import httpx2
 import pytest
-from fakes.accounts import ADMIN, READER, READER_PERMISSIONS
+from fakes.accounts import (
+    ADMIN,
+    BLIND,
+    BLIND_PERMISSIONS,
+    PRIVATE_ASN,
+    PRIVATE_CONTENT,
+    PUBLIC_ASN,
+    READER,
+    READER_PERMISSIONS,
+)
 
 PORT = os.environ.get("PAPERLESS_E2E_PORT", "8010")
 BASE_URL = f"http://127.0.0.1:{PORT}"
@@ -91,6 +100,7 @@ class Stack:
     # Fetched once: Paperless throttles /api/token/.
     admin_token: str
     reader_token: str
+    blind_token: str
 
 
 def pdf(text: str) -> bytes:
@@ -279,7 +289,7 @@ def seed(admin: httpx2.Client) -> Seeded:
     }
 
     public = ensure_document(admin, "e2e-public-invoice", "E2E public invoice ACME 2026")
-    private = ensure_document(admin, "e2e-private-note", "E2E private admin only note")
+    private = ensure_document(admin, "e2e-private-note", PRIVATE_CONTENT)
     select_field = obj(parse(admin.get(f"/api/custom_fields/{fields['select']}/")))
     option_id = obj(seq(obj(select_field["extra_data"])["select_options"])[0])["id"]
     values: Json = {
@@ -302,6 +312,7 @@ def seed(admin: httpx2.Client) -> Seeded:
             "correspondent": correspondent,
             "document_type": document_type,
             "storage_path": storage_path,
+            "archive_serial_number": PUBLIC_ASN,
             "custom_fields": [{"field": fields[kind], "value": v} for kind, v in values.items()],
         },
     ).raise_for_status()
@@ -312,6 +323,8 @@ def seed(admin: httpx2.Client) -> Seeded:
         f"/api/documents/{private}/",
         json={
             "owner": admin_id,
+            "content": PRIVATE_CONTENT,  # reconciles a stack seeded with the old text
+            "archive_serial_number": PRIVATE_ASN,
             "tags": [private_tag],
             "set_permissions": {
                 "view": {"users": [], "groups": []},
@@ -337,6 +350,13 @@ def seed(admin: httpx2.Client) -> Seeded:
             "user_permissions": READER_PERMISSIONS,
         },
         reconcile={"user_permissions": READER_PERMISSIONS},
+    )
+    _ = get_or_create(
+        admin,
+        "/api/users/",
+        "username",
+        {"username": BLIND[0], "password": BLIND[1], "user_permissions": BLIND_PERMISSIONS},
+        reconcile={"user_permissions": BLIND_PERMISSIONS},
     )
     return Seeded(
         parent_tag=parent,

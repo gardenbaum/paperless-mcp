@@ -484,7 +484,20 @@
                   'anyOf': list([
                     dict({
                       'items': dict({
-                        'type': 'string',
+                        'description': 'An option of a select custom field; documents store its id as the value.',
+                        'properties': dict({
+                          'id': dict({
+                            'type': 'string',
+                          }),
+                          'label': dict({
+                            'type': 'string',
+                          }),
+                        }),
+                        'required': list([
+                          'id',
+                          'label',
+                        ]),
+                        'type': 'object',
                       }),
                       'type': 'array',
                     }),
@@ -493,7 +506,7 @@
                     }),
                   ]),
                   'default': None,
-                  'description': 'Custom fields of type select: option labels.',
+                  'description': 'Custom fields of type select: the options, ids and labels.',
                 }),
               }),
               'required': list([
@@ -532,6 +545,556 @@
         'type': 'object',
       }),
       'title': 'List taxonomy',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Search documents',
+      }),
+      'description': '''
+        Find documents by full text, similarity or structured filters; all filters combine.
+        
+        Names (correspondent, document type, storage path, tags, owner) match exactly or ignoring
+        case and accents; an unknown or ambiguous name is an error that lists candidates. Rows hold
+        ids, names, dates, custom field values and web_url, never the document text. count is the
+        total; pass next_page as page to see more.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'added_from': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'added_to': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'correspondent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'created_from': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'created_to': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'custom_field_query': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Paperless custom field query: [field, op, value], fields by name, combined with ['AND'|'OR', [...]] or ['NOT', [...]]. Ops: exact, in, isnull, exists, icontains, gt, gte, lt, lte, range, contains. Dates take relative values: ['due', 'range', ['today', 'in 30 days']].",
+          }),
+          'document_type': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'inbox': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'true: only inbox documents; false: none of them.',
+          }),
+          'more_like_id': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Find documents similar to this document id.',
+          }),
+          'ordering': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'created',
+                  '-created',
+                  'added',
+                  '-added',
+                  'modified',
+                  '-modified',
+                  'title',
+                  '-title',
+                  'archive_serial_number',
+                  '-archive_serial_number',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Sort field, '-' for descending; default newest first or relevance.",
+          }),
+          'owner': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Username or id of the owning user.',
+          }),
+          'page': dict({
+            'default': 1,
+            'description': 'Page number, from 1.',
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'page_size': dict({
+            'default': 25,
+            'description': 'Documents per page, at most 100.',
+            'maximum': 100,
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'query': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Full-text query in Paperless syntax over title, content, notes and fields, e.g. 'invoice AND acme', 'created:[2024 to 2025]', 'notes.note:paid'. Results are ranked by relevance and carry highlights.",
+          }),
+          'storage_path': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'tags_all': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have all of them.',
+          }),
+          'tags_any': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have at least one.',
+          }),
+          'tags_none': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have none of them.',
+          }),
+          'title_contains': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only titles containing this text, ignoring case.',
+          }),
+        }),
+        'type': 'object',
+      }),
+      'name': 'search_documents',
+      'outputSchema': dict({
+        'description': 'One page of a document search.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many documents match in total.',
+            'type': 'integer',
+          }),
+          'documents': dict({
+            'items': dict({
+              'description': 'A document as a compact search row, without its content.',
+              'properties': dict({
+                'added': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'correspondent': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'created': dict({
+                  'format': 'date',
+                  'type': 'string',
+                }),
+                'custom_fields': dict({
+                  'items': dict({
+                    'description': 'A custom field\'s value, readable: select labels, "EUR 12.50", document ids.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'value': dict({
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                      'value',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'document_type': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'highlights': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Full-text search only: matching excerpt, terms marked with <b>.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'storage_path': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'tags': dict({
+                  'items': dict({
+                    'description': 'An object a document refers to; name is null if the user may not see it.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'created',
+                'added',
+                'correspondent',
+                'document_type',
+                'storage_path',
+                'tags',
+                'custom_fields',
+                'web_url',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'next_page': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The next page, null on the last one.',
+          }),
+          'page': dict({
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'count',
+          'page',
+          'next_page',
+          'documents',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Search documents',
     }),
   ])
 # ---

@@ -23,15 +23,17 @@ from typing import TYPE_CHECKING, cast
 import httpx2
 import pytest
 from e2e.helpers import EXPECTED_VERSION
-from fakes.accounts import ADMIN, READER
+from fakes.accounts import ADMIN, BLIND, READER
 from fakes.paperless import VERSION, FakePaperless, seeded
 
 from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
+    DocumentReader,
     InstanceReader,
     TaxonomyReader,
 )
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
+from paperless_mcp.paperless.documents import PaperlessDocumentReader
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
 
@@ -47,24 +49,33 @@ class Ports:
 
     instance: InstanceReader
     taxonomy: TaxonomyReader
+    documents: DocumentReader
 
 
 def fake_ports(fake: FakePaperless) -> Ports:
     """The fake implements every port itself."""
-    return Ports(instance=fake, taxonomy=fake)
+    return Ports(instance=fake, taxonomy=fake, documents=fake)
 
 
 def live_ports(client: PaperlessClient) -> Ports:
     """The adapter, one object per port, all on `client`."""
-    return Ports(instance=PaperlessInstanceReader(client), taxonomy=PaperlessTaxonomyReader(client))
+    return Ports(
+        instance=PaperlessInstanceReader(client),
+        taxonomy=PaperlessTaxonomyReader(client),
+        documents=PaperlessDocumentReader(client),
+    )
 
 
 @dataclass(frozen=True)
 class Backend:
-    """One Paperless, seen through the seeded superuser and the seeded restricted user."""
+    """One Paperless, seen through the seeded superuser, restricted user and blind user.
+
+    The blind user may sign in but holds no model permission (tests/fakes/accounts.py).
+    """
 
     admin: Ports
     reader: Ports
+    blind: Ports
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
     # (`just e2e-latest` runs the suite against a newer release than the pinned one).
     expected_version: str
@@ -75,6 +86,7 @@ def fake_backend() -> Backend:
     return Backend(
         admin=fake_ports(FakePaperless(state, user=ADMIN[0])),
         reader=fake_ports(FakePaperless(state, user=READER[0])),
+        blind=fake_ports(FakePaperless(state, user=BLIND[0])),
         expected_version=VERSION,
     )
 
@@ -97,5 +109,6 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
         yield Backend(
             admin=ports(stack.admin_token),
             reader=ports(stack.reader_token),
+            blind=ports(stack.blind_token),
             expected_version=EXPECTED_VERSION,
         )
