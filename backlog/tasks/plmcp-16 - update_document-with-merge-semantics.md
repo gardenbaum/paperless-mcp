@@ -1,11 +1,11 @@
 ---
 id: PLMCP-16
 title: update_document with merge semantics
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T20:02:00Z'
+updated_date: '2026-11-12T21:00:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -25,19 +25,19 @@ A PATCH of custom_fields replaces the whole list in Paperless; two reference ser
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Updates title, correspondent, document type, storage path (by name or id), created date, archive serial number and owner; tags add, remove or set; custom fields set or remove by name
-- [ ] #2 Setting one custom field never removes others (tested against the fake and live Paperless)
-- [ ] #3 Values are validated per custom-field data type before sending (select by label, monetary with currency, document-link ids, dates)
-- [ ] #4 Unknown tag names fail with NotFound and a hint unless create_missing_tags is set
-- [ ] #5 Returns the updated document detail and invalidates affected cache entries
-- [ ] #6 FakePaperless and the contract suite cover every new port method
+- [x] #1 Updates title, correspondent, document type, storage path (by name or id), created date, archive serial number and owner; tags add, remove or set; custom fields set or remove by name
+- [x] #2 Setting one custom field never removes others (tested against the fake and live Paperless)
+- [x] #3 Values are validated per custom-field data type before sending (select by label, monetary with currency, document-link ids, dates)
+- [x] #4 Unknown tag names fail with NotFound and a hint unless create_missing_tags is set
+- [x] #5 Returns the updated document detail and invalidates affected cache entries
+- [x] #6 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -69,3 +69,9 @@ TDD evidence, honestly: red first (failing for the intended reason): custom_valu
 
 Live correction found by the full e2e run: an update's PATCH answer does not carry user_can_change (only a read does), so DocumentRecord.user_can_change is bool | None and the pre-check refuses only on False; and user_can_change is the OBJECT permission only (the reader gets True on the unowned public document; the missing change_document permission is a separate 403 on the update, with Paperless's generic message). The contract suite pins both. Mutation check done: with the cache invalidation loop removed, the two invalidation tests fail.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+update_document (core) changes title, correspondent, document type, storage path (name or id), created date, ASN and owner, adds/removes/sets tags and sets/removes custom fields by name, and never drops data the caller did not ask to change: it reads the document, merges custom fields and tags, sends only what differs (no-op when nothing does) and returns the updated detail plus implicit_tags. Tags follow Paperless's live-verified hierarchy: wanted tags are closed over ancestors (idempotent tags_set), and a removal that would also drop child tags is rejected unless the children are removed explicitly (pure helpers in services/tag_hierarchy.py for PLMCP-22). Custom-field values are validated per data type before sending (select by label, monetary with currency, int32, url, strict dates, booleans, document links that must be visible; links are mirrored by Paperless, which the description states). Everything predictable (title, change permission, owner id, links) is checked before create_missing_tags creates any tag; later failures name created tags. Owner changes require confirm=true (new decision-12, supplements decision-6). Caches are invalidated for affected kinds. New DocumentWriter.update_document and TaxonomyWriter.create_tag ports with adapter, FakePaperless (PATCH replaces lists wholesale, tag hierarchy, link mirroring) and contract tests on fake and live 3.4.2. The read-then-PATCH race is documented (deferred note on PLMCP-37). Verified: just check 980 passed; just e2e 147 passed; just mutation 100 % (exit 0). Independent review: 1 Critical, 4 Important and 8 Minor fixed. Deliberate: snapshot (tool surface, error-message snapshot), schema-guard deviations for PATCH ?fields=, the PATCH response, narrowed custom-field value requests and the POST /api/tags/ response; e2e seed reconciles stale back-links; test_restricted_user_cannot_see_private_objects robust to foreign objects. DoD #1 left unchecked: tag_hierarchy tests and the e2e additions were written with or after the code. DoD #2 and #4 follow from CI and the merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
