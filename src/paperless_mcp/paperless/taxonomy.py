@@ -1,4 +1,4 @@
-"""TaxonomyReader on the list endpoints of the taxonomy kinds, users and groups.
+"""TaxonomyReader on the list endpoints of the taxonomy kinds, users and groups, and TaxonomyWriter.
 
 Paperless filters every list by the user's permissions and answers 403 when the user lacks the
 kind's global view permission. Users come with e-mail addresses and permission lists; only the
@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from paperless_mcp.domain.taxonomy import TaxonomyKind
     from paperless_mcp.paperless.client import PaperlessClient
 
+# MatchingAlgorithm.NONE: the tag is only ever set by hand.
+NO_MATCHING = 0
 PATHS: dict[TaxonomyKind, str] = {
     "tag": "/api/tags/",
     "correspondent": "/api/correspondents/",
@@ -90,3 +92,23 @@ class PaperlessTaxonomyReader:
             message = f"Paperless has more than {MAX_ITEMS} {label}s; this server reads up to that."
             raise PaperlessMcpError(message)
         return [_item(kind, row) for row in collected.items]
+
+
+class PaperlessTaxonomyWriter:
+    """``TaxonomyWriter`` over the Paperless REST API."""
+
+    def __init__(self, client: PaperlessClient) -> None:
+        """Write through ``client``."""
+        self._client: PaperlessClient = client
+
+    async def create_tag(self, name: str) -> TaxonomyItem:
+        """See ``TaxonomyWriter.create_tag``.
+
+        Matching algorithm 0 is "none": Paperless's default would train its classifier to put
+        the new tag on future documents by itself. The creating user owns the tag, as in the
+        web UI.
+        """
+        body = {"name": name, "matching_algorithm": NO_MATCHING}
+        row = await self._client.call("POST", PATHS["tag"], _Row, json=body)
+        # The create answer carries no count; a new tag has no documents.
+        return _item("tag", row).model_copy(update={"document_count": 0})

@@ -169,3 +169,40 @@ def test_a_hidden_document_is_answered_with_html_by_the_file_endpoints() -> None
 
     check_response(get("/api/documents/1/thumb/"), response)
     check_response(get("/api/documents/1/download/"), response)
+
+
+def patch(body: object) -> httpx2.Request:
+    return httpx2.Request(
+        "PATCH", BASE_URL + "/api/documents/1/", json=body, params={"fields": "id"}, headers=HEADERS
+    )
+
+
+def test_a_document_patch_may_carry_boolean_and_id_list_custom_field_values() -> None:
+    check_request(
+        patch(
+            {
+                "title": "t",
+                "custom_fields": [
+                    {"field": 1, "value": True},
+                    {"field": 2, "value": [3, 4]},
+                    {"field": 3, "value": "EUR12.50"},
+                    {"field": 4, "value": None},
+                ],
+            }
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"title": 5},
+        {"tags": "one"},
+        {"custom_fields": [{"field": "one", "value": True}]},
+        {"custom_fields": [{"value": True}]},
+        {"custom_fields": [{"field": 1, "value": {"nested": 1}}, {"field": 2}]},
+    ],
+)
+def test_the_rest_of_a_document_patch_is_still_checked(body: object) -> None:
+    with pytest.raises(SchemaViolationError):
+        check_request(patch(body))

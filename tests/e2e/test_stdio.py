@@ -82,5 +82,5 @@ async def test_the_environment_selects_the_tools_over_stdio(stack: Stack) -> Non
     trimmed = await listed_tools(stack, PAPERLESS_MCP_DISABLED_TOOLS="get_task, list_taxonomy")
 
     assert "get_instance_overview" in default
-    assert read_only == default
+    assert read_only == default - {"update_document"}  # the one tool that changes data
     assert trimmed == default - {"get_task", "list_taxonomy"}

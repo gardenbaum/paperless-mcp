@@ -38,11 +38,13 @@ from fakes.accounts import (
     READER_PERMISSIONS,
 )
 from fakes.custom_field_query import compile_query
+from fakes.document_values import coerce, reject, tag_closure
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
     DocumentFile,
     DocumentHit,
     DocumentPage,
+    DocumentPatch,
     DocumentQuery,
     DocumentRecord,
     DocumentVersion,
@@ -65,12 +67,16 @@ from paperless_mcp.paperless.documents import beyond_last_page, unseen_document
 from paperless_mcp.paperless.tasks import not_found
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Collection
+    from collections.abc import Callable, Collection
+    from types import CoroutineType
 
     from _typeshed import SupportsRichComparison
 
     from paperless_mcp.domain.documents import FileVersion
     from paperless_mcp.domain.taxonomy import TaxonomyKind
+
+# Paperless's max_length of document titles and tag names.
+MAX_TITLE = 128
 
 VERSION = "3.4.2"
 API_VERSION = 10
@@ -205,6 +211,10 @@ class FakeDocument(Owned):
     # None: Paperless made no archive version (e.g. a plain text document).
     archive: bytes | None = b"%PDF-1.4 fake archive version, longer than the original"
     thumbnail: bytes = THUMBNAIL
+
+    def __post_init__(self) -> None:
+        """Name the file after the title unless given; a rename keeps the file's name."""
+        self.file_name = self.file_name or f"{self.title}.pdf"
 
     @property
     def original_filename(self) -> str:
@@ -401,8 +411,8 @@ _WRITES: set[object] = set()
 
 
 def write[F: FakePaperless, **P, R](
-    method: Callable[Concatenate[F, P], Awaitable[R]],
-) -> Callable[Concatenate[F, P], Awaitable[R]]:
+    method: Callable[Concatenate[F, P], CoroutineType[object, object, R]],
+) -> Callable[Concatenate[F, P], CoroutineType[object, object, R]]:
     """Mark a fake method as a write: it fails unless the fake allows writes."""
 
     @functools.wraps(method)
@@ -659,29 +669,110 @@ class FakePaperless:
 
     async def get_document(self, document_id: int) -> DocumentRecord:
         """`DocumentReader.get_document` (DocumentViewSet.retrieve, `fields=` without content)."""
+        return _record(self._seen(document_id))
+
+    @write
+    async def update_document(self, document_id: int, patch: DocumentPatch) -> DocumentRecord:
+        """`DocumentWriter.update_document` (DocumentViewSet.partial_update).
+
+        Order in Paperless 3.4.2: the global `change_document` permission (403), then the
+        document among those the user may see (404), then object permission (403: an owner or
+        a superuser may change it, a viewer may not). Lists are replaced as a whole.
+
+        Raises:
+            Validation: Paperless's 400 for a value, with its message.
+        """
+        if not self.user.has("change_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
         document = self._seen(document_id)
-        return DocumentRecord(
-            id=document.id,
-            title=document.title,
-            created=document.created,
-            added=document.added,
-            modified=document.modified,
-            archive_serial_number=document.archive_serial_number,
-            owner=document.owner,
-            correspondent=document.correspondent,
-            document_type=document.document_type,
-            storage_path=document.storage_path,
-            tags=tuple(document.tags),
-            custom_fields=tuple(
-                CustomFieldValue(field=number, value=value)
-                for number, value in document.custom_fields.items()
-            ),
-            original_file_name=document.original_filename,
-            mime_type=document.mime_type,
-            page_count=document.page_count,
-            notes_count=len(document.notes),
-            versions=tuple(document.versions),
-        )
+        if document.owner not in {None, self.user.id} and not self.user.is_superuser:
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        changes = self._changes(document, patch)
+        document.__dict__.update(changes)
+        document.modified = datetime.now(UTC)
+        return _record(document)
+
+    def _changes(self, document: FakeDocument, patch: DocumentPatch) -> dict[str, object]:
+        """The attributes `patch` sets, validated like the serializer; nothing is applied."""
+        state = self.state
+        exists: dict[str, set[int]] = {
+            "correspondent": {o.id for o in state.correspondents},
+            "document_type": {o.id for o in state.document_types},
+            "storage_path": {o.id for o in state.storage_paths},
+            "owner": {u.id for u in state.users},
+        }
+        changes: dict[str, object] = {}
+        for name in patch.model_fields_set - {"tags", "custom_fields"}:
+            value = cast("object", getattr(patch, name))
+            if name in exists and value is not None and value not in exists[name]:
+                reject(name, f'Invalid pk "{value}" - object does not exist.')
+            changes[name] = value
+        self._check_title_and_number(document, changes)
+        if patch.tags is not None:
+            known = {t.id: t for t in state.tags}
+            for tag in patch.tags:
+                if tag not in known:
+                    reject("tags", f'Invalid pk "{tag}" - object does not exist.')
+            changes["tags"] = tag_closure(document.tags, list(patch.tags), known)
+        if patch.custom_fields is not None:
+            changes["custom_fields"] = self._custom_fields(patch)
+        return changes
+
+    def _check_title_and_number(self, document: FakeDocument, changes: dict[str, object]) -> None:
+        title = changes.get("title")
+        if isinstance(title, str) and len(title) > MAX_TITLE:
+            reject("title", f"Ensure this field has no more than {MAX_TITLE} characters.")
+        number = changes.get("archive_serial_number")
+        if isinstance(number, int):
+            if number < 0:
+                reject("archive_serial_number", "Ensure this value is greater than or equal to 0.")
+            taken = (
+                d.archive_serial_number == number and d is not document
+                for d in self.state.documents
+            )
+            if any(taken):
+                message = "document with this archive serial number already exists."
+                reject("archive_serial_number", message)
+
+    def _custom_fields(self, patch: DocumentPatch) -> dict[int, JsonValue]:
+        """The new custom field values; a field named twice keeps its last value."""
+        fields = {f.id: f for f in self.state.custom_fields}
+        documents = {d.id for d in self.state.documents}
+        stored: dict[int, JsonValue] = {}
+        for index, item in enumerate(patch.custom_fields or ()):
+            if item.field not in fields:
+                where = f"custom_fields.{index}.field"
+                reject(where, f'Invalid pk "{item.field}" - object does not exist.')
+            try:
+                stored[item.field] = coerce(fields[item.field], item.value, documents)
+            except ValueError as error:
+                where = f"custom_fields.{index}.non_field_errors"
+                reject(where, str(error))
+        return stored
+
+    @write
+    async def create_tag(self, name: str) -> TaxonomyItem:
+        """`TaxonomyWriter.create_tag` (TagViewSet.create): owned by the creator.
+
+        Raises:
+            PermissionDenied: The user lacks the global `add_tag` permission.
+            Validation: A blank or too long name, or the creator has a tag of that name.
+        """
+        if not self.user.has("add_tag"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        if not name.strip():
+            reject("name", "This field may not be blank.")
+        if len(name) > MAX_TITLE:
+            reject("name", f"Ensure this field has no more than {MAX_TITLE} characters.")
+        if any(t.name == name and t.owner == self.user.id for t in self.state.tags):
+            reject("error", "Object violates owner / name unique constraint")
+        tag = FakeTag(id=max((t.id for t in self.state.tags), default=0) + 1, name=name)
+        tag.owner = self.user.id
+        self.state.tags.append(tag)
+        return TaxonomyItem(id=tag.id, name=tag.name, document_count=0, colour=tag.colour)
 
     async def get_document_content(self, document_id: int) -> str:
         """`DocumentReader.get_document_content` (retrieve with `fields=content`)."""
@@ -844,6 +935,31 @@ def _ordered(
         return (value is None, 0 if value is None else value, document.id)
 
     return sorted(documents, key=key, reverse=ordering.startswith("-"))
+
+
+def _record(document: FakeDocument) -> DocumentRecord:
+    return DocumentRecord(
+        id=document.id,
+        title=document.title,
+        created=document.created,
+        added=document.added,
+        modified=document.modified,
+        archive_serial_number=document.archive_serial_number,
+        owner=document.owner,
+        correspondent=document.correspondent,
+        document_type=document.document_type,
+        storage_path=document.storage_path,
+        tags=tuple(document.tags),
+        custom_fields=tuple(
+            CustomFieldValue(field=number, value=value)
+            for number, value in document.custom_fields.items()
+        ),
+        original_file_name=document.original_filename,
+        mime_type=document.mime_type,
+        page_count=document.page_count,
+        notes_count=len(document.notes),
+        versions=tuple(document.versions),
+    )
 
 
 def _hit(document: FakeDocument, highlights: str | None) -> DocumentHit:

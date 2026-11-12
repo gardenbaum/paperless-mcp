@@ -37,7 +37,9 @@ def test_seeded_taxonomy_and_all_custom_field_types(stack: Stack) -> None:
 
 def test_restricted_user_cannot_see_private_objects(stack: Stack) -> None:
     ids = {num(d["id"]) for d in results(stack.reader.get("/api/documents/"))}
-    assert ids == {stack.seeded.public_document}
+    # Other tests on the shared stack may add documents; only the seed objects are asserted.
+    assert stack.seeded.public_document in ids
+    assert stack.seeded.private_document not in ids
     assert stack.reader.get(f"/api/documents/{stack.seeded.private_document}/").status_code == 404
     assert stack.reader.post("/api/tags/", json={"name": "nope"}).status_code == 403
 

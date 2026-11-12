@@ -80,6 +80,17 @@ def _readable(value: JsonValue, field: TaxonomyItem | None) -> JsonValue:
     return f"{money[1]} {money[2]}" if money else value
 
 
+async def owner_id(taxonomy: TaxonomyResolver, value: NameOrId | None) -> int | None:
+    """The user id ``value`` names. Paperless takes any owner id; only a username needs the list."""
+    if isinstance(value, int) or (value and value.strip().isascii() and value.strip().isdigit()):
+        return int(value)
+    try:
+        return None if value is None else (await taxonomy.resolve("user", value)).id
+    except PermissionDenied as error:
+        hint = "Pass the owner's user id instead of the username."
+        raise PermissionDenied(error.message, hint=hint) from None
+
+
 class DocumentService:
     """Finds documents for the current user."""
 
@@ -141,16 +152,7 @@ class DocumentService:
         }
 
     async def _owner(self, value: NameOrId | None) -> int | None:
-        """Paperless filters by any owner id; only a username needs the user list."""
-        if isinstance(value, int) or (
-            value and value.strip().isascii() and value.strip().isdigit()
-        ):
-            return int(value)
-        try:
-            return None if value is None else (await self._taxonomy.resolve("user", value)).id
-        except PermissionDenied as error:
-            hint = "Pass the owner's user id instead of the username."
-            raise PermissionDenied(error.message, hint=hint) from None
+        return await owner_id(self._taxonomy, value)
 
     async def _known(self, kind: TaxonomyKind) -> dict[int, TaxonomyItem]:
         try:
@@ -189,7 +191,12 @@ class DocumentService:
             NotFound: No such document, or the user may not see it.
             PermissionDenied: The user may not view documents at all.
         """
-        record = await self._reader.get_document(document_id)
+        return await self.detail(await self._reader.get_document(document_id), include)
+
+    async def detail(
+        self, record: DocumentRecord, include: Collection[Include] = ()
+    ) -> DocumentDetail:
+        """The detail of ``record`` as ``get`` returns it: names, readable fields, sections."""
         kinds: tuple[TaxonomyKind, ...] = (*REFERRED, "user")
         loaded = await asyncio.gather(*(self._known(kind) for kind in kinds))
         known = dict(zip(kinds, loaded, strict=True))

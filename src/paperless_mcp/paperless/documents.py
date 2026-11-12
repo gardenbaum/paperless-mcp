@@ -1,4 +1,4 @@
-"""DocumentReader on ``GET /api/documents/``.
+"""DocumentReader on ``GET /api/documents/`` and DocumentWriter on ``PATCH /api/documents/{id}/``.
 
 Every search names its ``fields``, so Paperless never sends the OCR content, notes or
 permissions. Full-text and more-like searches add ``__search_hit__`` to each row.
@@ -15,6 +15,7 @@ from paperless_mcp.domain.documents import (
     DocumentFile,
     DocumentHit,
     DocumentPage,
+    DocumentPatch,
     DocumentRecord,
     DocumentVersion,
     FileMetadata,
@@ -240,6 +241,35 @@ def _hit(row: _Row) -> DocumentHit:
     )
 
 
+def _record(row: _Detail) -> DocumentRecord:
+    return DocumentRecord(
+        id=row.id,
+        title=row.title,
+        created=row.created,
+        added=row.added,
+        modified=row.modified,
+        archive_serial_number=row.archive_serial_number,
+        owner=row.owner,
+        correspondent=row.correspondent,
+        document_type=row.document_type,
+        storage_path=row.storage_path,
+        tags=tuple(row.tags),
+        custom_fields=tuple(
+            CustomFieldValue(field=v.field, value=v.value) for v in row.custom_fields
+        ),
+        original_file_name=row.original_file_name,
+        mime_type=row.mime_type,
+        page_count=row.page_count,
+        notes_count=len(row.notes),
+        versions=tuple(
+            DocumentVersion(
+                id=v.id, added=v.added, version_label=v.version_label, is_root=v.is_root
+            )
+            for v in row.versions
+        ),
+    )
+
+
 class PaperlessDocumentReader:
     """``DocumentReader`` over the Paperless REST API."""
 
@@ -275,33 +305,7 @@ class PaperlessDocumentReader:
 
         Paperless answers 404 to a document that does not exist and to one the user may not see.
         """
-        row = await self._one(document_id, "", _Detail, {"fields": DETAIL_FIELDS})
-        return DocumentRecord(
-            id=row.id,
-            title=row.title,
-            created=row.created,
-            added=row.added,
-            modified=row.modified,
-            archive_serial_number=row.archive_serial_number,
-            owner=row.owner,
-            correspondent=row.correspondent,
-            document_type=row.document_type,
-            storage_path=row.storage_path,
-            tags=tuple(row.tags),
-            custom_fields=tuple(
-                CustomFieldValue(field=v.field, value=v.value) for v in row.custom_fields
-            ),
-            original_file_name=row.original_file_name,
-            mime_type=row.mime_type,
-            page_count=row.page_count,
-            notes_count=len(row.notes),
-            versions=tuple(
-                DocumentVersion(
-                    id=v.id, added=v.added, version_label=v.version_label, is_root=v.is_root
-                )
-                for v in row.versions
-            ),
-        )
+        return _record(await self._one(document_id, "", _Detail, {"fields": DETAIL_FIELDS}))
 
     async def get_document_content(self, document_id: int) -> str:
         """See ``DocumentReader.get_document_content``."""
@@ -406,3 +410,32 @@ class PaperlessDocumentReader:
             return await self._client.get(f"{PATH}{document_id}/{tail}", model, params=params)
         except NotFound:
             raise unseen_document(document_id) from None
+
+
+class PaperlessDocumentWriter:
+    """``DocumentWriter`` over the Paperless REST API."""
+
+    def __init__(self, client: PaperlessClient) -> None:
+        """Write through ``client``."""
+        self._client: PaperlessClient = client
+
+    async def update_document(self, document_id: int, patch: DocumentPatch) -> DocumentRecord:
+        """See ``DocumentWriter.update_document``.
+
+        Sends only the fields ``patch`` sets. The answer to a PATCH is the whole document, OCR
+        text included, unless ``fields`` limits it (it does on 3.4.2, although the schema does
+        not declare the parameter). Paperless answers 404 to a document that does not exist
+        or that the user may not see, and 403 to a user without the change permission.
+        """
+        body = patch.model_dump(mode="json", exclude_unset=True)
+        try:
+            row = await self._client.call(
+                "PATCH",
+                f"{PATH}{document_id}/",
+                _Detail,
+                params={"fields": DETAIL_FIELDS},
+                json=body,
+            )
+        except NotFound:
+            raise unseen_document(document_id) from None
+        return _record(row)

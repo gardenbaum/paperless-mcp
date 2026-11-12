@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from paperless_mcp.domain.documents import (
         DocumentFile,
         DocumentPage,
+        DocumentPatch,
         DocumentQuery,
         DocumentRecord,
         FileMetadata,
@@ -167,5 +168,35 @@ class TaskReader(Protocol):
         Raises:
             NotFound: No task with that id exists that the user may see.
             PermissionDenied: The user lacks the permission to view tasks.
+        """
+        ...
+
+
+class DocumentWriter(Protocol):
+    """Changes to documents."""
+
+    async def update_document(self, document_id: int, patch: DocumentPatch) -> DocumentRecord:
+        """Change the fields ``patch`` sets and return the document as it is afterwards.
+
+        Paperless replaces the tag and custom field lists as a whole: this port sends what it
+        is given, so callers merge first. Nothing else changes.
+
+        Raises:
+            NotFound: No such document, or the user may not see it.
+            PermissionDenied: The user may not change documents, or this one.
+            Validation: Paperless rejected a value (unknown id, wrong type, duplicate ASN).
+        """
+        ...
+
+
+class TaxonomyWriter(Protocol):
+    """Changes to tags, correspondents and the like."""
+
+    async def create_tag(self, name: str) -> TaxonomyItem:
+        """A new tag named ``name`` that matches nothing automatically, owned by the user.
+
+        Raises:
+            PermissionDenied: The user may not add tags.
+            Validation: The name is blank, too long, or the user already has such a tag.
         """
         ...
