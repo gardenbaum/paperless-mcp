@@ -26,8 +26,9 @@ class TaskStatus(BaseModel):
     task_type: Annotated[str, Field(description="E.g. consume_file (an upload).")]
     state: Annotated[TaskState, Field(description="pending, started, success, failure or revoked.")]
     message: Annotated[str | None, Field(description="Why the task failed; null otherwise.")]
-    document_id: Annotated[
-        int | None, Field(description="The document the task created or changed, once known.")
+    document_ids: Annotated[
+        tuple[int, ...],
+        Field(description="The documents the task created or changed, once known; may be several."),
     ]
     created: datetime
     finished: Annotated[datetime | None, Field(description="Null while the task is running.")]

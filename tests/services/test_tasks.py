@@ -52,7 +52,7 @@ class Scenario:
         if self.after is not None and self.clock.now - self.started >= self.after:
             self.task.status = "failure" if self.ends == "failure" else "success"
             self.task.finished = datetime(2026, 11, 12, tzinfo=UTC)
-            self.task.document_id = None if self.ends == "failure" else 9
+            self.task.document_ids = () if self.ends == "failure" else (9,)
             self.task.message = "broken" if self.ends == "failure" else None
 
 
@@ -87,7 +87,7 @@ async def test_a_task_that_has_ended_is_reported_at_once_even_when_asked_to_wait
 
     report = await scenario.service.get(ID, wait_seconds=20)
 
-    assert (report.state, report.document_id) == ("success", 9)
+    assert (report.state, report.document_ids) == ("success", (9,))
     assert (report.wait, report.waited_seconds) == ("finished", 0.0)
     assert scenario.clock.delays == []
 
@@ -136,6 +136,55 @@ async def test_a_wait_beyond_the_maximum_is_cut_to_the_maximum() -> None:
 
     assert (report.wait, report.waited_seconds) == ("timed_out", float(MAX_WAIT_SECONDS))
     assert sum(scenario.clock.delays) == MAX_WAIT_SECONDS
+
+
+class SlowReader:
+    """Every read takes three seconds of clock time and finds the task still running."""
+
+    def __init__(self, clock: ManualClock) -> None:
+        self.clock: ManualClock = clock
+        self.reads: int = 0
+
+    async def get_task(self, task_id: str) -> TaskStatus:
+        self.reads += 1
+        self.clock.now += 3
+        return await FakePaperless(_running(), user=ADMIN[0]).get_task(task_id)
+
+
+def _running():  # noqa: ANN202 -- test state
+    state = seeded()
+    state.tasks.append(FakeTask(id=1, task_id=ID, status="started"))
+    return state
+
+
+async def test_slow_reads_cannot_stretch_the_wait_beyond_its_bound() -> None:
+    clock = ManualClock()
+    reader = SlowReader(clock)
+    service = TaskService(reader, sleep=clock.sleep, clock=clock)
+
+    report = await service.get(ID, wait_seconds=5)
+
+    assert (report.state, report.wait) == ("started", "timed_out")
+    assert report.waited_seconds == 5.0
+    assert reader.reads == 1
+
+
+async def test_a_wait_over_the_maximum_is_clamped_not_rejected() -> None:
+    scenario = Scenario(after=None)
+
+    report = await scenario.service.get(ID, wait_seconds=MAX_WAIT_SECONDS + 1)
+
+    assert report.waited_seconds == float(MAX_WAIT_SECONDS)
+
+
+async def test_waited_seconds_are_rounded_to_a_tenth() -> None:
+    scenario = Scenario(after=None)
+    scenario.clock.now += 0  # keep the start
+    service = TaskService(_Reader(scenario), sleep=scenario.clock.sleep, clock=scenario.clock)
+
+    report = await service.get(ID, wait_seconds=0.25)
+
+    assert report.waited_seconds == 0.2
 
 
 async def test_a_negative_wait_is_no_wait() -> None:

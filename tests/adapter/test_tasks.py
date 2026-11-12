@@ -85,7 +85,7 @@ async def test_a_task_is_looked_up_by_its_celery_id_and_mapped(make_client: Clie
         task_type="consume_file",
         state="success",
         message=None,
-        document_id=3,
+        document_ids=(3,),
         created=datetime(2026, 11, 12, 17, 47, 20, 279846, tzinfo=UTC),
         finished=datetime(2026, 11, 12, 17, 47, 26, 284742, tzinfo=UTC),
     )
@@ -96,7 +96,7 @@ async def test_a_running_task_has_no_document_and_is_not_finished(
 ) -> None:
     status = await PaperlessTaskReader(make_client(Tasks(RUNNING))).get_task(UUID)
 
-    assert (status.state, status.document_id, status.finished) == ("started", None, None)
+    assert (status.state, status.document_ids, status.finished) == ("started", (), None)
 
 
 async def test_a_failed_task_reports_the_error_message_never_the_traceback(
@@ -109,14 +109,14 @@ async def test_a_failed_task_reports_the_error_message_never_the_traceback(
     assert "consumer.py" not in status.model_dump_json()
 
 
-async def test_a_task_that_wrote_several_documents_reports_the_first(
+async def test_a_task_that_wrote_several_documents_reports_them_all(
     make_client: ClientFactory,
 ) -> None:
     row: Json = {**DONE, "related_document_ids": [7, 8]}
 
     status = await PaperlessTaskReader(make_client(Tasks(row))).get_task(UUID)
 
-    assert status.document_id == 7
+    assert status.document_ids == (7, 8)
 
 
 async def test_no_row_for_the_id_is_not_found(make_client: ClientFactory) -> None:
@@ -135,3 +135,23 @@ async def test_a_user_without_the_task_permission_is_denied(make_client: ClientF
 
     with pytest.raises(PermissionDenied):
         _ = await PaperlessTaskReader(make_client(forbidden)).get_task(UUID)
+
+
+@pytest.mark.parametrize("asked", ["other", "E52F7466-0B2A-4106-86AF-9FDA489A6C52"])
+async def test_a_row_for_another_task_is_never_taken_for_the_one_asked_for(
+    make_client: ClientFactory, asked: str
+) -> None:
+    with pytest.raises(NotFound):
+        _ = await PaperlessTaskReader(make_client(Tasks(DONE))).get_task(asked)
+
+
+@pytest.mark.parametrize("blank", ["", "  "])
+async def test_a_blank_id_is_not_found_without_asking_paperless(
+    make_client: ClientFactory, blank: str
+) -> None:
+    server = Tasks(DONE)
+
+    with pytest.raises(NotFound):
+        _ = await PaperlessTaskReader(make_client(server)).get_task(blank)
+
+    assert server.sent == []

@@ -1,5 +1,6 @@
 """get_task through the assembled server against the seeded Paperless 3.4.2 stack."""
 
+import time
 import uuid
 from typing import TYPE_CHECKING, cast
 
@@ -7,7 +8,7 @@ import pytest
 from fastmcp import Client
 from harness import paperless_settings, server_settings
 
-from e2e.helpers import num, obj, parse, pdf
+from e2e.helpers import CONSUME_TIMEOUT, num, obj, parse, pdf, results, seq
 from paperless_mcp.server import create_server
 
 if TYPE_CHECKING:
@@ -30,7 +31,10 @@ async def get_task(stack: Stack, token: str, **arguments: object) -> Json:
 
 @pytest.fixture
 def upload(stack: Stack) -> Iterator[str]:
-    """The task id of a PDF just posted for consumption; its document is deleted afterwards."""
+    """The task id of a PDF just posted for consumption.
+
+    Teardown waits for the task to end (also when the test did not), then deletes its document.
+    """
     title = f"e2e-task-{uuid.uuid4().hex}"
     posted = stack.admin.post(
         "/api/documents/post_document/",
@@ -39,9 +43,14 @@ def upload(stack: Stack) -> Iterator[str]:
     ).raise_for_status()
     task_id = str(parse(posted))
     yield task_id
-    found = obj(parse(stack.admin.get("/api/documents/", params={"title__iexact": title})))
-    for row in cast("list[Json]", found["results"]):
-        _ = stack.admin.delete(f"/api/documents/{num(row['id'])}/")
+    deadline = time.monotonic() + CONSUME_TIMEOUT
+    while time.monotonic() < deadline:
+        [task] = results(stack.admin.get("/api/tasks/", params={"task_id": task_id}))
+        if task["status"] in {"success", "failure", "revoked"}:
+            for document in seq(task["related_document_ids"]):
+                _ = stack.admin.delete(f"/api/documents/{num(document)}/")
+            return
+        time.sleep(1)
 
 
 async def test_waiting_follows_a_fresh_upload_to_its_document(stack: Stack, upload: str) -> None:
@@ -49,8 +58,8 @@ async def test_waiting_follows_a_fresh_upload_to_its_document(stack: Stack, uplo
 
     assert (output["state"], output["wait"]) == ("success", "finished")
     assert output["task_type"] == "consume_file"
-    assert isinstance(output["document_id"], int)
-    document = obj(parse(stack.admin.get(f"/api/documents/{output['document_id']}/")))
+    [document_id] = cast("list[int]", output["document_ids"])
+    document = obj(parse(stack.admin.get(f"/api/documents/{document_id}/")))
     assert str(document["title"]).startswith("e2e-task-")
 
 

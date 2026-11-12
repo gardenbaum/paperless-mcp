@@ -41,7 +41,9 @@ class TaskService:
     async def get(self, task_id: str, *, wait_seconds: float = 0) -> TaskReport:
         """The task, after waiting up to ``wait_seconds`` (at most ``MAX_WAIT_SECONDS``) for it.
 
-        The wait ends as soon as the task has ended, successfully or not.
+        The wait ends as soon as the task has ended, successfully or not, or when the bound is
+        used up; a read that would start at the bound is skipped, so the whole call stays within
+        it (plus the one read in flight) and the last known status is reported as timed out.
 
         Raises:
             NotFound: No task with that id exists that the user may see.
@@ -52,8 +54,10 @@ class TaskService:
         status = await self._reader.get_task(task_id)
         while not status.is_final and (left := bound - (self._clock() - start)) > 0:
             await self._sleep(min(POLL_SECONDS, left))
+            if self._clock() - start >= bound:
+                break  # the bound covers reads too: never start one that cannot finish in time
             status = await self._reader.get_task(task_id)
-        waited = self._clock() - start
+        waited = round(self._clock() - start, 1) if bound > 0 else 0.0
         outcome: Wait = "not_requested"
         if bound > 0:
             outcome = "finished" if status.is_final else "timed_out"
@@ -66,7 +70,7 @@ def _report(status: TaskStatus, wait: Wait, waited_seconds: float) -> TaskReport
         task_type=status.task_type,
         state=status.state,
         message=status.message,
-        document_id=status.document_id,
+        document_ids=status.document_ids,
         created=status.created,
         finished=status.finished,
         wait=wait,

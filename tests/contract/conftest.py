@@ -106,7 +106,7 @@ def fake_consume(state: FakeState) -> Consume:
             status="success" if succeed else "failure",
             created=now,
             finished=now,
-            document_id=len(state.documents) + 1 if succeed else None,
+            document_ids=(len(state.documents) + 1,) if succeed else (),
             message=None if succeed else "broken.pdf: Error occurred while consuming document",
         )
         state.tasks.append(task)

@@ -375,21 +375,21 @@
         Follow a Paperless background task, such as an upload being processed, to its result.
         
         Reports state (pending, started, success, failure, revoked), the error message of a failed
-        task and the document id once known. With wait_seconds it polls until the task ends or the
-        wait is used up; wait says which: finished, timed_out (still running, call again) or
-        not_requested. Needs the permission to view tasks in Paperless.
+        task and the document ids once known. With wait_seconds it polls until the task ends or the
+        wait (at most 30 s in total) is used up; wait says which: finished, timed_out (still
+        running, call again) or not_requested. Needs the permission to view tasks in Paperless.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
           'task_id': dict({
-            'description': 'The task id an upload or other background work returned.',
+            'description': 'The task id (a UUID) that an upload or other background work returned.',
+            'pattern': '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
             'type': 'string',
           }),
           'wait_seconds': dict({
             'default': 0,
-            'description': 'Wait up to this many seconds (at most 30) for the task to end; 0 reads it once.',
-            'maximum': 30,
+            'description': 'Wait up to this many seconds for the task to end; more than 30 is cut to 30. 0 reads it once.',
             'minimum': 0,
             'type': 'integer',
           }),
@@ -407,16 +407,12 @@
             'format': 'date-time',
             'type': 'string',
           }),
-          'document_id': dict({
-            'anyOf': list([
-              dict({
-                'type': 'integer',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'The document the task created or changed, once known.',
+          'document_ids': dict({
+            'description': 'The documents the task created or changed, once known; may be several.',
+            'items': dict({
+              'type': 'integer',
+            }),
+            'type': 'array',
           }),
           'finished': dict({
             'anyOf': list([
@@ -477,7 +473,7 @@
           'task_type',
           'state',
           'message',
-          'document_id',
+          'document_ids',
           'created',
           'finished',
           'wait',

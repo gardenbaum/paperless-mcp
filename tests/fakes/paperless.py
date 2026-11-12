@@ -177,22 +177,26 @@ class FakeDocument(Owned):
 
 
 @dataclass(kw_only=True)
-class FakeTask(Owned):
+class FakeTask:
     """A background task, as `/api/tasks/` reports it.
+
+    Not owner-filtered: whether Paperless hides another owner's task from a user who may view
+    tasks is not verified on 3.4.2 (the seed has no such user).
 
     Attributes:
         task_id: The Celery UUID clients look tasks up by.
         message: The error message of a failed task (its traceback is not modelled).
-        document_id: The first of the task's related documents.
+        document_ids: The task's related documents.
     """
 
+    id: int
     task_id: str
     task_type: str = "consume_file"
     status: TaskState = "pending"
     created: datetime = datetime(2026, 11, 11, 19, 47, tzinfo=UTC)
     finished: datetime | None = None
     message: str | None = None
-    document_id: int | None = None
+    document_ids: tuple[int, ...] = ()
 
 
 @dataclass(kw_only=True)
@@ -522,13 +526,13 @@ class FakePaperless:
             message = "The Paperless user may not perform this action."
             raise PermissionDenied(message)
         for task in self.state.tasks:
-            if task.task_id == task_id and task.visible_to(self.user):
+            if task.task_id == task_id:
                 return TaskStatus(
                     task_id=task.task_id,
                     task_type=task.task_type,
                     state=task.status,
                     message=task.message,
-                    document_id=task.document_id,
+                    document_ids=task.document_ids,
                     created=task.created,
                     finished=task.finished,
                 )

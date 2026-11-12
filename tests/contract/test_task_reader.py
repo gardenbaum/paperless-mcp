@@ -27,7 +27,7 @@ async def test_a_consumed_upload_is_a_finished_task_with_its_document(backend: B
 
     assert (task.task_id, task.task_type, task.state) == (task_id, "consume_file", "success")
     assert task.is_final
-    assert task.document_id is not None
+    assert len(task.document_ids) == 1
     assert task.message is None
     assert task.finished is not None
     assert task.finished >= task.created
@@ -41,7 +41,7 @@ async def test_a_failed_upload_reports_a_message_and_no_document(backend: Backen
 
     assert task.state == "failure"
     assert task.is_final
-    assert task.document_id is None
+    assert task.document_ids == ()
     assert task.message
     assert "Traceback" not in task.message
     assert 'File "' not in task.message
@@ -59,7 +59,16 @@ async def test_an_unknown_task_id_is_not_found(backend: Backend) -> None:
 
 @pytest.mark.contract(CONTRACT)
 async def test_a_user_who_may_not_view_tasks_is_denied(backend: Backend) -> None:
-    task_id = backend.consume(succeed=True)
-
     with pytest.raises(PermissionDenied):
-        _ = await backend.reader.tasks.get_task(task_id)
+        _ = await backend.reader.tasks.get_task(str(uuid.uuid4()))
+
+
+@pytest.mark.contract(CONTRACT)
+@pytest.mark.parametrize("blank", ["", " "])
+async def test_a_blank_task_id_is_not_found_whatever_tasks_exist(
+    backend: Backend, blank: str
+) -> None:
+    _ = backend.consume(succeed=True)
+
+    with pytest.raises(NotFound):
+        _ = await backend.admin.tasks.get_task(blank)

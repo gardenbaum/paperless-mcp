@@ -26,6 +26,7 @@ TOOLSET = "core"
 # Most rows list_taxonomy returns and largest search page (decision-4: lists hold at most 100).
 LIST_LIMIT = 100
 PAGE_SIZE = 25
+UUID_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 
 type Named = Annotated[NameOrId | None, Field(description="Name or id; see list_taxonomy.")]
 type Day = Annotated[date | None, Field(description="Date (YYYY-MM-DD), inclusive.")]
@@ -173,16 +174,19 @@ async def search_documents(  # noqa: PLR0913 -- one parameter per filter, descri
 async def get_task(
     ctx: Context,
     task_id: Annotated[
-        str, Field(description="The task id an upload or other background work returned.")
+        str,
+        Field(
+            pattern=UUID_PATTERN,
+            description="The task id (a UUID) that an upload or other background work returned.",
+        ),
     ],
     wait_seconds: Annotated[
         int,
         Field(
             ge=0,
-            le=MAX_WAIT_SECONDS,
             description=(
-                f"Wait up to this many seconds (at most {MAX_WAIT_SECONDS}) for the task to end; "
-                "0 reads it once."
+                f"Wait up to this many seconds for the task to end; more than {MAX_WAIT_SECONDS} "
+                f"is cut to {MAX_WAIT_SECONDS}. 0 reads it once."
             ),
         ),
     ] = 0,
@@ -190,9 +194,9 @@ async def get_task(
     """Follow a Paperless background task, such as an upload being processed, to its result.
 
     Reports state (pending, started, success, failure, revoked), the error message of a failed
-    task and the document id once known. With wait_seconds it polls until the task ends or the
-    wait is used up; wait says which: finished, timed_out (still running, call again) or
-    not_requested. Needs the permission to view tasks in Paperless.
+    task and the document ids once known. With wait_seconds it polls until the task ends or the
+    wait (at most 30 s in total) is used up; wait says which: finished, timed_out (still
+    running, call again) or not_requested. Needs the permission to view tasks in Paperless.
     """
     return await services(ctx).tasks.get(task_id, wait_seconds=wait_seconds)
 

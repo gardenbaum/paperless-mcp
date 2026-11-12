@@ -55,16 +55,19 @@ class PaperlessTaskReader:
 
     async def get_task(self, task_id: str) -> TaskStatus:
         """See ``TaskReader.get_task``."""
+        if not task_id.strip():
+            raise not_found(task_id)  # Paperless would ignore a blank filter
         found = await self._client.get(PATH, Page[_Row], params={"task_id": task_id})
-        if not found.results:
+        # Never trust the filter alone: a blank or odd id must not return an unrelated task.
+        row = next((row for row in found.results if row.task_id == task_id), None)
+        if row is None:
             raise not_found(task_id)
-        row = found.results[0]
         return TaskStatus(
             task_id=row.task_id,
             task_type=row.task_type,
             state=row.status,
             message=_error_message(row.result_data),
-            document_id=row.related_document_ids[0] if row.related_document_ids else None,
+            document_ids=tuple(row.related_document_ids),
             created=row.date_created,
             finished=row.date_done,
         )
