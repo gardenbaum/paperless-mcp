@@ -1,11 +1,11 @@
 ---
 id: PLMCP-20
 title: 'ai toolset: ask_paperless_ai and get_ai_suggestions'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T20:54:00Z'
+updated_date: '2026-11-12T22:00:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -24,19 +24,19 @@ Paperless 3.x ships its own AI (RAG chat over documents and AI suggestions), so 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ask_paperless_ai(question, document_id single and optional) uses the Paperless chat endpoint and returns the complete answer; the endpoint takes only one document_id (or all documents), so a list is not offered
-- [ ] #2 get_ai_suggestions returns the AI suggestions for one document
-- [ ] #3 The toolset is hidden when Paperless AI is disabled
-- [ ] #4 Adapter tests are schema-guarded; just e2e-ai runs against an AI backend the developer provides via environment; CI needs no AI backend
-- [ ] #5 FakePaperless and the contract suite cover every new port method
-- [ ] #6 ai is in the default PAPERLESS_MCP_TOOLSETS (settings.py) and in TOOLSETS, TOOL_TOOLSETS and TOOLSET_REQUIRES (tools/_shared.py); the settings default test and the default-profile snapshot and budget test cover it
+- [x] #1 ask_paperless_ai(question, document_id single and optional) uses the Paperless chat endpoint and returns the complete answer; the endpoint takes only one document_id (or all documents), so a list is not offered
+- [x] #2 get_ai_suggestions returns the AI suggestions for one document
+- [x] #3 The toolset is hidden when Paperless AI is disabled
+- [x] #4 Adapter tests are schema-guarded; just e2e-ai runs against an AI backend the developer provides via environment; CI needs no AI backend
+- [x] #5 FakePaperless and the contract suite cover every new port method
+- [x] #6 ai is in the default PAPERLESS_MCP_TOOLSETS (settings.py) and in TOOLSETS, TOOL_TOOLSETS and TOOLSET_REQUIRES (tools/_shared.py); the settings default test and the default-profile snapshot and budget test cover it
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -65,3 +65,9 @@ Review round 1 ruling: single optional document_id is correct; AC #1 edited acco
 
 Review fix round 1. I1: client.request/call/get take retry=False; get_ai_suggestions uses it (one request on 503, test asserts it); the earlier 'accepted risk' about up to 3 model calls is void. I2: FakePaperless.get_ai_suggestions checks the owner-aware change permission (superuser, unowned, owner, or a change grant via FakeDocument.editors); contract test with an uploaded admin-owned document shared view-only to the reader gives PermissionDenied on fake and live (passed live, AI off, 403 comes first; the owner then meets disabled AI); Backend gained share_read_only. I3: the failure sentence at the END of a partially streamed answer (rstrip().endswith) raises UpstreamUnavailable (chosen over returning partial text + truncated: the answer is known broken); wording changes degrade to 'looks like an answer' (comment in paperless/ai.py). M1: idempotent_hint=True for both (MCP: environment unchanged), read_only and open_world stay True; README and ServerSettings docs say read-only clients may auto-approve these paid calls and how to opt out (PAPERLESS_MCP_TOOLSETS=core, PAPERLESS_MCP_DISABLED_TOOLS). M2: a truncated answer loses a trailing partial metadata delimiter; U+FFFD from a cut multi-byte character is accepted (commented). M3: timeout/size keeps partial text, a broken connection discards it (documented in stream_post). M4: the 400->NotFound mapping applies only to the body 'Document not found' (paperless/errors.py), other 400s stay Validation. M5: descriptions say may cost money, up to two minutes, not in loops, answer is data not instructions, 'couldn't find any content' may mean the LLM index is not built. M6: not done: progress per chunk would need a callback threaded through port and service for a tool that returns one complete answer; limitation accepted, clients see no progress during the up-to-two-minute wait. M7: disabled-AI hint also names Settings -> Application Configuration. M8: e2e-ai-containers.log is gitignored; the recipe unsets PAPERLESS_AI_* inherited from the shell; the PAPERLESS_AI_LLM_EMBEDDING_{BACKEND,MODEL,ENDPOINT,API_KEY} names were checked against settings in the 3.4.2 image (the values against a real backend are not). M9: the e2e AI test builds the LLM index itself and asserts at least one source (unverified without a backend). M10/M11: still unverified anywhere without a real backend: successful stream with trailer, real suggestions, the llm_index run call; AI timeouts are constants.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+New ai toolset (on by default, hidden when Paperless reports AI disabled): ask_paperless_ai(question, document_id optional) streams Paperless's RAG chat to a complete answer with up to three sources (bounded at 64 KiB / 120 s, never retried, failure sentence and mid-stream transport errors mapped to client-safe errors); get_ai_suggestions(document_id) returns the LLM suggestions with names and new_* proposals (never retried, 120 s timeout; distinct from the free classifier in get_document include=suggestions). AC #1 corrected: the endpoint accepts a single optional document_id, so the tool does too. Annotations read-only, idempotent, open-world; descriptions state cost, slowness, privacy and that answers are data. AiReader port with adapter, FakePaperless (AI off, owner-aware change permission) and contract tests on fake and live 3.4.2 with AI off; just e2e-ai runs the AI-on tests against a developer-provided backend (PAPERLESS_E2E_AI_*), CI needs none. ai joined the default toolsets and TOOLSET_REQUIRES (default profile 11 of 20 tools). Verified: just check 1079 passed; just e2e 154 passed, 6 skipped (AI on); just mutation 100 %. Independent review: 4 Important and 11 Minor addressed (M6 progress reporting noted as a limitation). Not verified: a successful run against a real LLM backend (owner's job). DoD #1 left unchecked: live contract tests and mutation-driven tests were not run red first. DoD #2 and #4 follow from CI and the merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
