@@ -140,7 +140,7 @@ def fake_upload(state: FakeState) -> Upload:
                 mime_type=mime_type,
                 file_name=filename,
                 original=content,
-                archive=content if mime_type == "application/pdf" else None,
+                archive=content + b"\n%archive" if mime_type == "application/pdf" else None,
             )
         )
         return number

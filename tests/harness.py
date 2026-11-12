@@ -82,7 +82,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     `taxonomy`, `documents` and `tasks` default to `reader` if that is a fake, else to the seeded
     admin's fake. `sleep` and `clock` replace the real ones the task wait uses. `toolsets`,
     `read_only` and `disabled_tools` go to the server settings; `catalogue` replaces the
-    tools the server offers, to try toolsets that do not exist yet. `max_download_bytes` replaces the download limit.
+    tools the server offers, to try toolsets that do not exist yet. `max_download_bytes`
+    replaces the download limit.
     """
     fake = reader if isinstance(reader, FakePaperless) else admin()
     return create_server(

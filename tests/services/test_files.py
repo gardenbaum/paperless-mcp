@@ -6,7 +6,7 @@ import pytest
 from fakes.accounts import ADMIN, READER
 from fakes.paperless import FakeDocument, FakePaperless, seeded
 
-from paperless_mcp.domain.errors import NotFound, PermissionDenied
+from paperless_mcp.domain.errors import NotFound, PaperlessMcpError, PermissionDenied
 from paperless_mcp.services.files import FileService
 
 if TYPE_CHECKING:
@@ -24,18 +24,38 @@ class Recording(FakePaperless):
     served: int = 0
 
     @override
-    async def get_document_file(self, document_id: int, version: FileVersion) -> DocumentFile:
+    async def get_document_file(
+        self, document_id: int, version: FileVersion, *, max_bytes: int
+    ) -> DocumentFile:
         self.served += 1
-        return await super().get_document_file(document_id, version)
+        return await super().get_document_file(document_id, version, max_bytes=max_bytes)
 
 
-class Understating(FakePaperless):
+class Understating(Recording):
     """A Paperless whose metadata names a smaller size than the file really has."""
 
     @override
     async def get_document_metadata(self, document_id: int) -> FileMetadata:
         found = await super().get_document_metadata(document_id)
         return found.model_copy(update={"original_size": 1, "archive_size": 1})
+
+
+class Sizeless(Recording):
+    """A Paperless that knows an archive version exists but not its size."""
+
+    @override
+    async def get_document_metadata(self, document_id: int) -> FileMetadata:
+        found = await super().get_document_metadata(document_id)
+        return found.model_copy(update={"archive_size": None})
+
+
+class NoUploadName(Recording):
+    """A Paperless that has no name for the uploaded file."""
+
+    @override
+    async def get_document_metadata(self, document_id: int) -> FileMetadata:
+        found = await super().get_document_metadata(document_id)
+        return found.model_copy(update={"original_filename": ""})
 
 
 def files(fake: FakePaperless, limit: int = LIMIT) -> FileService:
@@ -118,6 +138,7 @@ async def test_a_file_over_the_limit_is_reported_without_being_downloaded() -> N
     assert report.note is not None
     assert f"{LIMIT} bytes" in report.note
     assert report.web_url in report.note
+    assert "get_document_content" in report.note
     assert report.web_url == "https://paperless.example/documents/7/details"
 
 
@@ -131,15 +152,59 @@ async def test_an_archive_over_the_limit_is_named_after_the_upload_as_pdf() -> N
     assert delivery.report.size_bytes == LIMIT + 1
 
 
-async def test_the_size_is_checked_again_on_the_bytes_that_arrive() -> None:
+async def test_the_bytes_that_arrive_are_limited_even_if_the_metadata_understates_them() -> None:
     state = seeded()
     state.documents.append(FakeDocument(id=7, title="big", original=b"x" * (LIMIT + 50)))
     fake = Understating(state, user=ADMIN[0])
 
     delivery = await files(fake).download(7, "original")
 
+    report = delivery.report
     assert delivery.data is None
-    assert (delivery.report.delivered, delivery.report.size_bytes) == (False, LIMIT + 50)
+    assert fake.served == 1
+    assert (report.delivered, report.size_bytes) == (False, None)
+    assert (report.mime_type, report.filename) == ("application/pdf", "2026-11-11 big.pdf")
+    assert report.note is not None
+    assert f"{LIMIT} bytes" in report.note
+
+
+async def test_an_archive_of_unknown_size_is_not_taken_for_the_original_s_size() -> None:
+    state = seeded()
+    state.documents.append(
+        FakeDocument(id=7, title="big", original=b"x", archive=b"y" * (LIMIT + 1))
+    )
+    fake = Sizeless(state, user=ADMIN[0])
+
+    delivery = await files(fake).download(7, "archive")
+
+    assert delivery.data is None
+    assert (delivery.report.delivered, delivery.report.size_bytes) == (False, None)
+    assert fake.served == 1
+
+
+async def test_an_archive_of_unknown_size_within_the_limit_is_delivered_with_its_real_size() -> (
+    None
+):
+    state = seeded()
+    state.documents.append(FakeDocument(id=7, title="small", original=b"x", archive=b"%PDF-small"))
+    fake = Sizeless(state, user=ADMIN[0])
+
+    delivery = await files(fake).download(7, "archive")
+
+    assert delivery.data == b"%PDF-small"
+    assert (delivery.report.delivered, delivery.report.size_bytes) == (True, 10)
+
+
+@pytest.mark.parametrize("version", ["original", "archive"])
+async def test_a_withheld_file_without_an_upload_name_has_no_name(version: FileVersion) -> None:
+    state = seeded()
+    state.documents.append(
+        FakeDocument(id=7, title="big", original=b"x" * (LIMIT + 1), archive=b"y" * (LIMIT + 1))
+    )
+
+    delivery = await files(NoUploadName(state, user=ADMIN[0])).download(7, version)
+
+    assert (delivery.report.delivered, delivery.report.filename) == (False, None)
 
 
 async def test_a_document_without_archive_version_has_no_archive_to_download() -> None:
@@ -148,7 +213,9 @@ async def test_a_document_without_archive_version_has_no_archive_to_download() -
     with pytest.raises(NotFound, match="no archive version") as raised:
         _ = await files(fake).download(7, "archive")
 
-    assert "original" in (raised.value.hint or "")
+    assert raised.value.hint == (
+        'Call download_document with kind="original"; it is the only file the document has.'
+    )
     assert fake.served == 0
     assert (await files(fake).download(7, "original")).report.delivered
 
@@ -163,3 +230,14 @@ async def test_a_missing_or_hidden_document_is_an_error_before_anything_is_read(
     with pytest.raises(PermissionDenied):
         _ = await files(reader).thumbnail(2)
     assert reader.served == 0
+
+
+async def test_an_empty_thumbnail_is_an_error() -> None:
+    class Empty(Recording):
+        @override
+        async def get_document_thumbnail(self, document_id: int) -> DocumentFile:
+            found = await super().get_document_thumbnail(document_id)
+            return found.model_copy(update={"content": b""})
+
+    with pytest.raises(PaperlessMcpError, match="empty thumbnail"):
+        _ = await files(Empty(seeded(), user=ADMIN[0])).thumbnail(1)

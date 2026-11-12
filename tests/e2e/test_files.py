@@ -1,6 +1,7 @@
 """Thumbnails and downloads through the assembled server on Paperless 3.4.2, with real uploads."""
 
 import base64
+import json
 import uuid
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -8,7 +9,7 @@ import pytest
 from fastmcp import Client
 from harness import paperless_settings, server_settings
 from mcp.shared.exceptions import MCPError
-from mcp.types import BlobResourceContents, EmbeddedResource, ImageContent
+from mcp.types import BlobResourceContents, EmbeddedResource, ImageContent, TextContent
 
 from e2e.helpers import consume, pdf
 from paperless_mcp.server import create_server
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from fastmcp import FastMCP
+    from fastmcp.client.client import CallToolResult
 
     from e2e.helpers import Stack
 
@@ -60,6 +62,14 @@ def blob(content: object) -> BlobResourceContents:
     return content.resource
 
 
+def report(result: CallToolResult) -> Json:
+    """The JSON report in the first content block; media tools send no structured content."""
+    assert result.structured_content is None
+    first = result.content[0]
+    assert isinstance(first, TextContent)
+    return cast("Json", json.loads(first.text))
+
+
 def named(file: BlobResourceContents) -> str:
     """The file name the server put in the content's metadata."""
     return cast("str", (file.meta or {})["filename"])
@@ -75,8 +85,7 @@ async def test_the_seeded_thumbnail_is_a_webp_image(stack: Stack) -> None:
     assert isinstance(image, ImageContent)
     assert image.mime_type == "image/webp"
     assert base64.b64decode(image.data)[8:12] == b"WEBP"
-    assert result.structured_content is not None
-    assert result.structured_content["delivered"] is True
+    assert report(result)["delivered"] is True
 
 
 async def test_the_seeded_original_and_archive_are_pdfs(stack: Stack) -> None:
@@ -94,9 +103,8 @@ async def test_the_seeded_original_and_archive_are_pdfs(stack: Stack) -> None:
             f"paperless://documents/{number}/{kind}",
         )
         assert base64.b64decode(file.blob).startswith(b"%PDF")
-        assert result.structured_content is not None
         assert named(file).endswith("e2e-public-invoice.pdf")
-        assert named(file) == result.structured_content["filename"]
+        assert named(file) == report(result)["filename"]
     assert blob(original.content[1]).blob != blob(archive.content[1]).blob
 
 
@@ -111,14 +119,13 @@ async def test_a_non_ascii_upload_keeps_its_name_in_tools_and_resources(
         [original] = await client.read_resource(f"paperless://documents/{number}/original")
         [archive] = await client.read_resource(f"paperless://documents/{number}/archive")
 
-    assert downloaded.structured_content is not None
     file = blob(downloaded.content[1])
     assert named(file).endswith(f" {title}.pdf")
-    assert named(file) == downloaded.structured_content["filename"]
+    assert named(file) == report(downloaded)["filename"]
     for resource in (original, archive):
         assert isinstance(resource, BlobResourceContents)
         assert resource.mime_type == "application/pdf"
-        assert named(resource) == downloaded.structured_content["filename"]
+        assert named(resource) == report(downloaded)["filename"]
 
 
 async def test_a_document_without_archive_version_downloads_only_its_original(
@@ -139,8 +146,9 @@ async def test_a_document_without_archive_version_downloads_only_its_original(
     assert file.mime_type == "text/plain; charset=utf-8"
     assert base64.b64decode(file.blob).decode() == title
     assert failed.is_error
-    assert f"Document {number} has no archive version. Hint: Ask for the original" in str(
-        failed.content
+    assert (
+        f"Document {number} has no archive version. Hint: Call download_document with kind="
+        in str(failed.content)
     )
 
 
@@ -154,10 +162,10 @@ async def test_a_file_over_the_limit_is_reported_without_content(stack: Stack) -
             _ = await client.read_resource(f"paperless://documents/{number}/archive")
 
     assert len(result.content) == 1
-    report = cast("Json", result.structured_content)
-    assert (report["delivered"], report["max_bytes"]) == (False, 100)
-    assert cast("int", report["size_bytes"]) > 100
-    assert str(report["web_url"]).endswith(f"/documents/{number}/details")
+    sent = report(result)
+    assert (sent["delivered"], sent["max_bytes"]) == (False, 100)
+    assert cast("int", sent["size_bytes"]) > 100
+    assert str(sent["web_url"]).endswith(f"/documents/{number}/details")
 
 
 async def test_a_missing_document_is_a_tool_error(stack: Stack) -> None:

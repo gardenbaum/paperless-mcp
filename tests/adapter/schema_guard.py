@@ -83,7 +83,6 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
 FILE_RESPONSES: Mapping[tuple[str, str], str] = {
     ("GET", "/api/documents/{id}/thumb/"): "the thumbnail is image/webp (PLMCP-12)",
     ("GET", "/api/documents/{id}/download/"): "the original or archive file as stored (PLMCP-12)",
-    ("GET", "/api/documents/{id}/preview/"): "the archive file, inline (PLMCP-12)",
 }
 # drf-spectacular documents no error responses. Paperless (Django REST framework) answers 4xx with
 # {"detail": "..."} or a map of field names to message lists; such bodies are checked for that shape
@@ -220,7 +219,7 @@ def _check_file_response(request: httpx2.Request, response: httpx2.Response) -> 
         problem
         for problem, found in (
             ("no content type", not content_type),
-            ("a JSON content type", content_type.startswith("application/json")),
+            ("a JSON content type", content_type.lower().startswith("application/json")),
             (
                 "no inline or attachment Content-Disposition",
                 not re.match(r"(inline|attachment)\b", disposition),

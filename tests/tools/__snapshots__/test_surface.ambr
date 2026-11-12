@@ -315,10 +315,10 @@
       'description': '''
         Get the original file of a document, or its archive version, as an embedded resource.
         
-        The file comes attached as MCP content with its MIME type and file name (also in the report),
-        never written to disk. A file over the server's download limit (2 MiB unless the
-        administrator changed it) is not attached: delivered is false and the report holds its
-        size and web_url. Use get_document_content when you only need the text.
+        The file comes attached as MCP content with its MIME type and file name (also in the JSON
+        report before it), never written to disk. A file over the server's download limit (512 KiB
+        unless the administrator changed it) is not attached: delivered is false and the report holds
+        its web_url. Use get_document_content when you only need the text.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -343,92 +343,6 @@
         'type': 'object',
       }),
       'name': 'download_document',
-      'outputSchema': dict({
-        'description': 'What a tool says about a thumbnail or download, whether or not the bytes came with it.',
-        'properties': dict({
-          'delivered': dict({
-            'description': 'The file is attached as content; false: it is over the limit.',
-            'title': 'Delivered',
-            'type': 'boolean',
-          }),
-          'document_id': dict({
-            'title': 'Document Id',
-            'type': 'integer',
-          }),
-          'filename': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'File name, non-ASCII characters intact.',
-            'title': 'Filename',
-          }),
-          'kind': dict({
-            'description': 'Which file: the thumbnail, original or archive.',
-            'enum': list([
-              'thumbnail',
-              'original',
-              'archive',
-            ]),
-            'type': 'string',
-          }),
-          'max_bytes': dict({
-            'anyOf': list([
-              dict({
-                'type': 'integer',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': "The server's download limit; null for thumbnails.",
-            'title': 'Max Bytes',
-          }),
-          'mime_type': dict({
-            'title': 'Mime Type',
-            'type': 'string',
-          }),
-          'note': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'Why the file is not attached, if it is not.',
-            'title': 'Note',
-          }),
-          'size_bytes': dict({
-            'description': 'Size of the file in bytes.',
-            'title': 'Size Bytes',
-            'type': 'integer',
-          }),
-          'web_url': dict({
-            'description': 'Link to the document in the Paperless web UI.',
-            'title': 'Web Url',
-            'type': 'string',
-          }),
-        }),
-        'required': list([
-          'document_id',
-          'kind',
-          'filename',
-          'mime_type',
-          'size_bytes',
-          'delivered',
-          'max_bytes',
-          'web_url',
-          'note',
-        ]),
-        'title': 'FileReport',
-        'type': 'object',
-      }),
       'title': 'Download document',
     }),
     dict({
@@ -1253,8 +1167,8 @@
       'description': '''
         See a document as a small preview image (its first page), for clients that read images.
         
-        Returns the image as MCP image content together with a report (file name, size, web_url).
-        Use it to recognise a document by its look; use get_document_content for its text and
+        Returns the image as MCP image content, after a JSON report (file name, size, web_url). Use
+        it to recognise a document by its look; use get_document_content for its text and
         download_document for the file.
       ''',
       'inputSchema': dict({
@@ -1271,92 +1185,6 @@
         'type': 'object',
       }),
       'name': 'get_document_thumbnail',
-      'outputSchema': dict({
-        'description': 'What a tool says about a thumbnail or download, whether or not the bytes came with it.',
-        'properties': dict({
-          'delivered': dict({
-            'description': 'The file is attached as content; false: it is over the limit.',
-            'title': 'Delivered',
-            'type': 'boolean',
-          }),
-          'document_id': dict({
-            'title': 'Document Id',
-            'type': 'integer',
-          }),
-          'filename': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'File name, non-ASCII characters intact.',
-            'title': 'Filename',
-          }),
-          'kind': dict({
-            'description': 'Which file: the thumbnail, original or archive.',
-            'enum': list([
-              'thumbnail',
-              'original',
-              'archive',
-            ]),
-            'type': 'string',
-          }),
-          'max_bytes': dict({
-            'anyOf': list([
-              dict({
-                'type': 'integer',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': "The server's download limit; null for thumbnails.",
-            'title': 'Max Bytes',
-          }),
-          'mime_type': dict({
-            'title': 'Mime Type',
-            'type': 'string',
-          }),
-          'note': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'Why the file is not attached, if it is not.',
-            'title': 'Note',
-          }),
-          'size_bytes': dict({
-            'description': 'Size of the file in bytes.',
-            'title': 'Size Bytes',
-            'type': 'integer',
-          }),
-          'web_url': dict({
-            'description': 'Link to the document in the Paperless web UI.',
-            'title': 'Web Url',
-            'type': 'string',
-          }),
-        }),
-        'required': list([
-          'document_id',
-          'kind',
-          'filename',
-          'mime_type',
-          'size_bytes',
-          'delivered',
-          'max_bytes',
-          'web_url',
-          'note',
-        ]),
-        'title': 'FileReport',
-        'type': 'object',
-      }),
       'title': 'Get document thumbnail',
     }),
     dict({
@@ -2580,10 +2408,10 @@
       'description': '''
         Get the original file of a document, or its archive version, as an embedded resource.
         
-        The file comes attached as MCP content with its MIME type and file name (also in the report),
-        never written to disk. A file over the server's download limit (2 MiB unless the
-        administrator changed it) is not attached: delivered is false and the report holds its
-        size and web_url. Use get_document_content when you only need the text.
+        The file comes attached as MCP content with its MIME type and file name (also in the JSON
+        report before it), never written to disk. A file over the server's download limit (512 KiB
+        unless the administrator changed it) is not attached: delivered is false and the report holds
+        its web_url. Use get_document_content when you only need the text.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -2608,92 +2436,6 @@
         'type': 'object',
       }),
       'name': 'download_document',
-      'outputSchema': dict({
-        'description': 'What a tool says about a thumbnail or download, whether or not the bytes came with it.',
-        'properties': dict({
-          'delivered': dict({
-            'description': 'The file is attached as content; false: it is over the limit.',
-            'title': 'Delivered',
-            'type': 'boolean',
-          }),
-          'document_id': dict({
-            'title': 'Document Id',
-            'type': 'integer',
-          }),
-          'filename': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'File name, non-ASCII characters intact.',
-            'title': 'Filename',
-          }),
-          'kind': dict({
-            'description': 'Which file: the thumbnail, original or archive.',
-            'enum': list([
-              'thumbnail',
-              'original',
-              'archive',
-            ]),
-            'type': 'string',
-          }),
-          'max_bytes': dict({
-            'anyOf': list([
-              dict({
-                'type': 'integer',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': "The server's download limit; null for thumbnails.",
-            'title': 'Max Bytes',
-          }),
-          'mime_type': dict({
-            'title': 'Mime Type',
-            'type': 'string',
-          }),
-          'note': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'Why the file is not attached, if it is not.',
-            'title': 'Note',
-          }),
-          'size_bytes': dict({
-            'description': 'Size of the file in bytes.',
-            'title': 'Size Bytes',
-            'type': 'integer',
-          }),
-          'web_url': dict({
-            'description': 'Link to the document in the Paperless web UI.',
-            'title': 'Web Url',
-            'type': 'string',
-          }),
-        }),
-        'required': list([
-          'document_id',
-          'kind',
-          'filename',
-          'mime_type',
-          'size_bytes',
-          'delivered',
-          'max_bytes',
-          'web_url',
-          'note',
-        ]),
-        'title': 'FileReport',
-        'type': 'object',
-      }),
       'title': 'Download document',
     }),
     dict({
@@ -3518,8 +3260,8 @@
       'description': '''
         See a document as a small preview image (its first page), for clients that read images.
         
-        Returns the image as MCP image content together with a report (file name, size, web_url).
-        Use it to recognise a document by its look; use get_document_content for its text and
+        Returns the image as MCP image content, after a JSON report (file name, size, web_url). Use
+        it to recognise a document by its look; use get_document_content for its text and
         download_document for the file.
       ''',
       'inputSchema': dict({
@@ -3536,92 +3278,6 @@
         'type': 'object',
       }),
       'name': 'get_document_thumbnail',
-      'outputSchema': dict({
-        'description': 'What a tool says about a thumbnail or download, whether or not the bytes came with it.',
-        'properties': dict({
-          'delivered': dict({
-            'description': 'The file is attached as content; false: it is over the limit.',
-            'title': 'Delivered',
-            'type': 'boolean',
-          }),
-          'document_id': dict({
-            'title': 'Document Id',
-            'type': 'integer',
-          }),
-          'filename': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'File name, non-ASCII characters intact.',
-            'title': 'Filename',
-          }),
-          'kind': dict({
-            'description': 'Which file: the thumbnail, original or archive.',
-            'enum': list([
-              'thumbnail',
-              'original',
-              'archive',
-            ]),
-            'type': 'string',
-          }),
-          'max_bytes': dict({
-            'anyOf': list([
-              dict({
-                'type': 'integer',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': "The server's download limit; null for thumbnails.",
-            'title': 'Max Bytes',
-          }),
-          'mime_type': dict({
-            'title': 'Mime Type',
-            'type': 'string',
-          }),
-          'note': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'Why the file is not attached, if it is not.',
-            'title': 'Note',
-          }),
-          'size_bytes': dict({
-            'description': 'Size of the file in bytes.',
-            'title': 'Size Bytes',
-            'type': 'integer',
-          }),
-          'web_url': dict({
-            'description': 'Link to the document in the Paperless web UI.',
-            'title': 'Web Url',
-            'type': 'string',
-          }),
-        }),
-        'required': list([
-          'document_id',
-          'kind',
-          'filename',
-          'mime_type',
-          'size_bytes',
-          'delivered',
-          'max_bytes',
-          'web_url',
-          'note',
-        ]),
-        'title': 'FileReport',
-        'type': 'object',
-      }),
       'title': 'Get document thumbnail',
     }),
     dict({
@@ -4845,10 +4501,10 @@
       'description': '''
         Get the original file of a document, or its archive version, as an embedded resource.
         
-        The file comes attached as MCP content with its MIME type and file name (also in the report),
-        never written to disk. A file over the server's download limit (2 MiB unless the
-        administrator changed it) is not attached: delivered is false and the report holds its
-        size and web_url. Use get_document_content when you only need the text.
+        The file comes attached as MCP content with its MIME type and file name (also in the JSON
+        report before it), never written to disk. A file over the server's download limit (512 KiB
+        unless the administrator changed it) is not attached: delivered is false and the report holds
+        its web_url. Use get_document_content when you only need the text.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -4873,92 +4529,6 @@
         'type': 'object',
       }),
       'name': 'download_document',
-      'outputSchema': dict({
-        'description': 'What a tool says about a thumbnail or download, whether or not the bytes came with it.',
-        'properties': dict({
-          'delivered': dict({
-            'description': 'The file is attached as content; false: it is over the limit.',
-            'title': 'Delivered',
-            'type': 'boolean',
-          }),
-          'document_id': dict({
-            'title': 'Document Id',
-            'type': 'integer',
-          }),
-          'filename': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'File name, non-ASCII characters intact.',
-            'title': 'Filename',
-          }),
-          'kind': dict({
-            'description': 'Which file: the thumbnail, original or archive.',
-            'enum': list([
-              'thumbnail',
-              'original',
-              'archive',
-            ]),
-            'type': 'string',
-          }),
-          'max_bytes': dict({
-            'anyOf': list([
-              dict({
-                'type': 'integer',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': "The server's download limit; null for thumbnails.",
-            'title': 'Max Bytes',
-          }),
-          'mime_type': dict({
-            'title': 'Mime Type',
-            'type': 'string',
-          }),
-          'note': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'Why the file is not attached, if it is not.',
-            'title': 'Note',
-          }),
-          'size_bytes': dict({
-            'description': 'Size of the file in bytes.',
-            'title': 'Size Bytes',
-            'type': 'integer',
-          }),
-          'web_url': dict({
-            'description': 'Link to the document in the Paperless web UI.',
-            'title': 'Web Url',
-            'type': 'string',
-          }),
-        }),
-        'required': list([
-          'document_id',
-          'kind',
-          'filename',
-          'mime_type',
-          'size_bytes',
-          'delivered',
-          'max_bytes',
-          'web_url',
-          'note',
-        ]),
-        'title': 'FileReport',
-        'type': 'object',
-      }),
       'title': 'Download document',
     }),
     dict({
@@ -5783,8 +5353,8 @@
       'description': '''
         See a document as a small preview image (its first page), for clients that read images.
         
-        Returns the image as MCP image content together with a report (file name, size, web_url).
-        Use it to recognise a document by its look; use get_document_content for its text and
+        Returns the image as MCP image content, after a JSON report (file name, size, web_url). Use
+        it to recognise a document by its look; use get_document_content for its text and
         download_document for the file.
       ''',
       'inputSchema': dict({
@@ -5801,92 +5371,6 @@
         'type': 'object',
       }),
       'name': 'get_document_thumbnail',
-      'outputSchema': dict({
-        'description': 'What a tool says about a thumbnail or download, whether or not the bytes came with it.',
-        'properties': dict({
-          'delivered': dict({
-            'description': 'The file is attached as content; false: it is over the limit.',
-            'title': 'Delivered',
-            'type': 'boolean',
-          }),
-          'document_id': dict({
-            'title': 'Document Id',
-            'type': 'integer',
-          }),
-          'filename': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'File name, non-ASCII characters intact.',
-            'title': 'Filename',
-          }),
-          'kind': dict({
-            'description': 'Which file: the thumbnail, original or archive.',
-            'enum': list([
-              'thumbnail',
-              'original',
-              'archive',
-            ]),
-            'type': 'string',
-          }),
-          'max_bytes': dict({
-            'anyOf': list([
-              dict({
-                'type': 'integer',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': "The server's download limit; null for thumbnails.",
-            'title': 'Max Bytes',
-          }),
-          'mime_type': dict({
-            'title': 'Mime Type',
-            'type': 'string',
-          }),
-          'note': dict({
-            'anyOf': list([
-              dict({
-                'type': 'string',
-              }),
-              dict({
-                'type': 'null',
-              }),
-            ]),
-            'description': 'Why the file is not attached, if it is not.',
-            'title': 'Note',
-          }),
-          'size_bytes': dict({
-            'description': 'Size of the file in bytes.',
-            'title': 'Size Bytes',
-            'type': 'integer',
-          }),
-          'web_url': dict({
-            'description': 'Link to the document in the Paperless web UI.',
-            'title': 'Web Url',
-            'type': 'string',
-          }),
-        }),
-        'required': list([
-          'document_id',
-          'kind',
-          'filename',
-          'mime_type',
-          'size_bytes',
-          'delivered',
-          'max_bytes',
-          'web_url',
-          'note',
-        ]),
-        'title': 'FileReport',
-        'type': 'object',
-      }),
       'title': 'Get document thumbnail',
     }),
     dict({

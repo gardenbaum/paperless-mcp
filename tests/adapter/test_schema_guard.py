@@ -110,7 +110,7 @@ def test_a_response_deviation_covers_only_its_status() -> None:
         check_response(get("/api/status/"), httpx2.Response(404, text="<html>Not Found</html>"))
 
 
-FILE_PATHS = ["/api/documents/1/thumb/", "/api/documents/1/download/", "/api/documents/1/preview/"]
+FILE_PATHS = ["/api/documents/1/thumb/", "/api/documents/1/download/"]
 FILE_HEADERS = {
     "Content-Type": "application/pdf",
     "Content-Disposition": 'inline; filename="a.pdf"',
@@ -134,20 +134,32 @@ def test_a_file_response_passes_although_the_schema_says_json(path: str) -> None
         httpx2.Response(200, content=b"x", headers={"Content-Disposition": "inline"}),
         httpx2.Response(200, content=b"x", headers={"Content-Type": "application/pdf"}),
         httpx2.Response(200, content=b"x", headers={**FILE_HEADERS, "Content-Disposition": "x"}),
+        httpx2.Response(
+            200, content=b"{}", headers={**FILE_HEADERS, "Content-Type": "Application/JSON; x=1"}
+        ),
         httpx2.Response(204, headers=FILE_HEADERS),
     ],
-    ids=["empty", "json", "no content type", "no disposition", "odd disposition", "undocumented"],
+    ids=[
+        "empty",
+        "json",
+        "no content type",
+        "no disposition",
+        "odd disposition",
+        "json in other case",
+        "undocumented",
+    ],
 )
 def test_a_file_response_is_still_checked_for_what_it_must_have(response: httpx2.Response) -> None:
     with pytest.raises(SchemaViolationError):
         check_response(get("/api/documents/1/download/"), response)
 
 
-def test_the_file_exemption_covers_only_the_file_endpoints() -> None:
+@pytest.mark.parametrize("path", ["/api/documents/1/metadata/", "/api/documents/1/preview/"])
+def test_the_file_exemption_covers_only_the_endpoints_the_adapter_uses(path: str) -> None:
     response = httpx2.Response(200, content=b"%PDF-1.4", headers=FILE_HEADERS)
 
     with pytest.raises(SchemaViolationError):
-        check_response(get("/api/documents/1/metadata/"), response)
+        check_response(get(path), response)
 
 
 def test_a_hidden_document_is_answered_with_html_by_the_file_endpoints() -> None:

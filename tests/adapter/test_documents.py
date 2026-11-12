@@ -12,8 +12,18 @@ from paperless_mcp.domain.documents import (
     DocumentHit,
     DocumentQuery,
 )
-from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
-from paperless_mcp.paperless.documents import FIELDS, PaperlessDocumentReader
+from paperless_mcp.domain.errors import (
+    FeatureUnavailable,
+    NotFound,
+    PaperlessMcpError,
+    PermissionDenied,
+    Validation,
+)
+from paperless_mcp.paperless.documents import (
+    FIELDS,
+    THUMBNAIL_LIMIT,
+    PaperlessDocumentReader,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -583,7 +593,9 @@ async def test_a_version_is_chosen_with_the_original_parameter(
 ) -> None:
     server = Binary(PDF, "application/pdf", NON_ASCII_DISPOSITION)
 
-    found = await PaperlessDocumentReader(make_client(server)).get_document_file(30, version)
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        30, version, max_bytes=1000
+    )
 
     assert server.sent == [("/api/documents/30/download/", {"original": original})]
     assert found.content == PDF
@@ -594,7 +606,9 @@ async def test_the_filename_is_the_rfc_5987_one_with_its_non_ascii_characters(
 ) -> None:
     server = Binary(PDF, "application/pdf", NON_ASCII_DISPOSITION)
 
-    found = await PaperlessDocumentReader(make_client(server)).get_document_file(30, "original")
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        30, "original", max_bytes=1000
+    )
 
     assert found.filename == "2026-11-12 probe-Ünï 日本語 €.pdf"
 
@@ -605,14 +619,19 @@ async def test_the_content_type_is_kept_with_its_parameters(make_client: ClientF
     )
     server = Binary(b"plain text probe", "text/plain; charset=utf-8", disposition)
 
-    found = await PaperlessDocumentReader(make_client(server)).get_document_file(31, "original")
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        31, "original", max_bytes=1000
+    )
 
     assert (found.mime_type, found.filename) == ("text/plain; charset=utf-8", "xä.txt")
 
 
 FILES: list[tuple[Call, str]] = [
     (lambda reader, number: reader.get_document_thumbnail(number), "thumb"),
-    (lambda reader, number: reader.get_document_file(number, "original"), "download"),
+    (
+        lambda reader, number: reader.get_document_file(number, "original", max_bytes=1000),
+        "download",
+    ),
 ]
 
 
@@ -653,3 +672,37 @@ async def test_a_user_without_the_document_permission_is_denied_a_file(
 
     with pytest.raises(PermissionDenied):
         _ = await call(PaperlessDocumentReader(make_client(server)), 1)
+
+
+async def test_a_file_over_the_limit_is_truncated_but_still_named_and_typed(
+    make_client: ClientFactory,
+) -> None:
+    server = Binary(PDF, "application/pdf", NON_ASCII_DISPOSITION)
+
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        30, "original", max_bytes=len(PDF) - 1
+    )
+
+    assert found == DocumentFile(
+        content=b"",
+        mime_type="application/pdf",
+        filename="2026-11-12 probe-Ünï 日本語 €.pdf",
+        truncated=True,
+    )
+
+
+async def test_a_file_exactly_at_the_limit_is_whole(make_client: ClientFactory) -> None:
+    server = Binary(PDF, "application/pdf", NON_ASCII_DISPOSITION)
+
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        30, "original", max_bytes=len(PDF)
+    )
+
+    assert (found.content, found.truncated) == (PDF, False)
+
+
+async def test_a_thumbnail_larger_than_any_real_one_is_refused(make_client: ClientFactory) -> None:
+    server = Binary(b"x" * (THUMBNAIL_LIMIT + 1), "image/webp", THUMB_DISPOSITION)
+
+    with pytest.raises(PaperlessMcpError, match="unexpected response"):
+        _ = await PaperlessDocumentReader(make_client(server)).get_document_thumbnail(30)

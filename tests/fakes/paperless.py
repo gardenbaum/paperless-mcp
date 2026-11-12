@@ -747,7 +747,9 @@ class FakePaperless:
             filename=f"{document.id:07d}.webp",
         )
 
-    async def get_document_file(self, document_id: int, version: FileVersion) -> DocumentFile:
+    async def get_document_file(
+        self, document_id: int, version: FileVersion, *, max_bytes: int
+    ) -> DocumentFile:
         """`DocumentReader.get_document_file` (the `download` action).
 
         Without an archive version `archive` answers the original, as Paperless does.
@@ -757,10 +759,12 @@ class FakePaperless:
         mime_type = document.mime_type
         if document.mime_type.startswith("text/"):
             mime_type += "; charset=utf-8"
+        content = document.archive if archive and document.archive else document.original
         return DocumentFile(
-            content=document.archive if archive and document.archive else document.original,
+            content=b"" if len(content) > max_bytes else content,
             mime_type="application/pdf" if archive else mime_type,
             filename=document.download_filename(archive=archive),
+            truncated=len(content) > max_bytes,
         )
 
     async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:

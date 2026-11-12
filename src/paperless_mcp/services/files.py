@@ -7,12 +7,12 @@ Callers get a report for every file and the bytes only when the file is within t
 from pathlib import PurePath
 from typing import TYPE_CHECKING
 
-from paperless_mcp.domain.documents import FileDelivery, FileReport
-from paperless_mcp.domain.errors import NotFound
+from paperless_mcp.domain.documents import FileDelivery, FileReport, Thumbnail
+from paperless_mcp.domain.errors import NotFound, PaperlessMcpError
 from paperless_mcp.services.documents import document_link
 
 if TYPE_CHECKING:
-    from paperless_mcp.domain.documents import FileKind, FileMetadata, FileVersion
+    from paperless_mcp.domain.documents import FileKind, FileVersion
     from paperless_mcp.domain.ports import DocumentReader
 
 PDF = "application/pdf"
@@ -21,7 +21,8 @@ PDF = "application/pdf"
 def _over_limit(limit: int, link: str) -> str:
     return (
         f"The file is over the download limit of {limit} bytes, so it is not attached. "
-        f"Open it at {link}, or ask the administrator to raise PAPERLESS_MCP_MAX_DOWNLOAD_BYTES."
+        f"Read its text with get_document_content, open it at {link}, or ask the "
+        "administrator to raise PAPERLESS_MCP_MAX_DOWNLOAD_BYTES."
     )
 
 
@@ -37,14 +38,18 @@ class FileService:
         self._web_url: str = web_url
         self._max_bytes: int = max_bytes
 
-    async def thumbnail(self, document_id: int) -> FileDelivery:
+    async def thumbnail(self, document_id: int) -> Thumbnail:
         """The thumbnail image of a document; thumbnails are small and have no limit.
 
         Raises:
             NotFound: No such document.
             PermissionDenied: The user may not see the document.
+            PaperlessMcpError: Paperless sent an empty image.
         """
         found = await self._reader.get_document_thumbnail(document_id)
+        if not found.content:
+            message = f"Paperless sent an empty thumbnail for document {document_id}."
+            raise PaperlessMcpError(message)
         report = FileReport(
             document_id=document_id,
             kind="thumbnail",
@@ -56,13 +61,14 @@ class FileService:
             web_url=document_link(self._web_url, document_id),
             note=None,
         )
-        return FileDelivery(report=report, data=found.content)
+        return Thumbnail(report=report, data=found.content)
 
     async def download(self, document_id: int, version: FileVersion) -> FileDelivery:
         """The original or archive version of a document, if it is within the limit.
 
-        The size comes from the file metadata, so a file over the limit is never downloaded;
-        the size of the bytes that arrive is checked too.
+        A size the file metadata gives decides before anything is downloaded; otherwise (an
+        archive version of unknown size, or metadata that understates it) the download itself
+        stops at the limit, so no more than the limit is ever read.
 
         Raises:
             NotFound: No such document, or ``archive`` asked of a document without one.
@@ -72,48 +78,61 @@ class FileService:
         archive = version == "archive"
         if archive and not metadata.has_archive_version:
             message = f"Document {document_id} has no archive version."
-            raise NotFound(message, hint="Ask for the original: it is the only file it has.")
-        size = metadata.original_size
-        if archive and metadata.archive_size is not None:
-            size = metadata.archive_size
-        if size > self._max_bytes:
-            return self._withheld(document_id, version, metadata, size)
-        found = await self._reader.get_document_file(document_id, version)
-        if len(found.content) > self._max_bytes:
-            return self._withheld(document_id, version, metadata, len(found.content))
-        report = self._report(
-            document_id, version, found.filename, found.mime_type, len(found.content)
+            hint = (
+                'Call download_document with kind="original"; it is the only file the document has.'
+            )
+            raise NotFound(message, hint=hint)
+        size: int | None = metadata.archive_size if archive else metadata.original_size
+        name = PurePath(metadata.original_filename).name
+        if size is not None and size > self._max_bytes:
+            upload = (
+                (PurePath(name).with_suffix(".pdf").name if archive else name) if name else None
+            )
+            mime_type = PDF if archive else metadata.original_mime_type
+            return self._delivery(
+                document_id, version, filename=upload, mime_type=mime_type, size=size, data=None
+            )
+        found = await self._reader.get_document_file(
+            document_id, version, max_bytes=self._max_bytes
         )
-        return FileDelivery(report=report, data=found.content)
-
-    def _withheld(
-        self, document_id: int, version: FileVersion, metadata: FileMetadata, size: int
-    ) -> FileDelivery:
-        """A report for a file over the limit, named and typed from the file metadata."""
-        name = PurePath(metadata.original_filename)
-        archive = version == "archive"
-        report = self._report(
+        if found.truncated:
+            return self._delivery(
+                document_id,
+                version,
+                filename=found.filename,
+                mime_type=found.mime_type,
+                size=None,
+                data=None,
+            )
+        return self._delivery(
             document_id,
             version,
-            name.with_suffix(".pdf").name if archive else name.name,
-            PDF if archive else metadata.original_mime_type,
-            size,
+            filename=found.filename,
+            mime_type=found.mime_type,
+            size=len(found.content),
+            data=found.content,
         )
-        return FileDelivery(report=report, data=None)
 
-    def _report(
-        self, document_id: int, kind: FileKind, filename: str | None, mime_type: str, size: int
-    ) -> FileReport:
-        delivered = size <= self._max_bytes
+    def _delivery(  # noqa: PLR0913 -- the parts of one report
+        self,
+        document_id: int,
+        kind: FileKind,
+        *,
+        filename: str | None,
+        mime_type: str,
+        size: int | None,
+        data: bytes | None,
+    ) -> FileDelivery:
         link = document_link(self._web_url, document_id)
-        return FileReport(
+        report = FileReport(
             document_id=document_id,
             kind=kind,
             filename=filename,
             mime_type=mime_type,
             size_bytes=size,
-            delivered=delivered,
+            delivered=data is not None,
             max_bytes=self._max_bytes,
             web_url=link,
-            note=None if delivered else _over_limit(self._max_bytes, link),
+            note=None if data is not None else _over_limit(self._max_bytes, link),
         )
+        return FileDelivery(report=report, data=data)

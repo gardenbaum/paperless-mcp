@@ -22,7 +22,13 @@ from paperless_mcp.domain.documents import (
     Note,
     Suggestions,
 )
-from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
+from paperless_mcp.domain.errors import (
+    FeatureUnavailable,
+    NotFound,
+    PaperlessMcpError,
+    PermissionDenied,
+    Validation,
+)
 from paperless_mcp.paperless.disposition import filename
 from paperless_mcp.paperless.pagination import Page
 
@@ -33,6 +39,8 @@ if TYPE_CHECKING:
     from paperless_mcp.paperless.client import PaperlessClient, Params
 
 PATH = "/api/documents/"
+# Most bytes of a thumbnail read; real ones are 2 KB to 30 KB WebP, so this is generous.
+THUMBNAIL_LIMIT = 4 * 1024 * 1024
 FIELDS = "id,title,created,added,correspondent,document_type,storage_path,tags,custom_fields"
 # A single document without its content (the OCR text can be a million characters).
 DETAIL_FIELDS = (
@@ -340,9 +348,15 @@ class PaperlessDocumentReader:
         Paperless 3.4 sends WebP. A document the user may not see is answered 403 (text/html),
         a missing one 404, as for the other sub-resources.
         """
-        return await self._file(document_id, "thumb/")
+        found = await self._file(document_id, "thumb/", THUMBNAIL_LIMIT)
+        if found.truncated:
+            message = f"Paperless sent an unexpected response for the thumbnail of {document_id}."
+            raise PaperlessMcpError(message)
+        return found
 
-    async def get_document_file(self, document_id: int, version: FileVersion) -> DocumentFile:
+    async def get_document_file(
+        self, document_id: int, version: FileVersion, *, max_bytes: int
+    ) -> DocumentFile:
         """See ``DocumentReader.get_document_file``.
 
         ``original=false`` is the archive version; Paperless answers the original for it when
@@ -350,7 +364,10 @@ class PaperlessDocumentReader:
         correspondent and title), not the name of the upload.
         """
         return await self._file(
-            document_id, "download/", {"original": "true" if version == "original" else "false"}
+            document_id,
+            "download/",
+            max_bytes,
+            {"original": "true" if version == "original" else "false"},
         )
 
     async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
@@ -367,18 +384,19 @@ class PaperlessDocumentReader:
         return {row.id: row.title for row in found.results}
 
     async def _file(
-        self, document_id: int, tail: str, params: Params | None = None
+        self, document_id: int, tail: str, max_bytes: int, params: Params | None = None
     ) -> DocumentFile:
         try:
-            response = await self._client.request(
-                "GET", f"{PATH}{document_id}/{tail}", params=params
+            found = await self._client.download(
+                f"{PATH}{document_id}/{tail}", params=params, max_bytes=max_bytes
             )
         except NotFound:
             raise unseen_document(document_id) from None
         return DocumentFile(
-            content=response.content,
-            mime_type=response.headers.get("Content-Type", "application/octet-stream"),
-            filename=filename(response.headers.get("Content-Disposition")),
+            content=found.content,
+            mime_type=found.headers.get("Content-Type", "application/octet-stream"),
+            filename=filename(found.headers.get("Content-Disposition")),
+            truncated=found.truncated,
         )
 
     async def _one[M: BaseModel](

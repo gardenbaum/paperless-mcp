@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 # Every toolset; each tool carries exactly one of them as its only tag.
 TOOLSETS: Final = frozenset({"core"})
 
+# Tools whose result is an image or a file as MCP content blocks, with no output schema and no
+# structured content (decision-11); every other tool has a typed return model (decision-4).
+MEDIA_TOOLS: Final = frozenset({"get_document_thumbnail", "download_document"})
+
 # The toolset of every tool, keyed by tool name. It must equal each tool's tag (registry test); the
 # server uses it to refuse a configuration that leaves no tool before it contacts Paperless.
 TOOL_TOOLSETS: Final[Mapping[str, str]] = {

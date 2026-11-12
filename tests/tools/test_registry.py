@@ -11,11 +11,18 @@ from typing import TYPE_CHECKING, Annotated, cast
 import pytest
 from fastmcp import FastMCP
 from fastmcp.server.providers import LocalProvider
+from fastmcp.tools import ToolResult
 from harness import admin, serve
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from paperless_mcp.tools._shared import ANNOTATIONS, TOOL_TOOLSETS, TOOLSETS, boundary
+from paperless_mcp.tools._shared import (
+    ANNOTATIONS,
+    MEDIA_TOOLS,
+    TOOL_TOOLSETS,
+    TOOLSETS,
+    boundary,
+)
 from paperless_mcp.tools.selection import hidden_tools
 
 if TYPE_CHECKING:
@@ -116,6 +123,19 @@ def path_parameters(tools: list[Tool]) -> list[str]:
     ]
 
 
+def without_schema(tools: list[Tool], media: frozenset[str]) -> list[str]:
+    """Tools without an output schema that are not media tools (decision-11)."""
+    return [t.name for t in tools if t.output_schema is None and t.name not in media]
+
+
+def media_with_schema(tools: list[Tool], media: frozenset[str]) -> list[str]:
+    """Media tools that declare an output schema, and allowlisted names that have no tool."""
+    named = {t.name for t in tools}
+    return [t.name for t in tools if t.name in media and t.output_schema is not None] + sorted(
+        media - named
+    )
+
+
 def over_budget(tools: list[Tool]) -> list[str]:
     return [t.name for t in tools] if len(tools) > TOOL_BUDGET else []
 
@@ -176,6 +196,14 @@ async def test_destructive_tools_need_confirm_defaulting_to_false() -> None:
 @pytest.mark.decision("decision-7")
 async def test_no_tool_takes_a_filesystem_path_outside_the_stdio_allowlist() -> None:
     assert path_parameters(await server_tools()) == []
+
+
+@pytest.mark.decision("decision-11")
+async def test_only_media_tools_go_without_an_output_schema() -> None:
+    tools = await server_tools()
+
+    assert without_schema(tools, MEDIA_TOOLS) == []
+    assert media_with_schema(tools, MEDIA_TOOLS) == []
 
 
 async def test_the_default_profile_stays_within_the_tool_budget() -> None:
@@ -314,6 +342,38 @@ async def test_self_test_read_only_mode_hides_what_the_table_marks_as_writing() 
 
     assert "delete_everything" in remaining
     assert "bare" not in remaining
+
+
+@offenders.tool(annotations=ToolAnnotations(title="Screenshot"), output_schema=None)
+@boundary
+async def screenshot() -> ToolResult:
+    """A media tool: content blocks only."""
+    return ToolResult(content="png")
+
+
+@offenders.tool(annotations=ToolAnnotations(title="Typed media"))
+@boundary
+async def typed_media() -> int:
+    """A media tool that declares an output schema anyway."""
+    return 1
+
+
+@pytest.mark.decision("decision-11")
+async def test_self_test_a_schemaless_tool_outside_the_media_allowlist_is_found() -> None:
+    tools = await offending_tools()
+
+    assert "screenshot" in without_schema(tools, frozenset())
+    assert "screenshot" not in without_schema(tools, frozenset({"screenshot"}))
+    assert "bare" not in without_schema(tools, frozenset())  # typed: has a schema
+
+
+@pytest.mark.decision("decision-11")
+async def test_self_test_a_media_tool_with_a_schema_or_without_a_tool_is_found() -> None:
+    tools = await offending_tools()
+
+    found = media_with_schema(tools, frozenset({"typed_media", "screenshot", "ghost"}))
+
+    assert found == ["typed_media", "ghost"]
 
 
 async def test_self_test_a_profile_over_the_budget_is_found() -> None:

@@ -3,7 +3,7 @@
 import base64
 import json
 import logging
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, cast, override
 
 import pytest
 from fakes.accounts import READER
@@ -16,7 +16,7 @@ from mcp.types import BlobResourceContents, EmbeddedResource, ImageContent, Text
 if TYPE_CHECKING:
     from mcp.types import ContentBlock
 
-    from paperless_mcp.domain.documents import DocumentFile
+    from paperless_mcp.domain.documents import DocumentFile, FileVersion
 
 pytestmark = pytest.mark.anyio
 
@@ -55,18 +55,18 @@ async def call(
 ) -> tuple[list[ContentBlock], Json]:
     async with Client(serve(fake or admin(), max_download_bytes=limit)) as client:
         result = await client.call_tool(name, arguments)
-    assert result.structured_content is not None
-    return list(result.content), result.structured_content
+    assert result.structured_content is None  # decision-11: content blocks only
+    content = list(result.content)
+    assert isinstance(content[0], TextContent)
+    return content, cast("Json", json.loads(content[0].text))
 
 
 async def test_a_thumbnail_is_image_content_with_a_report() -> None:
     content, report = await call("get_document_thumbnail", {"document_id": 1})
 
-    [text, image] = content
+    [_, image] = content
     assert isinstance(image, ImageContent)
     assert (image.mime_type, image.data) == ("image/webp", encoded(THUMBNAIL))
-    assert isinstance(text, TextContent)
-    assert json.loads(text.text) == report
     assert report == {
         "document_id": 1,
         "kind": "thumbnail",
@@ -85,15 +85,13 @@ async def test_a_download_is_an_embedded_resource_with_its_type_and_name() -> No
 
     content, report = await call("download_document", {"document_id": 7}, fake)
 
-    [text, embedded] = content
+    [_, embedded] = content
     assert isinstance(embedded, EmbeddedResource)
     blob = embedded.resource
     assert isinstance(blob, BlobResourceContents)
     assert blob.blob == encoded(b"%PDF original")
     assert (blob.mime_type, blob.uri) == ("application/pdf", "paperless://documents/7/original")
     assert (blob.meta or {}).get("filename") == "2026-11-11 Müller €.pdf"
-    assert isinstance(text, TextContent)
-    assert json.loads(text.text) == report
     assert report["filename"] == "2026-11-11 Müller €.pdf"
     assert (report["kind"], report["delivered"], report["max_bytes"]) == ("original", True, LIMIT)
 
@@ -129,9 +127,7 @@ async def test_a_download_over_the_limit_is_metadata_and_a_link_only() -> None:
 
     content, report = await call("download_document", {"document_id": 7}, fake)
 
-    [text] = content
-    assert isinstance(text, TextContent)
-    assert json.loads(text.text) == report
+    assert len(content) == 1
     assert (report["delivered"], report["size_bytes"], report["max_bytes"]) == (
         False,
         LIMIT + 1,
@@ -175,7 +171,9 @@ async def test_a_document_without_archive_version_is_an_error_with_a_hint() -> N
         )
 
     assert result.is_error
-    assert "Document 7 has no archive version. Hint: Ask for the original" in str(result.content)
+    assert "Document 7 has no archive version. Hint: Call download_document with kind=" in str(
+        result.content
+    )
 
 
 async def test_a_hidden_document_is_a_permission_error() -> None:
@@ -273,3 +271,49 @@ async def test_a_file_bug_is_masked_and_logged_by_type_only(
     errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
     assert "get_document_thumbnail failed: RuntimeError" in errors
     assert not [line for line in errors if "secret-detail" in line]
+
+
+class Nameless(FakePaperless):
+    """Paperless proposes no file name."""
+
+    @override
+    async def get_document_file(
+        self, document_id: int, version: FileVersion, *, max_bytes: int
+    ) -> DocumentFile:
+        found = await super().get_document_file(document_id, version, max_bytes=max_bytes)
+        return found.model_copy(update={"filename": None})
+
+
+async def test_a_file_without_a_name_has_no_filename_in_its_metadata() -> None:
+    state = seeded()
+    fake = Nameless(state, user="admin")
+
+    content, report = await call("download_document", {"document_id": 1}, fake)
+    resource = await read("paperless://documents/1/original", fake)
+
+    embedded = blob_of(content[1])
+    assert report["filename"] is None
+    assert embedded.meta is None
+    assert resource.meta is None
+
+
+async def test_an_empty_thumbnail_is_an_error_not_an_empty_image() -> None:
+    class Empty(FakePaperless):
+        @override
+        async def get_document_thumbnail(self, document_id: int) -> DocumentFile:
+            found = await super().get_document_thumbnail(document_id)
+            return found.model_copy(update={"content": b""})
+
+    async with Client(serve(admin(), documents=Empty(seeded(), user="admin"))) as client:
+        result = await client.call_tool(
+            "get_document_thumbnail", {"document_id": 1}, raise_on_error=False
+        )
+
+    assert result.is_error
+    assert "empty thumbnail" in str(result.content)
+
+
+def blob_of(content: object) -> BlobResourceContents:
+    assert isinstance(content, EmbeddedResource)
+    assert isinstance(content.resource, BlobResourceContents)
+    return content.resource

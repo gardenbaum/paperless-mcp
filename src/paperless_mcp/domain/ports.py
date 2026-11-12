@@ -135,12 +135,14 @@ class DocumentReader(Protocol):
         """
         ...
 
-    async def get_document_file(self, document_id: int, version: FileVersion) -> DocumentFile:
+    async def get_document_file(
+        self, document_id: int, version: FileVersion, *, max_bytes: int
+    ) -> DocumentFile:
         """The original file or the archive version (the OCR'd PDF/A) of a document.
 
-        Reads the whole file into memory; callers check its size first
-        (``get_document_metadata``). Paperless answers the original for ``archive`` when the
-        document has no archive version, so callers check ``has_archive_version`` too.
+        Reads at most ``max_bytes`` bytes: a larger file comes back ``truncated`` with its type
+        and name but no content. Paperless answers the original for ``archive`` when the
+        document has no archive version, so callers check ``has_archive_version`` first.
 
         Raises:
             NotFound: No such document.

@@ -3,7 +3,7 @@
 import email.utils
 import logging
 from datetime import timedelta
-from typing import cast, override
+from typing import TYPE_CHECKING, cast, override
 
 import httpx2
 import pytest
@@ -11,7 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from adapter.conftest import NOW, TOKEN, ClientFactory, RecordingSleep, tag
+from adapter.conftest import BASE_URL, NOW, TOKEN, ClientFactory, RecordingSleep, tag
 from paperless_mcp.domain.errors import (
     AuthenticationFailed,
     Conflict,
@@ -25,7 +25,18 @@ from paperless_mcp.domain.errors import (
     Validation,
 )
 from paperless_mcp.paperless.auth import StaticTokenProvider
-from paperless_mcp.paperless.client import Method, RetryPolicy, retry_after, utc_now
+from paperless_mcp.paperless.client import (
+    Method,
+    PaperlessClient,
+    RetryPolicy,
+    retry_after,
+    utc_now,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from adapter.schema_guard import Handler
 
 pytestmark = pytest.mark.anyio
 
@@ -398,3 +409,94 @@ async def test_token_never_appears_in_logs_errors_or_reprs(
         texts += [str(error), repr(error), repr(error.__cause__), str(error.__cause__)]
     assert caplog.records  # the test saw log output at all
     assert not [text for text in texts if TOKEN in text]
+
+
+class Chunks(httpx2.AsyncByteStream):
+    """A response body of chunks that records how many were pulled and whether it was closed."""
+
+    def __init__(self, *chunks: bytes) -> None:
+        self.chunks: tuple[bytes, ...] = chunks
+        self.pulled: int = 0
+        self.closed: bool = False
+
+    @override
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self.chunks:
+            self.pulled += 1
+            yield chunk
+
+    @override
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def streaming(handler: Handler) -> tuple[PaperlessClient, RecordingSleep]:
+    """A client on a plain MockTransport (the schema guard reads whole bodies)."""
+    sleep = RecordingSleep()
+    http = httpx2.AsyncClient(base_url=BASE_URL, transport=httpx2.MockTransport(handler))
+    client = PaperlessClient(
+        http, StaticTokenProvider(TOKEN), retry=RetryPolicy(), upload_timeout=1.0, sleep=sleep
+    )
+    return client, sleep
+
+
+async def test_a_download_within_the_limit_is_returned_whole_with_its_headers() -> None:
+    body = Chunks(b"abc", b"def")
+    client, _ = streaming(
+        lambda _: httpx2.Response(200, headers={"Content-Type": "text/plain"}, stream=body)
+    )
+
+    found = await client.download("/api/documents/1/download/", max_bytes=6)
+
+    assert (found.content, found.truncated) == (b"abcdef", False)
+    assert found.headers["Content-Type"] == "text/plain"
+    assert body.closed
+
+
+async def test_a_download_stops_reading_once_the_limit_is_passed() -> None:
+    body = Chunks(b"abc", b"def", b"ghi", b"jkl")
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=body))
+
+    found = await client.download("/api/documents/1/download/", max_bytes=4)
+
+    assert (found.content, found.truncated) == (b"", True)
+    assert body.pulled == 2
+    assert body.closed
+
+
+async def test_a_download_sends_the_credential_and_the_api_version() -> None:
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(200, content=b"x")
+
+    client, _ = streaming(handler)
+
+    _ = await client.download(
+        "/api/documents/1/download/", params={"original": "true"}, max_bytes=9
+    )
+
+    [request] = seen
+    assert request.headers["Accept"] == "application/json; version=10"
+    assert request.headers["Authorization"] == f"Token {TOKEN}"
+    assert request.url.params["original"] == "true"
+
+
+async def test_a_download_error_becomes_the_domain_error() -> None:
+    client, _ = streaming(lambda _: httpx2.Response(400, json={"original": ["Bad."]}))
+
+    with pytest.raises(Validation, match="original: Bad"):
+        _ = await client.download("/api/documents/1/download/", max_bytes=9)
+
+
+async def test_a_download_retries_transient_statuses_and_closes_each_response() -> None:
+    first = Chunks(b"busy")
+    answers = [httpx2.Response(503, stream=first), httpx2.Response(200, content=b"ok")]
+    client, sleep = streaming(lambda _: answers.pop(0))
+
+    found = await client.download("/api/documents/1/download/", max_bytes=9)
+
+    assert found.content == b"ok"
+    assert first.closed
+    assert len(sleep.delays) == 1
