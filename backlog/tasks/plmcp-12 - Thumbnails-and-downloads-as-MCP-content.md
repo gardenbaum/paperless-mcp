@@ -1,11 +1,11 @@
 ---
 id: PLMCP-12
 title: Thumbnails and downloads as MCP content
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T18:51:00Z'
+updated_date: '2026-11-12T18:59:00Z'
 labels: []
 milestone: m-1
 dependencies:
@@ -24,18 +24,18 @@ Vision-capable clients can read thumbnails, and originals or archive PDFs must b
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 get_document_thumbnail returns MCP image content
-- [ ] #2 download_document (original or archive) returns an embedded resource up to a configurable size cap; above it, metadata and web_url only
-- [ ] #3 paperless://documents/{id}/thumbnail, /original and /archive resources exist
-- [ ] #4 MIME type and filename, including non-ASCII names, are preserved
-- [ ] #5 FakePaperless and the contract suite cover every new port method
+- [x] #1 get_document_thumbnail returns MCP image content
+- [x] #2 download_document (original or archive) returns an embedded resource up to a configurable size cap; above it, metadata and web_url only
+- [x] #3 paperless://documents/{id}/thumbnail, /original and /archive resources exist
+- [x] #4 MIME type and filename, including non-ASCII names, are preserved
+- [x] #5 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -59,3 +59,9 @@ Design decisions: (1) size check before download: DocumentService-independent Fi
 
 Review fix round 1. I1: Content-Disposition is now tokenised left to right (quoted strings consumed whole, first value of a repeated parameter wins), so filename*= inside a quoted title is not a parameter; quoted/malformed filename*, unterminated quotes covered by tests. I2: PaperlessClient.download streams (httpx2 send(stream=True) + aiter_bytes), aborts once max_bytes+1 bytes arrived (test counts pulled chunks) and shares the retry loop with request(); port get_document_file(id, version, *, max_bytes) returns DocumentFile(truncated=True, content empty); thumbnails capped at 4 MiB in the adapter; an archive whose size metadata is null is treated as size unknown (stream-capped) instead of using the original's size; FileReport.size_bytes is null when not measured. Setting: upper bound 32 MiB, default lowered to 512 KiB, not 1 MiB: the vendored FastMCP docs (docs/vendor/fastmcp/docs/clients/transports.mdx) say the client's HTTP transport reads at most 1 MiB per SSE event by default, and base64 adds a third plus the report, so 1 MiB raw would break default clients; 512 KiB is about 700 KB on the wire. I3: decision-11 'Media tool results return content blocks' (accepted) narrows decision-4's typed-return-model rule for MEDIA_TOOLS (tools/_shared.py: get_document_thumbnail, download_document); both return content blocks only (JSON report text + image / embedded resource), no output schema, no structured content; registry test fails for a schemaless tool outside the allowlist and for an allowlisted tool that has a schema, with self-tests. Note: PLMCP-15 may also have created decision-11 - renumber on rebase if so. Minors: 1 '.', '..', C0/C1 controls and bidi U+202A-202E/2066-2069 stripped from names; 2 charsets utf-8 and iso-8859-1 only; 3 the second-check branch uses the response's name and type, the name difference delivered (Paperless download name) vs withheld (upload name) is in the FileReport.filename description, an empty original_filename gives null; 4 hints name download_document kind=original and get_document_content; 5 _meta.filename omitted when None; 6 empty thumbnail is an error (Thumbnail type has non-optional data); 7 /preview/ dropped from FILE_RESPONSES, JSON content-type check case-insensitive; 8 known fake gaps: text/* charset suffix is simulated by the fake, not derived from content, and live document consumption details (formatted file name template with correspondent) are only approximated by '<created> <title>.<ext>'; the fake's uploaded PDF archive is now original+marker so archive != original; 9 README line on size and token cost; 10 FileReport.document_id and mime_type described. Snapshot test_surface.ambr regenerated deliberately: the two media tools lose their outputSchema and get the shorter descriptions.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+get_document_thumbnail returns MCP image content; download_document (original or archive) returns an embedded resource up to PAPERLESS_MCP_MAX_DOWNLOAD_BYTES (default 512 KiB, max 32 MiB: base64 grows a third and FastMCP's client HTTP transport reads 1 MiB per event by default), above it a report with metadata and web_url only; never touches the host filesystem. Downloads stream and stop once the cap is exceeded; thumbnails are capped at 4 MiB. Resources paperless://documents/{id}/thumbnail, /original and /archive. MIME type and filename are preserved, including non-ASCII names (RFC 5987 filename* preferred, parsed parameter by parameter so a title cannot spoof the name; dot names, control and bidi characters rejected). A missing archive version is NotFound with a hint naming download_document kind=original. New decision-11: media tools return content blocks only (no output schema/structured content), narrowing decision-4 for MEDIA_TOOLS, enforced by a two-way registry test. Ports get_document_thumbnail and get_document_file with adapter, FakePaperless and contract tests on fake and live 3.4.2 (real non-ASCII uploads). Verified: just check green; just e2e 95/96 locally, the one failure caused by a foreign document on the shared stack (CI runs a fresh stack). Independent review: 3 Important and 10 Minor fixed. Deliberate: schema-guard FILE_RESPONSES exemption for binary 200s (self-tested) and two text/html 403 entries; surface snapshot regenerated. DoD #1 left unchecked: the E2E file and the disposition table test were written after the code. DoD #2 is checked once CI is green; DoD #4 by the merge itself.
+<!-- SECTION:FINAL_SUMMARY:END -->
