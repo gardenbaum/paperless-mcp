@@ -178,7 +178,9 @@ async def test_a_disabled_audit_log_is_a_feature_error_before_anything_else() ->
 NOTER = FakeUser(
     id=12,
     username="noter",
-    permissions=frozenset({"view_document", "view_note", "add_note", "delete_note"}),
+    permissions=frozenset(
+        {"view_document", "view_note", "add_note", "delete_note", "change_document"}
+    ),
 )
 ERASER = FakeUser(id=13, username="eraser", permissions=frozenset({"delete_document"}))
 

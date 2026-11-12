@@ -42,7 +42,7 @@ from paperless_mcp.domain.taxonomy import TaxonomyKind, TaxonomyListing
 from paperless_mcp.services.documents import DEFAULT_SLICE, HISTORY_LIMIT
 from paperless_mcp.services.notes import MAX_NOTE_CHARS
 from paperless_mcp.services.tasks import MAX_WAIT_SECONDS
-from paperless_mcp.tools._shared import ANNOTATIONS, boundary, resource_boundary, services
+from paperless_mcp.tools._shared import ANNOTATIONS, Confirm, boundary, resource_boundary, services
 
 TOOLSET = "core"
 # Most rows list_taxonomy returns and largest search page (decision-4: lists hold at most 100).
@@ -59,15 +59,6 @@ type Offset = Annotated[int, Field(ge=0, description="Character offset to start 
 type SliceSize = Annotated[
     int,
     Field(ge=1, le=MAX_SLICE, description=f"Characters to return, at most {MAX_SLICE}."),
-]
-type Confirm = Annotated[
-    bool,
-    Field(
-        description=(
-            "Must be true to go ahead. Without it nothing changes and the answer says what would "
-            "happen; check that, then call again with confirm=true."
-        )
-    ),
 ]
 type Day = Annotated[date | None, Field(description="Date (YYYY-MM-DD), inclusive.")]
 
@@ -500,8 +491,9 @@ async def delete_document(
     Two steps: call without confirm first. Nothing is deleted and the error names the document
     that would go, with confirm=true to pass. The trash keeps the document until it is emptied
     (by the administrator's retention setting or by hand); restore it in the Paperless web UI
-    or with the trash toolset if enabled. Only the owner (any user for an unowned document)
-    may delete, and the user needs the delete permission.
+    or with the trash toolset if enabled. Needs the permission to view and to delete documents,
+    and the user must own the document, be a superuser, or the document must be unowned
+    (a view or change grant is not enough).
     """
     return await services(ctx).removal.delete(document_id, confirm=confirm)
 

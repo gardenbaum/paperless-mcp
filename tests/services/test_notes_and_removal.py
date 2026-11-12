@@ -194,8 +194,11 @@ async def test_a_confirmed_deletion_moves_the_document_to_the_trash_and_says_so(
     result = await setup.removal.delete(PUBLIC, confirm=True)
 
     assert (result.document_id, result.title, result.in_trash) == (PUBLIC, PUBLIC_TITLE, True)
-    assert "trash" in result.message
-    assert "web UI" in result.message
+    assert result.message == (
+        f"Document 1 '{PUBLIC_TITLE}' is in the trash. It stays there until the trash is emptied "
+        "(by default after 30 days) and can be restored in the Paperless web UI, or with "
+        "restore_from_trash if the trash toolset is enabled."
+    )
     assert [d.id for d in setup.state.trash] == [PUBLIC]
     assert [d.id for d in setup.state.documents] == [2]
 

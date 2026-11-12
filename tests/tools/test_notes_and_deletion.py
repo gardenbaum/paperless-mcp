@@ -12,6 +12,12 @@ pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
 type Json = dict[str, object]
 
+CONFIRM_DESCRIPTION = (
+    "Must be true to go ahead. Without it nothing changes and the error says what would "
+    "happen. Describe that to the user and pass true only once they agree, or if they "
+    "already asked for exactly this."
+)
+
 TOOLS = ("add_note", "delete_note", "delete_document")
 
 
@@ -130,7 +136,7 @@ async def test_the_destructive_tools_take_a_described_confirm_that_defaults_to_f
     for name in ("delete_note", "delete_document"):
         properties = cast("dict[str, Json]", tools[name].input_schema["properties"])
         assert properties["confirm"]["default"] is False
-        assert "true" in str(properties["confirm"]["description"])
+        assert properties["confirm"]["description"] == CONFIRM_DESCRIPTION
         assert "confirm" not in tools[name].input_schema.get("required", [])
     assert "confirm" not in cast("Json", tools["add_note"].input_schema["properties"])
 
@@ -145,3 +151,17 @@ async def test_the_descriptions_name_the_two_step_flow_and_the_trash() -> None:
     assert "for good" in tools["delete_note"]
     assert "confirm" in tools["delete_note"]
     assert "include" in tools["delete_note"]
+    assert "own the document" in tools["delete_document"]
+    assert "view" in tools["delete_document"]
+    assert "view and to delete documents" in tools["delete_document"]
+    assert "unowned" in tools["delete_document"]
+
+
+async def test_the_note_length_is_bounded_with_a_message_that_says_how() -> None:
+    # FastMCP leaves minLength/maxLength of a string out of the schema and does not enforce them,
+    # so the service's check is what the client meets.
+    empty = await refusal(fake(writes=False), "add_note", note="")
+    long = await refusal(fake(writes=False), "add_note", note="x" * 10_001)
+
+    assert "A note cannot be empty." in empty
+    assert "at most 10000 characters" in long

@@ -228,3 +228,23 @@ async def test_a_failed_note_post_is_not_retried_either() -> None:
         _ = await PaperlessDocumentWriter(client).add_note(1, "x")
 
     assert len(calls) == 1
+
+
+async def test_the_new_note_is_the_newest_one_with_the_text_that_was_sent() -> None:
+    # Another user's note can land between the POST and its answer: pick by text, then by id.
+    rival: Json = {**SECOND, "id": 4, "note": "written by somebody else", "user": ADMIN}
+    twin: Json = {**SECOND, "id": 1}
+    client, _ = streaming(lambda _: httpx2.Response(200, json=[twin, SECOND, rival]))
+
+    note = await PaperlessDocumentWriter(client).add_note(1, "second note")
+
+    assert note.id == 3
+
+
+async def test_without_a_note_of_that_text_the_newest_note_is_taken() -> None:
+    # Paperless might store the text changed (it does not today); the write succeeded anyway.
+    client, _ = streaming(lambda _: httpx2.Response(200, json=[FIRST, SECOND]))
+
+    note = await PaperlessDocumentWriter(client).add_note(1, "text that was normalised")
+
+    assert note.id == 3

@@ -467,7 +467,8 @@ class PaperlessDocumentWriter:
     async def add_note(self, document_id: int, text: str) -> Note:
         """See ``DocumentWriter.add_note``.
 
-        Paperless answers 200 with every note of the document, the new one last, or with
+        Paperless answers 200 with every note of the document, the new one last (picked as the
+        newest with the text that was sent, since others may add notes meanwhile), or with
         ``{"error": ...}`` and status 200 when it could not save it. A 403 means the global note
         permission is missing, the document is hidden, or the user may not change it.
         """
@@ -483,7 +484,8 @@ class PaperlessDocumentWriter:
         if not answer.root:
             message = f"Paperless sent an unexpected response for POST {PATH}{document_id}/notes/."
             raise PaperlessMcpError(message)
-        return _note(max(answer.root, key=lambda row: row.id))
+        mine = [row for row in answer.root if row.note == text] or answer.root
+        return _note(max(mine, key=lambda row: row.id))
 
     async def delete_note(self, document_id: int, note_id: int) -> None:
         """See ``DocumentWriter.delete_note``.

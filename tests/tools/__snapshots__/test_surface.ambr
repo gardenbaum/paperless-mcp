@@ -517,15 +517,16 @@
         Two steps: call without confirm first. Nothing is deleted and the error names the document
         that would go, with confirm=true to pass. The trash keeps the document until it is emptied
         (by the administrator's retention setting or by hand); restore it in the Paperless web UI
-        or with the trash toolset if enabled. Only the owner (any user for an unowned document)
-        may delete, and the user needs the delete permission.
+        or with the trash toolset if enabled. Needs the permission to view and to delete documents,
+        and the user must own the document, be a superuser, or the document must be unowned
+        (a view or change grant is not enough).
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
           'confirm': dict({
             'default': False,
-            'description': 'Must be true to go ahead. Without it nothing changes and the answer says what would happen; check that, then call again with confirm=true.',
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
             'type': 'boolean',
           }),
           'document_id': dict({
@@ -596,7 +597,7 @@
         'properties': dict({
           'confirm': dict({
             'default': False,
-            'description': 'Must be true to go ahead. Without it nothing changes and the answer says what would happen; check that, then call again with confirm=true.',
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
             'type': 'boolean',
           }),
           'document_id': dict({
@@ -4134,15 +4135,16 @@
         Two steps: call without confirm first. Nothing is deleted and the error names the document
         that would go, with confirm=true to pass. The trash keeps the document until it is emptied
         (by the administrator's retention setting or by hand); restore it in the Paperless web UI
-        or with the trash toolset if enabled. Only the owner (any user for an unowned document)
-        may delete, and the user needs the delete permission.
+        or with the trash toolset if enabled. Needs the permission to view and to delete documents,
+        and the user must own the document, be a superuser, or the document must be unowned
+        (a view or change grant is not enough).
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
           'confirm': dict({
             'default': False,
-            'description': 'Must be true to go ahead. Without it nothing changes and the answer says what would happen; check that, then call again with confirm=true.',
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
             'type': 'boolean',
           }),
           'document_id': dict({
@@ -4213,7 +4215,7 @@
         'properties': dict({
           'confirm': dict({
             'default': False,
-            'description': 'Must be true to go ahead. Without it nothing changes and the answer says what would happen; check that, then call again with confirm=true.',
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
             'type': 'boolean',
           }),
           'document_id': dict({

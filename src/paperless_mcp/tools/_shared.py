@@ -10,12 +10,13 @@ calls on ``Services``. The registry tests
 import functools
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Annotated, Final, cast
 
 from fastmcp.exceptions import ResourceError, ToolError
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
-from paperless_mcp.domain.errors import PaperlessMcpError
+from paperless_mcp.domain.errors import ConfirmationRequired, PaperlessMcpError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
@@ -166,6 +167,18 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
 
 logger = logging.getLogger(__name__)
 
+# The `confirm` parameter of every destructive tool (decision-6, decision-15).
+type Confirm = Annotated[
+    bool,
+    Field(
+        description=(
+            "Must be true to go ahead. Without it nothing changes and the error says what would "
+            "happen. Describe that to the user and pass true only once they agree, or if they "
+            "already asked for exactly this."
+        )
+    ),
+]
+
 # Key of the ``Services`` in the server's lifespan context.
 SERVICES: Final = "services"
 
@@ -207,6 +220,9 @@ def boundary[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R
             return await tool(*args, **kwargs)
         except ToolError:
             raise
+        except ConfirmationRequired as refusal:
+            # The normal first step of a two-step flow, not a failure (decision-15).
+            raise ToolError(refusal.describe(), log_level=logging.INFO) from None
         except PaperlessMcpError as error:
             raise ToolError(error.describe()) from None
         except Exception as error:

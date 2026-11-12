@@ -34,6 +34,7 @@ from fakes.paperless import (
     FakePaperless,
     FakeState,
     FakeTask,
+    FakeUser,
     seeded,
 )
 
@@ -55,7 +56,7 @@ from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator, AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
 
     from e2e.helpers import Stack
 
@@ -117,6 +118,19 @@ class Upload(Protocol):
     def __call__(self, title: str, filename: str, content: bytes, mime_type: str) -> int: ...
 
 
+class Restricted(Protocol):
+    """Makes a user with just these global permissions and object grants on admin documents.
+
+    `view` documents are shared with it for viewing only, `change` documents for changing too;
+    every other document of the admin stays hidden from it. The live one deletes the user again
+    when the test ends.
+    """
+
+    def __call__(
+        self, permissions: frozenset[str], *, view: Sequence[int] = (), change: Sequence[int] = ()
+    ) -> Ports: ...
+
+
 class Share(Protocol):
     """Makes a document the admin's own and shares it with the restricted user to view only."""
 
@@ -143,6 +157,8 @@ class Backend:
     new_document: Callable[[], int]
     # Shares an uploaded document view-only with the restricted user (see `Share`).
     share_read_only: Share
+    # A user with only the given permissions and grants (see `Restricted`).
+    restricted: Restricted
     # Whether the document with this id is in the trash (deleted, not yet emptied from it).
     in_trash: Callable[[int], bool]
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
@@ -210,6 +226,26 @@ def fake_share(state: FakeState) -> Share:
     return share_fake
 
 
+def fake_restricted(state: FakeState) -> Restricted:
+    def restricted(
+        permissions: frozenset[str], *, view: Sequence[int] = (), change: Sequence[int] = ()
+    ) -> Ports:
+        user = FakeUser(
+            id=max(u.id for u in state.users) + 1,
+            username=f"contract-user-{uuid.uuid4().hex[:12]}",
+            permissions=permissions,
+        )
+        state.users.append(user)
+        for document in state.documents:
+            if document.id in {*view, *change}:
+                document.viewers.add(user.id)
+            if document.id in change:
+                document.editors.add(user.id)
+        return fake_ports(state, user.username)
+
+    return restricted
+
+
 def fake_in_trash(state: FakeState) -> Callable[[int], bool]:
     def in_trash(document_id: int) -> bool:
         return document_id in {d.id for d in state.trash}
@@ -229,6 +265,7 @@ def fake_backend(*, ai_enabled: bool = False) -> Backend:
         upload=fake_upload(state),
         new_document=fake_new_document(state),
         share_read_only=fake_share(state),
+        restricted=fake_restricted(state),
         in_trash=fake_in_trash(state),
         expected_version=VERSION,
     )
@@ -251,13 +288,50 @@ def delete_and_empty_trash(stack: Stack, documents: list[int]) -> None:
     for document in documents:
         _ = stack.admin.delete(f"/api/documents/{document}/")
     if documents:
-        _ = stack.admin.post("/api/trash/", json={"action": "empty", "documents": documents})
+        emptied = stack.admin.post("/api/trash/", json={"action": "empty", "documents": documents})
+        _ = emptied.raise_for_status()
+
+
+def live_restricted(
+    stack: Stack, ports_for: Callable[[str], Ports], users: list[int]
+) -> Restricted:
+    """Live `Restricted`: a temporary user whose id goes on `users` for the finaliser."""
+
+    def restricted(
+        permissions: frozenset[str], *, view: Sequence[int] = (), change: Sequence[int] = ()
+    ) -> Ports:
+        name = f"contract-user-{uuid.uuid4().hex[:12]}"
+        password = f"pw-{uuid.uuid4().hex}"
+        body = {"username": name, "password": password, "user_permissions": sorted(permissions)}
+        created = stack.admin.post("/api/users/", json=body).raise_for_status()
+        user = int(cast("int", cast("dict[str, object]", created.json())["id"]))
+        users.append(user)
+        owner = cast("dict[str, dict[str, object]]", stack.admin.get("/api/ui_settings/").json())
+        for document in {*view, *change}:
+            grant = {"users": [user], "groups": []}
+            nobody: dict[str, list[int]] = {"users": [], "groups": []}
+            shared = {"view": grant, "change": grant if document in change else nobody}
+            _ = stack.admin.patch(
+                f"/api/documents/{document}/",
+                json={"owner": owner["user"]["id"], "set_permissions": shared},
+            ).raise_for_status()
+        # Basic auth, not /api/token/: that endpoint is throttled.
+        with httpx2.Client(
+            base_url=stack.base_url,
+            auth=(name, password),
+            headers={"Accept": "application/json; version=10"},
+        ) as signed_in:
+            issued = signed_in.post("/api/profile/generate_auth_token/").raise_for_status()
+        return ports_for(str(cast("object", issued.json())))
+
+    return restricted
 
 
 @contextlib.asynccontextmanager
 async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
     """The adapter on the live stack; documents a test uploads are deleted when it ends."""
     created: list[int] = []
+    users: list[int] = []
 
     def consume_live(*, succeed: bool) -> str:
         title = f"contract-task-{uuid.uuid4().hex}"
@@ -309,11 +383,14 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
                 upload=upload_live,
                 new_document=new_live_document,
                 share_read_only=share_live,
+                restricted=live_restricted(stack, ports, users),
                 in_trash=lambda document_id: live_in_trash(stack, document_id),
                 expected_version=EXPECTED_VERSION,
             )
     finally:
         delete_and_empty_trash(stack, created)
+        for user in users:
+            _ = stack.admin.delete(f"/api/users/{user}/")
         # Tags the contract tests created (they all start with SCRATCH_TAG).
         found = stack.admin.get("/api/tags/", params={"name__istartswith": SCRATCH_TAG})
         for row in results(found):

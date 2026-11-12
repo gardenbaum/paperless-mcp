@@ -120,7 +120,7 @@ reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated 
 
 [[equivalent]]
 mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁrequest__mutmut_19"
-function_hash = "d8b329d2b758"
+function_hash = "75c7ce12d941"
 reason = "stream=None is falsy like stream=False, and httpx2 treats both as 'read the body now'."
 
 [[equivalent]]
@@ -280,7 +280,7 @@ reason = "retry=None is falsy like retry=False, so the request is not retried ei
 
 [[equivalent]]
 mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁadd_note__mutmut_11"
-function_hash = "f321dd014742"
+function_hash = "4b4ad4f40f16"
 reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
 
 [[equivalent]]

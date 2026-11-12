@@ -54,7 +54,7 @@ from paperless_mcp.domain.documents import (
     Note,
     Suggestions,
 )
-from paperless_mcp.domain.errors import FeatureUnavailable, PermissionDenied, Validation
+from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
 from paperless_mcp.domain.instance import (
     ComponentStatus,
     CurrentUser,
@@ -693,14 +693,14 @@ class FakePaperless:
             raise unseen_document(document_id)
         return document
 
-    def _sub(self, document_id: int, permission: str | None = None) -> FakeDocument:
+    def _sub(self, document_id: int, *permissions: str) -> FakeDocument:
         """The document for a sub-resource.
 
         The global permission is checked first (403), then existence (404); a hidden document
         is 403, which differs from the detail view.
         """
-        for needed in ("view_document", permission):
-            if needed and not self.user.has(needed):
+        for needed in ("view_document", *permissions):
+            if not self.user.has(needed):
                 message = "The Paperless user may not perform this action."
                 raise PermissionDenied(message)
         document = self._document(document_id)
@@ -849,11 +849,12 @@ class FakePaperless:
     async def add_note(self, document_id: int, text: str) -> Note:
         """`DocumentWriter.add_note` (the `notes` action, POST).
 
-        Order in Paperless 3.4.2: the global `view_document` and `add_note` permissions (403),
+        Order in Paperless 3.4.2: the global `view_document`, `add_note` and `change_document`
+        permissions (403; live: a change grant on the document does not replace the last),
         the document (404), the object view (403 for a hidden document) and the object change
         permission (403: a viewer may not add notes). Empty and blank text is accepted.
         """
-        document = self._sub(document_id, "add_note")
+        document = self._sub(document_id, "add_note", "change_document")
         if not document.changeable_by(self.user):
             message = "The Paperless user may not perform this action."
             raise PermissionDenied(message)
@@ -873,7 +874,10 @@ class FakePaperless:
         Same order as `add_note` with `delete_note` as the global permission; then the note
         must be one of this document (404).
         """
-        document = self._sub(document_id, "delete_note")
+        try:
+            document = self._sub(document_id, "delete_note", "change_document")
+        except NotFound:
+            raise unseen_note(document_id, note_id) from None  # the same 404 for both
         if not document.changeable_by(self.user):
             message = "The Paperless user may not perform this action."
             raise PermissionDenied(message)

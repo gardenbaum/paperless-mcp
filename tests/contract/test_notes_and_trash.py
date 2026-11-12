@@ -11,6 +11,7 @@ from fakes.accounts import PUBLIC_NOTE
 
 from paperless_mcp.domain.documents import DocumentQuery
 from paperless_mcp.domain.errors import NotFound, PermissionDenied
+from paperless_mcp.paperless.documents import unseen_note
 
 if TYPE_CHECKING:
     from contract.conftest import Backend
@@ -104,8 +105,10 @@ async def test_deleting_an_unknown_or_foreign_note_is_not_found(backend: Backend
         await ports.document_writes.delete_note(document, MISSING)
     with pytest.raises(NotFound):
         await ports.document_writes.delete_note(document, foreign.id)
-    with pytest.raises(NotFound):
+    with pytest.raises(NotFound) as raised:
         await ports.document_writes.delete_note(MISSING, mine.id)
+    # Paperless answers 404 alike to a missing document and to a missing note.
+    assert raised.value.message == unseen_note(MISSING, mine.id).message
 
     assert await ports.documents.list_document_notes(document) == (mine,)
     assert await ports.documents.list_document_notes(other) == (foreign,)
@@ -183,3 +186,50 @@ async def test_deleting_needs_the_delete_permission(backend: Backend) -> None:
         await backend.blind.document_writes.delete_document(public)
 
     assert (await backend.reader.documents.get_document(public)).id == public
+
+
+NOTES = frozenset({"view_document", "view_note", "add_note", "delete_note", "delete_document"})
+# Live 3.4.2: adding and deleting notes also needs the global change_document permission.
+CHANGING = NOTES | {"change_document"}
+
+
+@pytest.mark.contract(ADD)
+@pytest.mark.contract(DELETE_NOTE)
+async def test_a_view_grant_reads_notes_but_writing_them_needs_a_change_grant_and_permission(
+    backend: Backend,
+) -> None:
+    admin = backend.admin
+    viewed, changed, hidden, granted_alone = (backend.new_document() for _ in range(4))
+    note = await admin.document_writes.add_note(viewed, "admin's note")
+    user = backend.restricted(CHANGING, view=[viewed], change=[changed])
+    without_change_permission = backend.restricted(NOTES, change=[granted_alone])
+
+    with pytest.raises(PermissionDenied):
+        _ = await without_change_permission.document_writes.add_note(granted_alone, "no")
+    assert await user.documents.list_document_notes(viewed) == (note,)
+    with pytest.raises(PermissionDenied):
+        _ = await user.document_writes.add_note(viewed, "no")
+    with pytest.raises(PermissionDenied):
+        await user.document_writes.delete_note(viewed, note.id)
+    with pytest.raises(PermissionDenied):
+        _ = await user.document_writes.add_note(hidden, "no")
+    mine = await user.document_writes.add_note(changed, "yes")
+    await user.document_writes.delete_note(changed, mine.id)
+
+    assert await admin.documents.list_document_notes(viewed) == (note,)
+    assert await admin.documents.list_document_notes(changed) == ()
+
+
+@pytest.mark.contract(DELETE_DOCUMENT)
+async def test_a_view_or_change_grant_is_not_enough_to_delete_a_document(backend: Backend) -> None:
+    viewed, changed, hidden = (backend.new_document() for _ in range(3))
+    user = backend.restricted(NOTES, view=[viewed], change=[changed])
+
+    with pytest.raises(PermissionDenied):
+        await user.document_writes.delete_document(viewed)
+    with pytest.raises(PermissionDenied):
+        await user.document_writes.delete_document(changed)
+    with pytest.raises(NotFound):
+        await user.document_writes.delete_document(hidden)
+
+    assert not any(backend.in_trash(d) for d in (viewed, changed, hidden))

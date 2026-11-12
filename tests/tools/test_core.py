@@ -10,7 +10,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 from harness import FailsAfterProbe, admin, serve
 
-from paperless_mcp.domain.errors import UpstreamUnreachable
+from paperless_mcp.domain.errors import ConfirmationRequired, UpstreamUnreachable
 from paperless_mcp.tools._shared import boundary
 
 pytestmark = pytest.mark.anyio
@@ -85,3 +85,29 @@ async def test_a_tool_error_passes_the_boundary_unchanged(caplog: pytest.LogCapt
 
     assert raised.value is error
     assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.decision("decision-15")
+async def test_a_confirmation_refusal_is_logged_at_info_not_error() -> None:
+    async def tool() -> None:
+        effect = "delete something"
+        raise ConfirmationRequired.for_effect(effect)
+
+    with pytest.raises(ToolError) as raised:
+        await boundary(tool)()
+
+    assert raised.value.log_level == logging.INFO
+    assert str(raised.value).startswith("Nothing was changed.")
+    assert "confirm=true" in str(raised.value)
+
+
+@pytest.mark.decision("decision-15")
+async def test_other_domain_errors_keep_the_error_log_level() -> None:
+    async def tool() -> None:
+        message = "down"
+        raise UpstreamUnreachable(message)
+
+    with pytest.raises(ToolError) as raised:
+        await boundary(tool)()
+
+    assert raised.value.log_level == logging.ERROR
