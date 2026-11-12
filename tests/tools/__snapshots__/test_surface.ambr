@@ -1,5 +1,5 @@
 # serializer version: 1
-# name: test_the_resource_templates_match_the_snapshot
+# name: test_the_resource_templates_match_the_snapshot[all]
   list([
     dict({
       '_meta': dict({
@@ -48,7 +48,2457 @@
     }),
   ])
 # ---
-# name: test_the_surface_matches_the_snapshot
+# name: test_the_resource_templates_match_the_snapshot[default]
+  list([
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'description': '''
+        Every tag, correspondent, document type, storage path, custom field, saved view, user or
+        group the current user may see, as JSON rows with id, name and document count.
+      ''',
+      'mimeType': 'application/json',
+      'name': 'taxonomy',
+      'title': 'Taxonomy table',
+      'uriTemplate': 'paperless://taxonomy/{kind}',
+    }),
+  ])
+# ---
+# name: test_the_resource_templates_match_the_snapshot[read-only]
+  list([
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'description': '''
+        Every tag, correspondent, document type, storage path, custom field, saved view, user or
+        group the current user may see, as JSON rows with id, name and document count.
+      ''',
+      'mimeType': 'application/json',
+      'name': 'taxonomy',
+      'title': 'Taxonomy table',
+      'uriTemplate': 'paperless://taxonomy/{kind}',
+    }),
+  ])
+# ---
+# name: test_the_surface_matches_the_snapshot[all]
+  list([
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get instance overview',
+      }),
+      'description': '''
+        Describe the Paperless instance as the current user sees it.
+        
+        Reports the Paperless and API version, the document, inbox and taxonomy counts, the system
+        health (storage, database, task queue, search index, classifier), the current user and
+        whether Paperless AI is enabled. Use it first to orient yourself, or to diagnose failures.
+        
+        Counts include only what the user may see, unless they may view global statistics. A null
+        field means the user may not see it, not that it is off: ai_enabled null means unknown.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+        }),
+        'type': 'object',
+      }),
+      'name': 'get_instance_overview',
+      'outputSchema': dict({
+        'description': 'The instance as the current user sees it.',
+        'properties': dict({
+          'ai_enabled': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Whether Paperless AI is enabled; null means unknown (the user may not view the UI settings), not disabled.',
+          }),
+          'api_version': dict({
+            'type': 'integer',
+          }),
+          'current_user': dict({
+            'anyOf': list([
+              dict({
+                'description': 'The Paperless user the credential belongs to.',
+                'properties': dict({
+                  'id': dict({
+                    'type': 'integer',
+                  }),
+                  'is_superuser': dict({
+                    'type': 'boolean',
+                  }),
+                  'username': dict({
+                    'type': 'string',
+                  }),
+                }),
+                'required': list([
+                  'id',
+                  'username',
+                  'is_superuser',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null if the user may not view the UI settings.',
+          }),
+          'paperless_version': dict({
+            'type': 'string',
+          }),
+          'statistics': dict({
+            'description': 'Object counts, of the objects the user may see unless they may view global statistics.',
+            'properties': dict({
+              'correspondents': dict({
+                'type': 'integer',
+              }),
+              'document_types': dict({
+                'type': 'integer',
+              }),
+              'documents': dict({
+                'type': 'integer',
+              }),
+              'inbox_documents': dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'integer',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+                'description': 'Documents with an inbox tag; null if no inbox tag is visible.',
+              }),
+              'storage_paths': dict({
+                'type': 'integer',
+              }),
+              'tags': dict({
+                'type': 'integer',
+              }),
+            }),
+            'required': list([
+              'documents',
+              'inbox_documents',
+              'tags',
+              'correspondents',
+              'document_types',
+              'storage_paths',
+            ]),
+            'type': 'object',
+          }),
+          'system_status': dict({
+            'anyOf': list([
+              dict({
+                'description': 'Storage and component health of the instance.',
+                'properties': dict({
+                  'celery': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'classifier': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'database': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'install_type': dict({
+                    'type': 'string',
+                  }),
+                  'llm_index': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'redis': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'sanity_check': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'search_index': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'storage_available_bytes': dict({
+                    'type': 'integer',
+                  }),
+                  'storage_total_bytes': dict({
+                    'type': 'integer',
+                  }),
+                }),
+                'required': list([
+                  'install_type',
+                  'storage_total_bytes',
+                  'storage_available_bytes',
+                  'database',
+                  'redis',
+                  'celery',
+                  'search_index',
+                  'classifier',
+                  'sanity_check',
+                  'llm_index',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null if the user may not view the system status.',
+          }),
+        }),
+        'required': list([
+          'paperless_version',
+          'api_version',
+          'statistics',
+          'system_status',
+          'current_user',
+          'ai_enabled',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get instance overview',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get task',
+      }),
+      'description': '''
+        Follow a Paperless background task, such as an upload being processed, to its result.
+        
+        Reports state (pending, started, success, failure, revoked), the error message of a failed
+        task and the document ids once known. With wait_seconds it polls until the task ends or the
+        wait (at most 30 s in total) is used up; wait says which: finished, timed_out (still
+        running, call again) or not_requested. Needs the permission to view tasks in Paperless.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'task_id': dict({
+            'description': 'The task id (a UUID) that an upload or other background work returned.',
+            'pattern': '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+            'type': 'string',
+          }),
+          'wait_seconds': dict({
+            'default': 0,
+            'description': 'Wait up to this many seconds for the task to end; more than 30 is cut to 30. 0 reads it once.',
+            'minimum': 0,
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'task_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'get_task',
+      'outputSchema': dict({
+        'description': 'A task, and what waiting for it did.',
+        'properties': dict({
+          'created': dict({
+            'format': 'date-time',
+            'type': 'string',
+          }),
+          'document_ids': dict({
+            'description': 'The documents the task created or changed, once known; may be several.',
+            'items': dict({
+              'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'finished': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date-time',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null while the task is running.',
+          }),
+          'message': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Why the task failed; null otherwise.',
+          }),
+          'state': dict({
+            'description': 'pending, started, success, failure or revoked.',
+            'enum': list([
+              'pending',
+              'started',
+              'success',
+              'failure',
+              'revoked',
+            ]),
+            'type': 'string',
+          }),
+          'task_id': dict({
+            'type': 'string',
+          }),
+          'task_type': dict({
+            'description': 'E.g. consume_file (an upload).',
+            'type': 'string',
+          }),
+          'wait': dict({
+            'description': 'not_requested: wait_seconds was 0, so the task was read once; finished: the task ended within the wait (see state); timed_out: still running after waited_seconds, ask again.',
+            'enum': list([
+              'not_requested',
+              'finished',
+              'timed_out',
+            ]),
+            'type': 'string',
+          }),
+          'waited_seconds': dict({
+            'type': 'number',
+          }),
+        }),
+        'required': list([
+          'task_id',
+          'task_type',
+          'state',
+          'message',
+          'document_ids',
+          'created',
+          'finished',
+          'wait',
+          'waited_seconds',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get task',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List taxonomy',
+      }),
+      'description': '''
+        List the tags, correspondents, document types, storage paths, custom fields, saved views,
+        users or groups the current user may see, as compact rows with their ids.
+        
+        Use it to find the exact name or id to pass to other tools. Returns at most 100 rows in
+        Paperless order (by name); truncated true means more match, so narrow with name_contains.
+        Users, groups and saved views need the matching view permission in Paperless.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'kind': dict({
+            'description': 'Which kind of object to list.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+              'saved_view',
+              'user',
+              'group',
+            ]),
+            'type': 'string',
+          }),
+          'name_contains': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only names that contain this text, ignoring case and accents.',
+          }),
+        }),
+        'required': list([
+          'kind',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'list_taxonomy',
+      'outputSchema': dict({
+        'description': 'Taxonomy rows of one kind, at most a page of them.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many objects match, also beyond the items.',
+            'type': 'integer',
+          }),
+          'items': dict({
+            'items': dict({
+              'description': 'One taxonomy object; fields that do not apply to its kind are null.',
+              'properties': dict({
+                'colour': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Tags: the colour, e.g. #a6cee3.',
+                }),
+                'data_type': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Custom fields: the data type.',
+                }),
+                'document_count': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'Documents the user may see that use it; null for views, users, groups.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'description': 'The name; the username for users.',
+                  'type': 'string',
+                }),
+                'parent': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Tags: id of the parent tag.',
+                }),
+                'select_options': dict({
+                  'anyOf': list([
+                    dict({
+                      'items': dict({
+                        'description': 'An option of a select custom field; documents store its id as the value.',
+                        'properties': dict({
+                          'id': dict({
+                            'type': 'string',
+                          }),
+                          'label': dict({
+                            'type': 'string',
+                          }),
+                        }),
+                        'required': list([
+                          'id',
+                          'label',
+                        ]),
+                        'type': 'object',
+                      }),
+                      'type': 'array',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Custom fields of type select: the options, ids and labels.',
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+                'document_count',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'kind': dict({
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+              'saved_view',
+              'user',
+              'group',
+            ]),
+            'type': 'string',
+          }),
+          'truncated': dict({
+            'description': 'More match than the items hold; narrow with name_contains.',
+            'type': 'boolean',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'count',
+          'truncated',
+          'items',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List taxonomy',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Search documents',
+      }),
+      'description': '''
+        Find documents by full text, similarity or structured filters; all filters combine.
+        
+        Names (correspondent, document type, storage path, tags, owner) match exactly or ignoring
+        case and accents; an unknown or ambiguous name is an error that lists candidates. Rows hold
+        ids, names, dates, custom field values and web_url, never the document text. count is the
+        total; pass next_page as page to see more.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'added_from': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'added_to': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'correspondent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'created_from': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'created_to': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'custom_field_query': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Paperless custom field query: [field, op, value], fields by name, combined with ['AND'|'OR', [...]] or ['NOT', [...]]. Ops: exact, in, isnull, exists, icontains, gt, gte, lt, lte, range, contains. Dates take relative values: ['due', 'range', ['today', 'in 30 days']].",
+          }),
+          'document_type': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'inbox': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'true: only inbox documents; false: none of them.',
+          }),
+          'more_like_id': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Find documents similar to this document id.',
+          }),
+          'ordering': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'created',
+                  '-created',
+                  'added',
+                  '-added',
+                  'modified',
+                  '-modified',
+                  'title',
+                  '-title',
+                  'archive_serial_number',
+                  '-archive_serial_number',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Sort field, '-' for descending; default newest first or relevance.",
+          }),
+          'owner': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Username or id of the owning user.',
+          }),
+          'page': dict({
+            'default': 1,
+            'description': 'Page number, from 1.',
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'page_size': dict({
+            'default': 25,
+            'description': 'Documents per page, at most 100.',
+            'maximum': 100,
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'query': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Full-text query in Paperless syntax over title, content, notes and fields, e.g. 'invoice AND acme', 'created:[2024 to 2025]', 'notes.note:paid'. Results are ranked by relevance and carry highlights.",
+          }),
+          'storage_path': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'tags_all': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have all of them.',
+          }),
+          'tags_any': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have at least one.',
+          }),
+          'tags_none': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have none of them.',
+          }),
+          'title_contains': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only titles containing this text, ignoring case.',
+          }),
+        }),
+        'type': 'object',
+      }),
+      'name': 'search_documents',
+      'outputSchema': dict({
+        'description': 'One page of a document search.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many documents match in total.',
+            'type': 'integer',
+          }),
+          'documents': dict({
+            'items': dict({
+              'description': 'A document as a compact search row, without its content.',
+              'properties': dict({
+                'added': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'correspondent': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'created': dict({
+                  'format': 'date',
+                  'type': 'string',
+                }),
+                'custom_fields': dict({
+                  'items': dict({
+                    'description': 'A custom field\'s value, readable: select labels, "EUR 12.50", document ids.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'value': dict({
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                      'value',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'document_type': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'highlights': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Full-text search only: matching excerpt, terms marked with <b>.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'storage_path': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'tags': dict({
+                  'items': dict({
+                    'description': 'An object a document refers to; name is null if the user may not see it.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'created',
+                'added',
+                'correspondent',
+                'document_type',
+                'storage_path',
+                'tags',
+                'custom_fields',
+                'web_url',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'next_page': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The next page, null on the last one.',
+          }),
+          'page': dict({
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'count',
+          'page',
+          'next_page',
+          'documents',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Search documents',
+    }),
+  ])
+# ---
+# name: test_the_surface_matches_the_snapshot[default]
+  list([
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get instance overview',
+      }),
+      'description': '''
+        Describe the Paperless instance as the current user sees it.
+        
+        Reports the Paperless and API version, the document, inbox and taxonomy counts, the system
+        health (storage, database, task queue, search index, classifier), the current user and
+        whether Paperless AI is enabled. Use it first to orient yourself, or to diagnose failures.
+        
+        Counts include only what the user may see, unless they may view global statistics. A null
+        field means the user may not see it, not that it is off: ai_enabled null means unknown.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+        }),
+        'type': 'object',
+      }),
+      'name': 'get_instance_overview',
+      'outputSchema': dict({
+        'description': 'The instance as the current user sees it.',
+        'properties': dict({
+          'ai_enabled': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Whether Paperless AI is enabled; null means unknown (the user may not view the UI settings), not disabled.',
+          }),
+          'api_version': dict({
+            'type': 'integer',
+          }),
+          'current_user': dict({
+            'anyOf': list([
+              dict({
+                'description': 'The Paperless user the credential belongs to.',
+                'properties': dict({
+                  'id': dict({
+                    'type': 'integer',
+                  }),
+                  'is_superuser': dict({
+                    'type': 'boolean',
+                  }),
+                  'username': dict({
+                    'type': 'string',
+                  }),
+                }),
+                'required': list([
+                  'id',
+                  'username',
+                  'is_superuser',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null if the user may not view the UI settings.',
+          }),
+          'paperless_version': dict({
+            'type': 'string',
+          }),
+          'statistics': dict({
+            'description': 'Object counts, of the objects the user may see unless they may view global statistics.',
+            'properties': dict({
+              'correspondents': dict({
+                'type': 'integer',
+              }),
+              'document_types': dict({
+                'type': 'integer',
+              }),
+              'documents': dict({
+                'type': 'integer',
+              }),
+              'inbox_documents': dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'integer',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+                'description': 'Documents with an inbox tag; null if no inbox tag is visible.',
+              }),
+              'storage_paths': dict({
+                'type': 'integer',
+              }),
+              'tags': dict({
+                'type': 'integer',
+              }),
+            }),
+            'required': list([
+              'documents',
+              'inbox_documents',
+              'tags',
+              'correspondents',
+              'document_types',
+              'storage_paths',
+            ]),
+            'type': 'object',
+          }),
+          'system_status': dict({
+            'anyOf': list([
+              dict({
+                'description': 'Storage and component health of the instance.',
+                'properties': dict({
+                  'celery': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'classifier': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'database': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'install_type': dict({
+                    'type': 'string',
+                  }),
+                  'llm_index': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'redis': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'sanity_check': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'search_index': dict({
+                    'description': 'Health of one Paperless component.',
+                    'properties': dict({
+                      'error': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'status': dict({
+                        'description': 'OK, WARNING, ERROR or DISABLED.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'status',
+                      'error',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'storage_available_bytes': dict({
+                    'type': 'integer',
+                  }),
+                  'storage_total_bytes': dict({
+                    'type': 'integer',
+                  }),
+                }),
+                'required': list([
+                  'install_type',
+                  'storage_total_bytes',
+                  'storage_available_bytes',
+                  'database',
+                  'redis',
+                  'celery',
+                  'search_index',
+                  'classifier',
+                  'sanity_check',
+                  'llm_index',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null if the user may not view the system status.',
+          }),
+        }),
+        'required': list([
+          'paperless_version',
+          'api_version',
+          'statistics',
+          'system_status',
+          'current_user',
+          'ai_enabled',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get instance overview',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get task',
+      }),
+      'description': '''
+        Follow a Paperless background task, such as an upload being processed, to its result.
+        
+        Reports state (pending, started, success, failure, revoked), the error message of a failed
+        task and the document ids once known. With wait_seconds it polls until the task ends or the
+        wait (at most 30 s in total) is used up; wait says which: finished, timed_out (still
+        running, call again) or not_requested. Needs the permission to view tasks in Paperless.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'task_id': dict({
+            'description': 'The task id (a UUID) that an upload or other background work returned.',
+            'pattern': '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+            'type': 'string',
+          }),
+          'wait_seconds': dict({
+            'default': 0,
+            'description': 'Wait up to this many seconds for the task to end; more than 30 is cut to 30. 0 reads it once.',
+            'minimum': 0,
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'task_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'get_task',
+      'outputSchema': dict({
+        'description': 'A task, and what waiting for it did.',
+        'properties': dict({
+          'created': dict({
+            'format': 'date-time',
+            'type': 'string',
+          }),
+          'document_ids': dict({
+            'description': 'The documents the task created or changed, once known; may be several.',
+            'items': dict({
+              'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'finished': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date-time',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null while the task is running.',
+          }),
+          'message': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Why the task failed; null otherwise.',
+          }),
+          'state': dict({
+            'description': 'pending, started, success, failure or revoked.',
+            'enum': list([
+              'pending',
+              'started',
+              'success',
+              'failure',
+              'revoked',
+            ]),
+            'type': 'string',
+          }),
+          'task_id': dict({
+            'type': 'string',
+          }),
+          'task_type': dict({
+            'description': 'E.g. consume_file (an upload).',
+            'type': 'string',
+          }),
+          'wait': dict({
+            'description': 'not_requested: wait_seconds was 0, so the task was read once; finished: the task ended within the wait (see state); timed_out: still running after waited_seconds, ask again.',
+            'enum': list([
+              'not_requested',
+              'finished',
+              'timed_out',
+            ]),
+            'type': 'string',
+          }),
+          'waited_seconds': dict({
+            'type': 'number',
+          }),
+        }),
+        'required': list([
+          'task_id',
+          'task_type',
+          'state',
+          'message',
+          'document_ids',
+          'created',
+          'finished',
+          'wait',
+          'waited_seconds',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get task',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List taxonomy',
+      }),
+      'description': '''
+        List the tags, correspondents, document types, storage paths, custom fields, saved views,
+        users or groups the current user may see, as compact rows with their ids.
+        
+        Use it to find the exact name or id to pass to other tools. Returns at most 100 rows in
+        Paperless order (by name); truncated true means more match, so narrow with name_contains.
+        Users, groups and saved views need the matching view permission in Paperless.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'kind': dict({
+            'description': 'Which kind of object to list.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+              'saved_view',
+              'user',
+              'group',
+            ]),
+            'type': 'string',
+          }),
+          'name_contains': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only names that contain this text, ignoring case and accents.',
+          }),
+        }),
+        'required': list([
+          'kind',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'list_taxonomy',
+      'outputSchema': dict({
+        'description': 'Taxonomy rows of one kind, at most a page of them.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many objects match, also beyond the items.',
+            'type': 'integer',
+          }),
+          'items': dict({
+            'items': dict({
+              'description': 'One taxonomy object; fields that do not apply to its kind are null.',
+              'properties': dict({
+                'colour': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Tags: the colour, e.g. #a6cee3.',
+                }),
+                'data_type': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Custom fields: the data type.',
+                }),
+                'document_count': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'Documents the user may see that use it; null for views, users, groups.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'description': 'The name; the username for users.',
+                  'type': 'string',
+                }),
+                'parent': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Tags: id of the parent tag.',
+                }),
+                'select_options': dict({
+                  'anyOf': list([
+                    dict({
+                      'items': dict({
+                        'description': 'An option of a select custom field; documents store its id as the value.',
+                        'properties': dict({
+                          'id': dict({
+                            'type': 'string',
+                          }),
+                          'label': dict({
+                            'type': 'string',
+                          }),
+                        }),
+                        'required': list([
+                          'id',
+                          'label',
+                        ]),
+                        'type': 'object',
+                      }),
+                      'type': 'array',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Custom fields of type select: the options, ids and labels.',
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+                'document_count',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'kind': dict({
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+              'saved_view',
+              'user',
+              'group',
+            ]),
+            'type': 'string',
+          }),
+          'truncated': dict({
+            'description': 'More match than the items hold; narrow with name_contains.',
+            'type': 'boolean',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'count',
+          'truncated',
+          'items',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List taxonomy',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Search documents',
+      }),
+      'description': '''
+        Find documents by full text, similarity or structured filters; all filters combine.
+        
+        Names (correspondent, document type, storage path, tags, owner) match exactly or ignoring
+        case and accents; an unknown or ambiguous name is an error that lists candidates. Rows hold
+        ids, names, dates, custom field values and web_url, never the document text. count is the
+        total; pass next_page as page to see more.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'added_from': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'added_to': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'correspondent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'created_from': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'created_to': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Date (YYYY-MM-DD), inclusive.',
+          }),
+          'custom_field_query': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Paperless custom field query: [field, op, value], fields by name, combined with ['AND'|'OR', [...]] or ['NOT', [...]]. Ops: exact, in, isnull, exists, icontains, gt, gte, lt, lte, range, contains. Dates take relative values: ['due', 'range', ['today', 'in 30 days']].",
+          }),
+          'document_type': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'inbox': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'true: only inbox documents; false: none of them.',
+          }),
+          'more_like_id': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Find documents similar to this document id.',
+          }),
+          'ordering': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'created',
+                  '-created',
+                  'added',
+                  '-added',
+                  'modified',
+                  '-modified',
+                  'title',
+                  '-title',
+                  'archive_serial_number',
+                  '-archive_serial_number',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Sort field, '-' for descending; default newest first or relevance.",
+          }),
+          'owner': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Username or id of the owning user.',
+          }),
+          'page': dict({
+            'default': 1,
+            'description': 'Page number, from 1.',
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'page_size': dict({
+            'default': 25,
+            'description': 'Documents per page, at most 100.',
+            'maximum': 100,
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'query': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Full-text query in Paperless syntax over title, content, notes and fields, e.g. 'invoice AND acme', 'created:[2024 to 2025]', 'notes.note:paid'. Results are ranked by relevance and carry highlights.",
+          }),
+          'storage_path': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'tags_all': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have all of them.',
+          }),
+          'tags_any': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have at least one.',
+          }),
+          'tags_none': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; documents have none of them.',
+          }),
+          'title_contains': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only titles containing this text, ignoring case.',
+          }),
+        }),
+        'type': 'object',
+      }),
+      'name': 'search_documents',
+      'outputSchema': dict({
+        'description': 'One page of a document search.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many documents match in total.',
+            'type': 'integer',
+          }),
+          'documents': dict({
+            'items': dict({
+              'description': 'A document as a compact search row, without its content.',
+              'properties': dict({
+                'added': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'correspondent': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'created': dict({
+                  'format': 'date',
+                  'type': 'string',
+                }),
+                'custom_fields': dict({
+                  'items': dict({
+                    'description': 'A custom field\'s value, readable: select labels, "EUR 12.50", document ids.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'value': dict({
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                      'value',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'document_type': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'highlights': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Full-text search only: matching excerpt, terms marked with <b>.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'storage_path': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'tags': dict({
+                  'items': dict({
+                    'description': 'An object a document refers to; name is null if the user may not see it.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'created',
+                'added',
+                'correspondent',
+                'document_type',
+                'storage_path',
+                'tags',
+                'custom_fields',
+                'web_url',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'next_page': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The next page, null on the last one.',
+          }),
+          'page': dict({
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'count',
+          'page',
+          'next_page',
+          'documents',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Search documents',
+    }),
+  ])
+# ---
+# name: test_the_surface_matches_the_snapshot[read-only]
   list([
     dict({
       '_meta': dict({

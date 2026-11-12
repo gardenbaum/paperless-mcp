@@ -16,6 +16,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from paperless_mcp.tools._shared import ANNOTATIONS, TOOLSETS, boundary
+from paperless_mcp.tools.selection import hidden_tools
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -111,7 +112,13 @@ def over_budget(tools: list[Tool]) -> list[str]:
 
 
 async def server_tools() -> list[Tool]:
-    return list(await serve(admin()).list_tools())
+    """The tools of the server with every toolset on: what the rules below apply to."""
+    return list(await serve(admin(), toolsets=["all"]).list_tools())
+
+
+def writing(tools: list[Tool]) -> list[str]:
+    """Tools without the read-only hint."""
+    return [t.name for t in tools if not (t.annotations and t.annotations.read_only_hint)]
 
 
 async def test_every_tool_has_a_title_and_a_description() -> None:
@@ -143,7 +150,14 @@ async def test_no_tool_takes_a_filesystem_path_outside_the_stdio_allowlist() -> 
 
 
 async def test_the_default_profile_stays_within_the_tool_budget() -> None:
-    assert over_budget(await server_tools()) == []
+    assert over_budget(list(await serve(admin()).list_tools())) == []
+
+
+async def test_read_only_mode_leaves_only_tools_with_the_read_only_hint() -> None:
+    tools = list(await serve(admin(), toolsets=["all"], read_only=True).list_tools())
+
+    assert tools != []
+    assert writing(tools) == []
 
 
 # --- Self-tests: every check fires on a tool that breaks its rule ------------------------------
@@ -220,6 +234,23 @@ async def test_self_test_destructive_tools_without_a_false_confirm_are_found() -
 @pytest.mark.decision("decision-7")
 async def test_self_test_path_parameters_are_found() -> None:
     assert path_parameters(await offending_tools()) == ["bare.source"]
+
+
+async def test_self_test_tools_without_the_read_only_hint_are_found() -> None:
+    found = writing(await offending_tools())
+
+    assert set(found) >= {"bare", "delete_everything", "drop_without_confirm", "empty_trash"}
+
+
+async def test_self_test_read_only_mode_hides_what_the_table_marks_as_writing() -> None:
+    table = {"bare": ToolAnnotations(), "delete_everything": ToolAnnotations(read_only_hint=True)}
+    server = FastMCP(providers=[offenders])
+    _ = server.disable(names=set(hidden_tools(table, read_only=True, disabled=())))
+
+    remaining = {t.name for t in await server.list_tools()}
+
+    assert "delete_everything" in remaining
+    assert "bare" not in remaining
 
 
 async def test_self_test_a_profile_over_the_budget_is_found() -> None:

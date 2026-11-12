@@ -66,3 +66,7 @@ class FeatureUnavailable(PaperlessMcpError):
 
 class UnsupportedVersion(PaperlessMcpError):
     """The Paperless instance does not speak the API version this server needs."""
+
+
+class InvalidConfiguration(PaperlessMcpError):
+    """The server's configuration is wrong or leaves it nothing to offer."""

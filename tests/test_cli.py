@@ -73,6 +73,28 @@ def test_a_rejected_token_or_api_version_stops_the_start(
     assert TOKEN not in err
 
 
+@pytest.mark.decision("decision-4")
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("PAPERLESS_MCP_TOOLSETS", "core,pdff"),
+        ("PAPERLESS_MCP_DISABLED_TOOLS", "get_taks"),
+    ],
+)
+@pytest.mark.usefixtures("isolated_logging")
+def test_a_misspelt_toolset_or_tool_stops_the_start_naming_it(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], variable: str, value: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_URL", "http://paperless.test")
+    monkeypatch.setenv("PAPERLESS_TOKEN", TOKEN)
+    monkeypatch.setenv(variable, value)
+
+    err = exit_message(capsys)
+
+    assert f"Unknown {'toolset' if 'TOOLSETS' in variable else 'tool'} in {variable}" in err
+    assert value.rsplit(",", maxsplit=1)[-1] in err
+
+
 @pytest.mark.usefixtures("isolated_logging")
 def test_python_dash_m_runs_the_same_entrypoint(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as caught:

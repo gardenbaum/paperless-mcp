@@ -8,12 +8,27 @@ fields in the synthesized ``__init__``, so load with ``Model.model_validate({})`
 the custom ``__init__`` and the environment applies.
 """
 
-from typing import ClassVar, Literal
+import json
+from typing import Annotated, ClassVar, Literal, cast
 
-from pydantic import Field, HttpUrl, SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, HttpUrl, SecretStr, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+# The value of ``PAPERLESS_MCP_TOOLSETS`` that selects every toolset.
+ALL_TOOLSETS = "all"
+
+
+def _names(value: object, *, lower: bool) -> object:
+    """A list setting: a JSON array or comma-separated names, trimmed, without duplicates."""
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    parsed = cast("list[object]", json.loads(text) if text.startswith("[") else text.split(","))
+    names = [str(item).strip() for item in parsed]
+    names = [name.lower() if lower else name for name in names if name]
+    return tuple(dict.fromkeys(names))
 
 
 class PaperlessSettings(BaseSettings):
@@ -44,6 +59,11 @@ class ServerSettings(BaseSettings):
         startup_timeout: Most seconds the startup check of the Paperless connection may take
             (``PAPERLESS_MCP_STARTUP_TIMEOUT``); a Paperless that does not answer in time does
             not stop the start.
+        toolsets: Toolsets whose tools are offered (``PAPERLESS_MCP_TOOLSETS``): names, or
+            ``all``; comma-separated or a JSON array. Default ``core``.
+        read_only: Offer only tools that do not change anything (``PAPERLESS_MCP_READ_ONLY``).
+        disabled_tools: Tools never offered, whatever the toolsets say
+            (``PAPERLESS_MCP_DISABLED_TOOLS``).
     """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -52,3 +72,27 @@ class ServerSettings(BaseSettings):
 
     log_level: LogLevel = "INFO"
     startup_timeout: float = Field(default=5.0, gt=0)
+    toolsets: Annotated[tuple[str, ...], NoDecode] = ("core",)
+    read_only: bool = False
+    disabled_tools: Annotated[tuple[str, ...], NoDecode] = ()
+
+    @field_validator("toolsets", mode="before")
+    @classmethod
+    def _split_toolsets(cls, value: object) -> object:
+        return _names(value, lower=True)
+
+    @field_validator("disabled_tools", mode="before")
+    @classmethod
+    def _split_disabled_tools(cls, value: object) -> object:
+        return _names(value, lower=False)
+
+    @field_validator("toolsets", mode="after")
+    @classmethod
+    def _check_toolsets(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            message = "name at least one toolset, or all"
+            raise ValueError(message)
+        if ALL_TOOLSETS in value and len(value) > 1:
+            message = f"{ALL_TOOLSETS} stands alone; do not combine it with toolset names"
+            raise ValueError(message)
+        return value

@@ -29,6 +29,10 @@ if TYPE_CHECKING:
 # Every toolset; each tool carries exactly one of them as its only tag.
 TOOLSETS: Final = frozenset({"core"})
 
+# Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
+# hides such a toolset when the capability is known to be missing.
+TOOLSET_REQUIRES: Final[Mapping[str, str]] = {}
+
 # The one place tool titles and behaviour hints are set (decision-4), keyed by tool name.
 ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
     "get_instance_overview": ToolAnnotations(

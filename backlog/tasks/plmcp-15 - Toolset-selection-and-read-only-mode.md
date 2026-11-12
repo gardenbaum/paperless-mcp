@@ -1,9 +1,11 @@
 ---
 id: PLMCP-15
 title: Toolset selection and read-only mode
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-11-09T19:25:00Z'
+updated_date: '2026-11-12T18:30:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -36,3 +38,25 @@ The user wants to be able to do everything, but the default tool list must stay 
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Settings: ServerSettings gains toolsets (PAPERLESS_MCP_TOOLSETS, comma list or 'all', default core), read_only (PAPERLESS_MCP_READ_ONLY), disabled_tools (PAPERLESS_MCP_DISABLED_TOOLS, comma list). Tests first.
+2. tools/_shared.py: DEFAULT_TOOLSETS and TOOLSET_CAPABILITY tables (toolset -> required Paperless capability, ai ready for PLMCP-20). New tools/selection.py: pure functions to resolve the visible toolsets (unknown names -> InvalidConfiguration at create_server), read-only hidden tool names from ANNOTATIONS, unknown disabled tool names -> error, capability-missing toolsets from the probe overview. Synthetic-table tests.
+3. server.py: apply with FastMCP enable(tags, only=True)/disable(names)/disable(tags); lifespan hides toolsets whose capability the probe found missing (ai_enabled is False; unknown/unreachable keeps them) then fails startup if list_tools is empty.
+4. Registry test: read-only leaves only read_only_hint tools, with self-test using a synthetic violating provider; budget test on default profile.
+5. Surface snapshots for profiles default, all, read-only (parametrized).
+6. E2E over stdio: env vars select tools; zero tools exits 1 with message.
+7. Append notes with decisions; just check, flock just e2e; commit.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Design: settings ServerSettings.toolsets/read_only/disabled_tools (comma list or JSON array, 'all' stands alone, empty list rejected). Pure selection in tools/selection.py; composition root applies it with FastMCP visibility: enable(tags=selected, only=True) then disable(names=read-only/disabled tools, components={'tool'}) in create_server; the lifespan, after the startup probe, disable(tags=unavailable toolsets) and then fails startup (InvalidConfiguration -> exit 1 via cli) when list_tools() is empty. Catalogue dataclass (providers, annotations, toolsets, requires) in server.py is the seam tests use to add synthetic toolsets (ai, bulk); TOOLSET_REQUIRES in tools/_shared.py is empty until PLMCP-20 adds 'ai': 'ai'. Read-only mode is computed from the central ANNOTATIONS table (registry test guarantees table == tools).
+
+Decisions: (1) Unknown toolset in PAPERLESS_MCP_TOOLSETS or unknown tool in PAPERLESS_MCP_DISABLED_TOOLS is a startup error (InvalidConfiguration) naming the offender and the known names, raised by create_server. (2) Capability detection happens once at startup from the probe overview: only ai_enabled == False hides a toolset; null (user may not view UI settings) and an unreachable Paperless at startup leave it visible so a transient outage does not hide it for the process lifetime; its tools report errors themselves. An explicitly selected toolset hidden by a missing capability logs a WARNING. (3) Zero tools after all filters/capabilities fails startup with one message naming the three variables. (4) Default is core only (AC #1); design says core+ai: PLMCP-20 must add 'ai' to the toolsets default in settings.py, to TOOLSETS and to TOOLSET_REQUIRES. (5) Resources carry the toolset tag, so an unselected toolset also hides its resources.
+
+Deliberate snapshot change: tests/tools/__snapshots__/test_surface.ambr regenerated because the surface tests are now parametrized by profile (default, all, read-only); old unparametrised entries replaced by 6 new ones. Content is unchanged: all three profiles are identical today (core is the only toolset and all its tools are read-only). No gate or decision weakened.
+<!-- SECTION:NOTES:END -->
