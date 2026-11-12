@@ -25,6 +25,7 @@ from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
 from paperless_mcp.services.documents import DocumentService
+from paperless_mcp.services.files import FileService
 from paperless_mcp.services.instance import InstanceService
 from paperless_mcp.services.tasks import TaskService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
@@ -185,6 +186,9 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                 instance=InstanceService(adapters.instance),
                 taxonomy=taxonomy,
                 documents=DocumentService(adapters.documents, taxonomy, web_url=web_url),
+                files=FileService(
+                    adapters.documents, web_url=web_url, max_bytes=settings.max_download_bytes
+                ),
                 tasks=TaskService(adapters.tasks, sleep=sleep, clock=clock),
             )
             overview = await services.instance.probe(settings.startup_timeout)

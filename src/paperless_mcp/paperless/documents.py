@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, JsonValue, RootModel
 
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
+    DocumentFile,
     DocumentHit,
     DocumentPage,
     DocumentRecord,
@@ -22,12 +23,13 @@ from paperless_mcp.domain.documents import (
     Suggestions,
 )
 from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
+from paperless_mcp.paperless.disposition import filename
 from paperless_mcp.paperless.pagination import Page
 
 if TYPE_CHECKING:
     from collections.abc import Collection
 
-    from paperless_mcp.domain.documents import DocumentQuery
+    from paperless_mcp.domain.documents import DocumentQuery, FileVersion
     from paperless_mcp.paperless.client import PaperlessClient, Params
 
 PATH = "/api/documents/"
@@ -332,6 +334,25 @@ class PaperlessDocumentReader:
             dates=tuple(row.dates),
         )
 
+    async def get_document_thumbnail(self, document_id: int) -> DocumentFile:
+        """See ``DocumentReader.get_document_thumbnail``.
+
+        Paperless 3.4 sends WebP. A document the user may not see is answered 403 (text/html),
+        a missing one 404, as for the other sub-resources.
+        """
+        return await self._file(document_id, "thumb/")
+
+    async def get_document_file(self, document_id: int, version: FileVersion) -> DocumentFile:
+        """See ``DocumentReader.get_document_file``.
+
+        ``original=false`` is the archive version; Paperless answers the original for it when
+        the document has none. The file name is the formatted one Paperless proposes (date,
+        correspondent and title), not the name of the upload.
+        """
+        return await self._file(
+            document_id, "download/", {"original": "true" if version == "original" else "false"}
+        )
+
     async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
         """See ``DocumentReader.get_document_titles``; ``id__in`` leaves hidden ids out."""
         wanted = sorted(set(document_ids))
@@ -344,6 +365,21 @@ class PaperlessDocumentReader:
         }
         found = await self._client.get(PATH, Page[_Title], params=sent)
         return {row.id: row.title for row in found.results}
+
+    async def _file(
+        self, document_id: int, tail: str, params: Params | None = None
+    ) -> DocumentFile:
+        try:
+            response = await self._client.request(
+                "GET", f"{PATH}{document_id}/{tail}", params=params
+            )
+        except NotFound:
+            raise unseen_document(document_id) from None
+        return DocumentFile(
+            content=response.content,
+            mime_type=response.headers.get("Content-Type", "application/octet-stream"),
+            filename=filename(response.headers.get("Content-Disposition")),
+        )
 
     async def _one[M: BaseModel](
         self, document_id: int, tail: str, model: type[M], params: Params | None = None

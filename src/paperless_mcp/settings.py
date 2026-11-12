@@ -69,6 +69,11 @@ class ServerSettings(BaseSettings):
         read_only: Offer only tools that do not change anything (``PAPERLESS_MCP_READ_ONLY``).
         disabled_tools: Tools never offered, whatever the toolsets say
             (``PAPERLESS_MCP_DISABLED_TOOLS``).
+        max_download_bytes: Largest file ``download_document`` attaches
+            (``PAPERLESS_MCP_MAX_DOWNLOAD_BYTES``); larger files are reported with their size and
+            link only. Embedded files travel base64-encoded (a third larger) inside one MCP
+            message, and clients cap those messages; 2 MiB holds a typical multi-page scan and
+            stays far below the usual limits.
     """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -80,6 +85,7 @@ class ServerSettings(BaseSettings):
     toolsets: Annotated[tuple[str, ...], NoDecode] = ("core",)
     read_only: bool = False
     disabled_tools: Annotated[tuple[str, ...], NoDecode] = ()
+    max_download_bytes: int = Field(default=2 * 1024 * 1024, ge=1)
 
     @field_validator("toolsets", mode="before")
     @classmethod

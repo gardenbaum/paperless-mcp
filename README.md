@@ -39,6 +39,7 @@ not logged, and an internal error is logged by type, with its traceback only at 
 | `PAPERLESS_PUBLIC_URL` | Base URL for links shown to users, if it differs from `PAPERLESS_URL` |
 | `PAPERLESS_MCP_LOG_LEVEL` | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` or `CRITICAL` |
 | `PAPERLESS_MCP_STARTUP_TIMEOUT` | Seconds the startup check may take (default 5) |
+| `PAPERLESS_MCP_MAX_DOWNLOAD_BYTES` | Largest original or archive file `download_document` attaches, in bytes (default 2097152); larger files are reported with their size and link only |
 
 ## Development
 

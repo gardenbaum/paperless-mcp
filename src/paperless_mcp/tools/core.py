@@ -1,11 +1,21 @@
 """The core toolset: everyday reading (and later writing) of documents and taxonomy."""
 
+import base64
 from datetime import date
 from typing import Annotated
 
 from fastmcp import Context
 from fastmcp.exceptions import ResourceError
+from fastmcp.resources import ResourceContent, ResourceResult
 from fastmcp.server.providers import LocalProvider
+from fastmcp.tools import ToolResult
+from mcp.types import (
+    BlobResourceContents,
+    ContentBlock,
+    EmbeddedResource,
+    ImageContent,
+    TextContent,
+)
 from pydantic import Field, JsonValue
 
 from paperless_mcp.domain.documents import (
@@ -13,6 +23,9 @@ from paperless_mcp.domain.documents import (
     DocumentDetail,
     DocumentQuery,
     DocumentSearchResult,
+    FileDelivery,
+    FileReport,
+    FileVersion,
     Include,
     NameFilters,
     NameOrId,
@@ -258,6 +271,77 @@ async def get_document_content(
     return await services(ctx).documents.content(document_id, offset=offset, max_chars=max_chars)
 
 
+def _report(delivery: FileDelivery) -> dict[str, object]:
+    return delivery.report.model_dump(mode="json")
+
+
+def _text(delivery: FileDelivery) -> TextContent:
+    return TextContent(type="text", text=delivery.report.model_dump_json())
+
+
+@provider.tool(
+    tags={TOOLSET},
+    annotations=ANNOTATIONS["get_document_thumbnail"],
+    output_schema=FileReport.model_json_schema(),
+)
+@boundary
+async def get_document_thumbnail(ctx: Context, document_id: DocumentId) -> ToolResult:
+    """See a document as a small preview image (its first page), for clients that read images.
+
+    Returns the image as MCP image content together with a report (file name, size, web_url).
+    Use it to recognise a document by its look; use get_document_content for its text and
+    download_document for the file.
+    """
+    delivery = await services(ctx).files.thumbnail(document_id)
+    report = delivery.report
+    image = ImageContent(
+        type="image",
+        data=base64.b64encode(delivery.data or b"").decode(),
+        mime_type=report.mime_type,
+    )
+    return ToolResult(content=[_text(delivery), image], structured_content=_report(delivery))
+
+
+@provider.tool(
+    tags={TOOLSET},
+    annotations=ANNOTATIONS["download_document"],
+    output_schema=FileReport.model_json_schema(),
+)
+@boundary
+async def download_document(
+    ctx: Context,
+    document_id: DocumentId,
+    kind: Annotated[
+        FileVersion,
+        Field(
+            description=(
+                "original: the file as it was uploaded. archive: the searchable PDF/A "
+                "Paperless made from it; not every document has one (text files do not)."
+            )
+        ),
+    ] = "original",
+) -> ToolResult:
+    """Get the original file of a document, or its archive version, as an embedded resource.
+
+    The file comes attached as MCP content with its MIME type and file name (also in the report),
+    never written to disk. A file over the server's download limit (2 MiB unless the
+    administrator changed it) is not attached: delivered is false and the report holds its
+    size and web_url. Use get_document_content when you only need the text.
+    """
+    delivery = await services(ctx).files.download(document_id, kind)
+    content: list[ContentBlock] = [_text(delivery)]
+    if delivery.data is not None:
+        report = delivery.report
+        blob = BlobResourceContents(
+            uri=f"paperless://documents/{document_id}/{kind}",
+            mime_type=report.mime_type,
+            blob=base64.b64encode(delivery.data).decode(),
+            _meta={"filename": report.filename},
+        )
+        content.append(EmbeddedResource(type="resource", resource=blob))
+    return ToolResult(content=content, structured_content=_report(delivery))
+
+
 @provider.resource(
     "paperless://documents/{document_id}",
     name="document",
@@ -305,3 +389,53 @@ async def taxonomy_table(ctx: Context, kind: TaxonomyKind) -> list[dict[str, obj
     """  # noqa: D205 -- see list_taxonomy
     rows = await services(ctx).taxonomy.items(kind)
     return [row.model_dump(mode="json") for row in rows]
+
+
+def _file_resource(delivery: FileDelivery) -> ResourceResult:
+    """The bytes with their own MIME type and file name; a file over the limit is an error."""
+    report = delivery.report
+    if delivery.data is None:
+        raise ResourceError(report.note or "The file is not available.")
+    content = ResourceContent(
+        content=delivery.data, mime_type=report.mime_type, meta={"filename": report.filename}
+    )
+    return ResourceResult([content])
+
+
+@provider.resource(
+    "paperless://documents/{document_id}/thumbnail",
+    name="document_thumbnail",
+    title="Document thumbnail",
+    mime_type="image/webp",
+    tags={TOOLSET},
+)
+@resource_boundary
+async def document_thumbnail(ctx: Context, document_id: int) -> ResourceResult:
+    """The thumbnail image of a document, as get_document_thumbnail returns it."""
+    return _file_resource(await services(ctx).files.thumbnail(document_id))
+
+
+@provider.resource(
+    "paperless://documents/{document_id}/original",
+    name="document_original",
+    title="Document original file",
+    mime_type="application/octet-stream",
+    tags={TOOLSET},
+)
+@resource_boundary
+async def document_original(ctx: Context, document_id: int) -> ResourceResult:
+    """The file as uploaded (its own MIME type and name), within the server's download limit."""
+    return _file_resource(await services(ctx).files.download(document_id, "original"))
+
+
+@provider.resource(
+    "paperless://documents/{document_id}/archive",
+    name="document_archive",
+    title="Document archive version",
+    mime_type="application/pdf",
+    tags={TOOLSET},
+)
+@resource_boundary
+async def document_archive(ctx: Context, document_id: int) -> ResourceResult:
+    """The searchable PDF/A Paperless made from the upload, within the server's download limit."""
+    return _file_resource(await services(ctx).files.download(document_id, "archive"))

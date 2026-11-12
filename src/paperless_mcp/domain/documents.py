@@ -55,6 +55,8 @@ class DocumentQuery(BaseModel):
 
 
 type NameOrId = str | int
+type FileVersion = Literal["original", "archive"]
+type FileKind = Literal["thumbnail", "original", "archive"]
 
 
 class NameFilters(BaseModel):
@@ -323,3 +325,50 @@ class ContentSlice(BaseModel):
         int | None, Field(description="Offset of the next slice, null at the end of the text.")
     ]
     web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+
+
+class DocumentFile(BaseModel):
+    """A file of a document as Paperless sends it: the bytes, their MIME type and file name.
+
+    Attributes:
+        content: The file itself.
+        mime_type: The ``Content-Type`` Paperless sent, parameters included
+            (``text/plain; charset=utf-8``).
+        filename: The name Paperless proposes (RFC 6266), non-ASCII characters intact and never
+            holding a path; None if it proposes none (thumbnails have a numbered name).
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    content: bytes
+    mime_type: str
+    filename: str | None
+
+
+class FileReport(BaseModel):
+    """What a tool says about a thumbnail or download, whether or not the bytes came with it."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    document_id: int
+    kind: Annotated[FileKind, Field(description="Which file: the thumbnail, original or archive.")]
+    filename: Annotated[str | None, Field(description="File name, non-ASCII characters intact.")]
+    mime_type: str
+    size_bytes: Annotated[int, Field(description="Size of the file in bytes.")]
+    delivered: Annotated[
+        bool, Field(description="The file is attached as content; false: it is over the limit.")
+    ]
+    max_bytes: Annotated[
+        int | None, Field(description="The server's download limit; null for thumbnails.")
+    ]
+    web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+    note: Annotated[str | None, Field(description="Why the file is not attached, if it is not.")]
+
+
+class FileDelivery(BaseModel):
+    """A report and, unless the file is over the size limit, the bytes it describes."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    report: FileReport
+    data: bytes | None
