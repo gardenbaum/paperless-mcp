@@ -26,7 +26,14 @@ import httpx2
 import pytest
 from e2e.helpers import EXPECTED_VERSION, consume, pdf
 from fakes.accounts import ADMIN, BLIND, READER
-from fakes.paperless import VERSION, FakePaperless, FakeState, FakeTask, seeded
+from fakes.paperless import (
+    VERSION,
+    FakeDocument,
+    FakePaperless,
+    FakeState,
+    FakeTask,
+    seeded,
+)
 
 from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
     DocumentReader,
@@ -78,6 +85,12 @@ class Consume(Protocol):
     def __call__(self, *, succeed: bool) -> str: ...
 
 
+class Upload(Protocol):
+    """Uploads a file as a new document, waits for its consumption and returns the document id."""
+
+    def __call__(self, title: str, filename: str, content: bytes, mime_type: str) -> int: ...
+
+
 @dataclass(frozen=True)
 class Backend:
     """One Paperless, seen through the seeded superuser, restricted user and blind user.
@@ -91,6 +104,8 @@ class Backend:
     # Starts a consumption task and waits for its end; `succeed=False` uploads a broken PDF.
     # The live one uploads for real and deletes the documents again when the test ends.
     consume: Consume
+    # Uploads a document; the live one deletes it again when the test ends, after consumption.
+    upload: Upload
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
     # (`just e2e-latest` runs the suite against a newer release than the pinned one).
     expected_version: str
@@ -115,6 +130,24 @@ def fake_consume(state: FakeState) -> Consume:
     return consume_fake
 
 
+def fake_upload(state: FakeState) -> Upload:
+    def upload_fake(title: str, filename: str, content: bytes, mime_type: str) -> int:
+        number = max((d.id for d in state.documents), default=0) + 1
+        state.documents.append(
+            FakeDocument(
+                id=number,
+                title=title,
+                mime_type=mime_type,
+                file_name=filename,
+                original=content,
+                archive=content + b"\n%archive" if mime_type == "application/pdf" else None,
+            )
+        )
+        return number
+
+    return upload_fake
+
+
 def fake_backend() -> Backend:
     state = seeded()
     return Backend(
@@ -122,6 +155,7 @@ def fake_backend() -> Backend:
         reader=fake_ports(FakePaperless(state, user=READER[0])),
         blind=fake_ports(FakePaperless(state, user=BLIND[0])),
         consume=fake_consume(state),
+        upload=fake_upload(state),
         expected_version=VERSION,
     )
 
@@ -143,6 +177,12 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
             created.append(document)
         return task_id
 
+    def upload_live(title: str, filename: str, content: bytes, mime_type: str) -> int:
+        _, document = consume(stack.admin, title, content, filename=filename, mime_type=mime_type)
+        assert document is not None, f"Consuming {title!r} failed"
+        created.append(document)
+        return document
+
     try:
         async with httpx2.AsyncClient(base_url=stack.base_url, timeout=30.0) as http:
 
@@ -157,6 +197,7 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
                 reader=ports(stack.reader_token),
                 blind=ports(stack.blind_token),
                 consume=consume_live,
+                upload=upload_live,
                 expected_version=EXPECTED_VERSION,
             )
     finally:

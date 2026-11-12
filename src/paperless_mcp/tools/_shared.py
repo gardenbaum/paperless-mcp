@@ -23,12 +23,17 @@ if TYPE_CHECKING:
     from fastmcp import Context
 
     from paperless_mcp.services.documents import DocumentService
+    from paperless_mcp.services.files import FileService
     from paperless_mcp.services.instance import InstanceService
     from paperless_mcp.services.tasks import TaskService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
 
 # Every toolset; each tool carries exactly one of them as its only tag.
 TOOLSETS: Final = frozenset({"core"})
+
+# Tools whose result is an image or a file as MCP content blocks, with no output schema and no
+# structured content (decision-11); every other tool has a typed return model (decision-4).
+MEDIA_TOOLS: Final = frozenset({"get_document_thumbnail", "download_document"})
 
 # The toolset of every tool, keyed by tool name. It must equal each tool's tag (registry test); the
 # server uses it to refuse a configuration that leaves no tool before it contacts Paperless.
@@ -38,6 +43,8 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "search_documents": "core",
     "get_document": "core",
     "get_document_content": "core",
+    "get_document_thumbnail": "core",
+    "download_document": "core",
     "get_task": "core",
 }
 
@@ -77,6 +84,18 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
+    "get_document_thumbnail": ToolAnnotations(
+        title="Get document thumbnail",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "download_document": ToolAnnotations(
+        title="Download document",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
     "get_task": ToolAnnotations(
         title="Get task",
         read_only_hint=True,
@@ -98,6 +117,7 @@ class Services:
     instance: InstanceService
     taxonomy: TaxonomyResolver
     documents: DocumentService
+    files: FileService
     tasks: TaskService
 
 

@@ -10,7 +10,9 @@ Deliberate deviations from the schema are listed below, each with its reason.
 """
 
 import json
+import re
 from collections.abc import Callable, Mapping
+from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from urllib.parse import parse_qs
@@ -50,6 +52,14 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
         "3.4.2 answers a bare list, not the paginated envelope of the schema, and a null actor "
         "for system changes (PLMCP-11)"
     ),
+    ("GET", "/api/documents/{id}/thumb/", 403): (
+        "a document the user may not see is answered with HttpResponseForbidden, text/html "
+        "(PLMCP-12)"
+    ),
+    ("GET", "/api/documents/{id}/download/", 403): (
+        "a document the user may not see is answered with HttpResponseForbidden, text/html "
+        "(PLMCP-12)"
+    ),
     ("GET", "/api/documents/", 403): (
         "an unknown or hidden more_like_id is answered with HttpResponseForbidden, text/html "
         "(PLMCP-10)"
@@ -65,6 +75,14 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
     ("GET", "/api/ui_settings/", 200): (
         "3.4.2 answers {user, settings, permissions}; the schema has {id, settings} (PLMCP-7)"
     ),
+}
+# Endpoints that answer a file: (method, path template) -> reason. The schema declares their 200 as
+# application/json (format binary), but Paperless sends the file with its own content type, so
+# openapi-core cannot match it. Their 200 is checked for what every file response has instead: a
+# non-JSON content type, an inline or attachment Content-Disposition and a body.
+FILE_RESPONSES: Mapping[tuple[str, str], str] = {
+    ("GET", "/api/documents/{id}/thumb/"): "the thumbnail is image/webp (PLMCP-12)",
+    ("GET", "/api/documents/{id}/download/"): "the original or archive file as stored (PLMCP-12)",
 }
 # drf-spectacular documents no error responses. Paperless (Django REST framework) answers 4xx with
 # {"detail": "..."} or a map of field names to message lists; such bodies are checked for that shape
@@ -193,9 +211,34 @@ def check_request(request: httpx2.Request) -> None:
         raise SchemaViolationError(message)
 
 
+def _check_file_response(request: httpx2.Request, response: httpx2.Response) -> None:
+    """Raise `SchemaViolationError` unless the response looks like a file Paperless sends."""
+    content_type = response.headers.get("Content-Type", "")
+    disposition = response.headers.get("Content-Disposition", "")
+    problems = [
+        problem
+        for problem, found in (
+            ("no content type", not content_type),
+            ("a JSON content type", content_type.lower().startswith("application/json")),
+            (
+                "no inline or attachment Content-Disposition",
+                not re.match(r"(inline|attachment)\b", disposition),
+            ),
+            ("an empty body", not response.content),
+        )
+        if found
+    ]
+    if problems:
+        message = f"{request.method} {request.url.path}: file response with {', '.join(problems)}"
+        raise SchemaViolationError(message)
+
+
 def check_response(request: httpx2.Request, response: httpx2.Response) -> None:
     """Raise `SchemaViolationError` unless the response is one the schema allows for the request."""
     template = _template(request)
+    if (request.method, template) in FILE_RESPONSES and response.status_code == HTTPStatus.OK:
+        _check_file_response(request, response)
+        return
     if (request.method, template, response.status_code) in WRONG_RESPONSE_SCHEMAS:
         return
     operation = cast("Json", _PATHS[template][request.method.lower()])

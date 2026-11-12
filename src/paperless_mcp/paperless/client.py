@@ -96,6 +96,21 @@ def parse[M: pydantic.BaseModel](response: httpx2.Response, model: type[M]) -> M
         raise unexpected(response) from error
 
 
+@dataclass(frozen=True, slots=True)
+class Download:
+    """A body read up to a limit.
+
+    Attributes:
+        content: The whole body, or empty if it is ``truncated``.
+        headers: The response headers.
+        truncated: The body is larger than the limit; the rest was not read.
+    """
+
+    content: bytes
+    headers: httpx2.Headers
+    truncated: bool
+
+
 class PaperlessClient:
     """Async client for one Paperless instance, over one shared ``httpx2.AsyncClient``.
 
@@ -145,8 +160,57 @@ class PaperlessClient:
         Raises:
             PaperlessMcpError: The matching subclass for an error status or a failed transport.
         """
+        outgoing = self._build(method, path, params=params, json=json, data=data, files=files)
+        response = await self._exchange(outgoing, stream=False)
+        if response.is_error:
+            raise error_for_status(response)
+        return response
+
+    async def download(
+        self, path: str, *, params: Params | None = None, max_bytes: int
+    ) -> Download:
+        """GET ``path`` and read at most ``max_bytes`` bytes of the body.
+
+        The body is streamed and the connection closed as soon as more than ``max_bytes`` bytes
+        have arrived; the result is then ``truncated`` with no content.
+
+        Raises:
+            PaperlessMcpError: The matching subclass for an error status or a failed transport.
+        """
+        outgoing = self._build("GET", path, params=params)
+        response = await self._exchange(outgoing, stream=True)
+        try:
+            if response.is_error:
+                _ = await response.aread()
+                raise error_for_status(response)
+            received: list[bytes] = []
+            total = 0
+            async for chunk in response.aiter_bytes():
+                received.append(chunk)
+                total += len(chunk)
+                if total > max_bytes:
+                    return Download(b"", response.headers, truncated=True)
+            return Download(b"".join(received), response.headers, truncated=False)
+        except httpx2.TransportError as error:
+            # Not retried: the status was fine and the connection broke while the body came in;
+            # the caller can ask again, and a retry would read the file from the start.
+            logger.warning("GET %s failed: %s", outgoing.url.path, type(error).__name__)
+            raise error_for_transport(error) from error
+        finally:
+            await response.aclose()
+
+    def _build(  # noqa: PLR0913 -- the parts of httpx2's build_request(), keyword-only
+        self,
+        method: Method,
+        path: str,
+        *,
+        params: Params | None = None,
+        json: object = None,
+        data: Mapping[str, str] | None = None,
+        files: Files | None = None,
+    ) -> httpx2.Request:
         name, value = self._credentials.current().header
-        outgoing = self._http.build_request(
+        return self._http.build_request(
             method,
             path,
             params=params,
@@ -156,13 +220,22 @@ class PaperlessClient:
             headers={"Accept": ACCEPT, name: value},
             timeout=self._upload_timeout if files else httpx2.USE_CLIENT_DEFAULT,
         )
+
+    async def _exchange(self, outgoing: httpx2.Request, *, stream: bool) -> httpx2.Response:
+        """Send ``outgoing``, retrying transient statuses; the last response, errors included.
+
+        With ``stream`` the body is not read yet: the caller reads and closes the response.
+        """
+        method, path = outgoing.method, outgoing.url.path
         attempt, waited = 1, 0.0
         while True:
-            response = await self._send(outgoing)
+            response = await self._send(outgoing, stream=stream)
             logger.debug("%s %s -> %d (attempt %d)", method, path, response.status_code, attempt)
             delay = self._retry_delay(response, attempt, waited)
             if delay is None:
-                break
+                return response
+            if stream:
+                await response.aclose()
             logger.warning(
                 "Paperless answered %d to %s %s; retrying in %.1fs",
                 response.status_code,
@@ -172,9 +245,6 @@ class PaperlessClient:
             )
             await self._sleep(delay)
             attempt, waited = attempt + 1, waited + delay
-        if response.is_error:
-            raise error_for_status(response)
-        return response
 
     async def call[M: pydantic.BaseModel](  # noqa: PLR0913 -- request() plus the model
         self,
@@ -217,9 +287,9 @@ class PaperlessClient:
             delay = random.uniform(0.0, cap)  # noqa: S311 -- jitter, not cryptography
         return delay if waited + delay <= self._retry.budget else None
 
-    async def _send(self, request: httpx2.Request) -> httpx2.Response:
+    async def _send(self, request: httpx2.Request, *, stream: bool) -> httpx2.Response:
         try:
-            return await self._http.send(request)
+            return await self._http.send(request, stream=stream)
         except httpx2.TransportError as error:
             logger.warning(
                 "%s %s failed: %s", request.method, request.url.path, type(error).__name__

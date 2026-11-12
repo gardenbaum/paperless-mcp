@@ -1,14 +1,29 @@
 """PaperlessDocumentReader on responses recorded from the Paperless 3.4.2 E2E stack."""
 
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import httpx2
 import pytest
 
-from paperless_mcp.domain.documents import CustomFieldValue, DocumentHit, DocumentQuery
-from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
-from paperless_mcp.paperless.documents import FIELDS, PaperlessDocumentReader
+from paperless_mcp.domain.documents import (
+    CustomFieldValue,
+    DocumentFile,
+    DocumentHit,
+    DocumentQuery,
+)
+from paperless_mcp.domain.errors import (
+    FeatureUnavailable,
+    NotFound,
+    PaperlessMcpError,
+    PermissionDenied,
+    Validation,
+)
+from paperless_mcp.paperless.documents import (
+    FIELDS,
+    THUMBNAIL_LIMIT,
+    PaperlessDocumentReader,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -533,3 +548,161 @@ async def test_no_titles_are_asked_for_without_ids(make_client: ClientFactory) -
 
     assert await PaperlessDocumentReader(make_client(server)).get_document_titles([]) == {}
     assert server.sent == []
+
+
+WEBP = b"RIFF\x1a\x00\x00\x00WEBPVP8L"
+PDF = b"%PDF-1.4 recorded"
+# Content-Disposition headers recorded from Paperless 3.4.2: `filename` is ASCII-folded (the
+# non-ASCII characters are dropped), `filename*` (RFC 5987) holds the real name.
+THUMB_DISPOSITION = 'inline; filename="0000030.webp"'
+NON_ASCII_DISPOSITION = (
+    'attachment; filename="2026-11-12 probe-Uni  .pdf"; '
+    "filename*=utf-8''2026-11-12%20probe-%C3%9Cn%C3%AF%20%E6%97%A5%E6%9C%AC%E8%AA%9E%20%E2%82%AC.pdf"
+)
+
+
+class Binary:
+    """Answers every GET with a file and records the paths and query parameters sent."""
+
+    def __init__(self, content: bytes, content_type: str, disposition: str | None) -> None:
+        self.content: bytes = content
+        self.headers: dict[str, str] = {"Content-Type": content_type}
+        if disposition is not None:
+            self.headers["Content-Disposition"] = disposition
+        self.sent: list[tuple[str, dict[str, str]]] = []
+
+    def __call__(self, request: httpx2.Request) -> httpx2.Response:
+        self.sent.append((request.url.path, dict(request.url.params)))
+        return httpx2.Response(200, content=self.content, headers=self.headers)
+
+
+async def test_a_thumbnail_is_fetched_as_the_image_paperless_sends(
+    make_client: ClientFactory,
+) -> None:
+    server = Binary(WEBP, "image/webp", THUMB_DISPOSITION)
+
+    found = await PaperlessDocumentReader(make_client(server)).get_document_thumbnail(30)
+
+    assert server.sent == [("/api/documents/30/thumb/", {})]
+    assert found == DocumentFile(content=WEBP, mime_type="image/webp", filename="0000030.webp")
+
+
+@pytest.mark.parametrize(("version", "original"), [("original", "true"), ("archive", "false")])
+async def test_a_version_is_chosen_with_the_original_parameter(
+    make_client: ClientFactory, version: Literal["original", "archive"], original: str
+) -> None:
+    server = Binary(PDF, "application/pdf", NON_ASCII_DISPOSITION)
+
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        30, version, max_bytes=1000
+    )
+
+    assert server.sent == [("/api/documents/30/download/", {"original": original})]
+    assert found.content == PDF
+
+
+async def test_the_filename_is_the_rfc_5987_one_with_its_non_ascii_characters(
+    make_client: ClientFactory,
+) -> None:
+    server = Binary(PDF, "application/pdf", NON_ASCII_DISPOSITION)
+
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        30, "original", max_bytes=1000
+    )
+
+    assert found.filename == "2026-11-12 probe-Ünï 日本語 €.pdf"
+
+
+async def test_the_content_type_is_kept_with_its_parameters(make_client: ClientFactory) -> None:
+    disposition = (
+        "attachment; filename=\"2026-11-12 probe-txt-a.txt\"; filename*=utf-8''x%C3%A4.txt"
+    )
+    server = Binary(b"plain text probe", "text/plain; charset=utf-8", disposition)
+
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        31, "original", max_bytes=1000
+    )
+
+    assert (found.mime_type, found.filename) == ("text/plain; charset=utf-8", "xä.txt")
+
+
+FILES: list[tuple[Call, str]] = [
+    (lambda reader, number: reader.get_document_thumbnail(number), "thumb"),
+    (
+        lambda reader, number: reader.get_document_file(number, "original", max_bytes=1000),
+        "download",
+    ),
+]
+
+
+@pytest.mark.parametrize(("call", "path"), FILES, ids=[path for _, path in FILES])
+async def test_the_file_of_a_missing_document_is_not_found(
+    make_client: ClientFactory, call: Call, path: str
+) -> None:
+    server = Resource({"detail": "Not found."}, status=404)
+
+    with pytest.raises(NotFound, match="No document 9") as raised:
+        _ = await call(PaperlessDocumentReader(make_client(server)), 9)
+
+    assert raised.value.hint
+    assert server.sent[0][0] == f"/api/documents/9/{path}/"
+
+
+@pytest.mark.parametrize(("call", "path"), FILES, ids=[path for _, path in FILES])
+async def test_the_file_of_a_hidden_document_is_permission_denied(
+    make_client: ClientFactory, call: Call, path: str
+) -> None:
+    def answer(request: httpx2.Request) -> httpx2.Response:
+        assert request.url.path == f"/api/documents/2/{path}/"
+        # 3.4.2: HttpResponseForbidden for a document the user may not see, text/html
+        return httpx2.Response(
+            403, text="Insufficient permissions", headers={"Content-Type": "text/html"}
+        )
+
+    with pytest.raises(PermissionDenied):
+        _ = await call(PaperlessDocumentReader(make_client(answer)), 2)
+
+
+@pytest.mark.parametrize(("call", "path"), FILES, ids=[path for _, path in FILES])
+async def test_a_user_without_the_document_permission_is_denied_a_file(
+    make_client: ClientFactory, call: Call, path: str
+) -> None:
+    del path
+    server = Resource({"detail": "You do not have permission to perform this action."}, 403)
+
+    with pytest.raises(PermissionDenied):
+        _ = await call(PaperlessDocumentReader(make_client(server)), 1)
+
+
+async def test_a_file_over_the_limit_is_truncated_but_still_named_and_typed(
+    make_client: ClientFactory,
+) -> None:
+    server = Binary(PDF, "application/pdf", NON_ASCII_DISPOSITION)
+
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        30, "original", max_bytes=len(PDF) - 1
+    )
+
+    assert found == DocumentFile(
+        content=b"",
+        mime_type="application/pdf",
+        filename="2026-11-12 probe-Ünï 日本語 €.pdf",
+        truncated=True,
+    )
+
+
+async def test_a_file_exactly_at_the_limit_is_whole(make_client: ClientFactory) -> None:
+    server = Binary(PDF, "application/pdf", NON_ASCII_DISPOSITION)
+
+    found = await PaperlessDocumentReader(make_client(server)).get_document_file(
+        30, "original", max_bytes=len(PDF)
+    )
+
+    assert (found.content, found.truncated) == (PDF, False)
+
+
+async def test_a_thumbnail_larger_than_any_real_one_is_refused(make_client: ClientFactory) -> None:
+    server = Binary(b"x" * (THUMBNAIL_LIMIT + 1), "image/webp", THUMB_DISPOSITION)
+
+    with pytest.raises(PaperlessMcpError, match="unexpected response"):
+        _ = await PaperlessDocumentReader(make_client(server)).get_document_thumbnail(30)

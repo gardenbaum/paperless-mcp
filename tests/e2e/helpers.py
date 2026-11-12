@@ -212,8 +212,17 @@ def ensure_document(api: httpx2.Client, title: str, text: str) -> int:
     pytest.fail(f"Consuming {title!r} timed out after {CONSUME_TIMEOUT:.0f}s. Logs: `{LOGS_HINT}`")
 
 
-def consume(api: httpx2.Client, title: str, content: bytes) -> tuple[str, int | None]:
+def consume(
+    api: httpx2.Client,
+    title: str,
+    content: bytes,
+    *,
+    filename: str | None = None,
+    mime_type: str = "application/pdf",
+) -> tuple[str, int | None]:
     """Upload `content` as `title`, wait until its task ends, and return the task id.
+
+    The file is named `filename` (default: the title with ".pdf") and sent as `mime_type`.
 
     Also returns the id of the document the task created, None if it failed. The caller deletes
     that document again (`api.delete`), also when its test fails.
@@ -221,7 +230,7 @@ def consume(api: httpx2.Client, title: str, content: bytes) -> tuple[str, int | 
     uploaded = api.post(
         "/api/documents/post_document/",
         data={"title": title},
-        files={"document": (f"{title}.pdf", content, "application/pdf")},
+        files={"document": (filename or f"{title}.pdf", content, mime_type)},
     ).raise_for_status()
     task_id = str(parse(uploaded))
     deadline = time.monotonic() + CONSUME_TIMEOUT

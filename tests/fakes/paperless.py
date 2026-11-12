@@ -21,6 +21,7 @@ import functools
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from pathlib import PurePath
 from typing import TYPE_CHECKING, Concatenate, cast
 
 from pydantic import JsonValue
@@ -39,6 +40,7 @@ from fakes.accounts import (
 from fakes.custom_field_query import compile_query
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
+    DocumentFile,
     DocumentHit,
     DocumentPage,
     DocumentQuery,
@@ -67,10 +69,14 @@ if TYPE_CHECKING:
 
     from _typeshed import SupportsRichComparison
 
+    from paperless_mcp.domain.documents import FileVersion
     from paperless_mcp.domain.taxonomy import TaxonomyKind
 
 VERSION = "3.4.2"
 API_VERSION = 10
+
+# A WebP header, as far as clients sniff it: Paperless 3.4 renders thumbnails as WebP.
+THUMBNAIL = b"RIFF\x1a\x00\x00\x00WEBPVP8L fake"
 
 # What the E2E stack reports: a fresh instance without classifier, sanity check or AI.
 HEALTHY = SystemStatus(
@@ -193,11 +199,25 @@ class FakeDocument(Owned):
     history: list[HistoryEntry] = field(default_factory=list[HistoryEntry])
     versions: list[DocumentVersion] = field(default_factory=list[DocumentVersion])
     suggestions: Suggestions = field(default_factory=lambda: NO_SUGGESTIONS)
+    # The name of the uploaded file; the seed's files are named after the title.
+    file_name: str | None = None
+    original: bytes = b"%PDF-1.4 fake original"
+    # None: Paperless made no archive version (e.g. a plain text document).
+    archive: bytes | None = b"%PDF-1.4 fake archive version, longer than the original"
+    thumbnail: bytes = THUMBNAIL
 
     @property
     def original_filename(self) -> str:
-        """Paperless names the uploaded file after the title in the seed."""
-        return f"{self.title}.pdf"
+        """The uploaded file's name; the seed's files are named after the title."""
+        return self.file_name or f"{self.title}.pdf"
+
+    def download_filename(self, *, archive: bool) -> str:
+        """The name Paperless proposes for a download: the created date, then the title.
+
+        The archive version is always a PDF; the original keeps the upload's extension.
+        """
+        extension = ".pdf" if archive else PurePath(self.original_filename).suffix
+        return f"{self.created.isoformat()} {self.title}{extension}"
 
 
 @dataclass(kw_only=True)
@@ -707,13 +727,44 @@ class FakePaperless:
         return FileMetadata(
             original_filename=document.original_filename,
             original_mime_type=document.mime_type,
-            original_size=644,
+            original_size=len(document.original),
             original_checksum=f"{document.id:064x}",
             media_filename=f"e2e/2026/{document.original_filename}",
-            has_archive_version=True,
-            archive_size=9138,
-            archive_checksum=f"{document.id + 1000:064x}",
-            archive_media_filename=f"e2e/2026/{document.original_filename}",
+            has_archive_version=document.archive is not None,
+            archive_size=None if document.archive is None else len(document.archive),
+            archive_checksum=None if document.archive is None else f"{document.id + 1000:064x}",
+            archive_media_filename=(
+                None if document.archive is None else f"e2e/2026/{document.original_filename}"
+            ),
+        )
+
+    async def get_document_thumbnail(self, document_id: int) -> DocumentFile:
+        """`DocumentReader.get_document_thumbnail` (the `thumb` action: WebP, numbered name)."""
+        document = self._sub(document_id)
+        return DocumentFile(
+            content=document.thumbnail,
+            mime_type="image/webp",
+            filename=f"{document.id:07d}.webp",
+        )
+
+    async def get_document_file(
+        self, document_id: int, version: FileVersion, *, max_bytes: int
+    ) -> DocumentFile:
+        """`DocumentReader.get_document_file` (the `download` action).
+
+        Without an archive version `archive` answers the original, as Paperless does.
+        """
+        document = self._sub(document_id)
+        archive = version == "archive" and document.archive is not None
+        mime_type = document.mime_type
+        if document.mime_type.startswith("text/"):
+            mime_type += "; charset=utf-8"
+        content = document.archive if archive and document.archive else document.original
+        return DocumentFile(
+            content=b"" if len(content) > max_bytes else content,
+            mime_type="application/pdf" if archive else mime_type,
+            filename=document.download_filename(archive=archive),
+            truncated=len(content) > max_bytes,
         )
 
     async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:

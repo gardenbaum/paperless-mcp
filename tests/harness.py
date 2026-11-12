@@ -47,6 +47,7 @@ def server_settings(
     toolsets: Sequence[str] | None = None,
     read_only: bool = False,
     disabled_tools: Sequence[str] = (),
+    max_download_bytes: int | None = None,
 ) -> ServerSettings:
     """Server settings; `toolsets=None` leaves the setting at its shipped default."""
     given: dict[str, object] = {
@@ -56,6 +57,8 @@ def server_settings(
     }
     if toolsets is not None:
         given["toolsets"] = ",".join(toolsets)
+    if max_download_bytes is not None:
+        given["max_download_bytes"] = max_download_bytes
     return ServerSettings.model_validate(given)
 
 
@@ -72,13 +75,15 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     toolsets: Sequence[str] | None = None,
     read_only: bool = False,
     disabled_tools: Sequence[str] = (),
+    max_download_bytes: int | None = None,
 ) -> FastMCP:
     """The assembled server, with `reader` in place of the Paperless adapter.
 
     `taxonomy`, `documents` and `tasks` default to `reader` if that is a fake, else to the seeded
     admin's fake. `sleep` and `clock` replace the real ones the task wait uses. `toolsets`,
     `read_only` and `disabled_tools` go to the server settings; `catalogue` replaces the
-    tools the server offers, to try toolsets that do not exist yet.
+    tools the server offers, to try toolsets that do not exist yet. `max_download_bytes`
+    replaces the download limit.
     """
     fake = reader if isinstance(reader, FakePaperless) else admin()
     return create_server(
@@ -88,6 +93,7 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
             toolsets=toolsets,
             read_only=read_only,
             disabled_tools=disabled_tools,
+            max_download_bytes=max_download_bytes,
         ),
         catalogue=catalogue,
         ports=lambda _client: Ports(

@@ -15,10 +15,12 @@ if TYPE_CHECKING:
     from collections.abc import Collection
 
     from paperless_mcp.domain.documents import (
+        DocumentFile,
         DocumentPage,
         DocumentQuery,
         DocumentRecord,
         FileMetadata,
+        FileVersion,
         HistoryEntry,
         Note,
         Suggestions,
@@ -117,6 +119,30 @@ class DocumentReader(Protocol):
 
     async def get_document_suggestions(self, document_id: int) -> Suggestions:
         """The classifier's suggestions (ids) for a document.
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user may not see the document.
+        """
+        ...
+
+    async def get_document_thumbnail(self, document_id: int) -> DocumentFile:
+        """The thumbnail image of a document (WebP in Paperless 3.4).
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user may not see the document.
+        """
+        ...
+
+    async def get_document_file(
+        self, document_id: int, version: FileVersion, *, max_bytes: int
+    ) -> DocumentFile:
+        """The original file or the archive version (the OCR'd PDF/A) of a document.
+
+        Reads at most ``max_bytes`` bytes: a larger file comes back ``truncated`` with its type
+        and name but no content. Paperless answers the original for ``archive`` when the
+        document has no archive version, so callers check ``has_archive_version`` first.
 
         Raises:
             NotFound: No such document.

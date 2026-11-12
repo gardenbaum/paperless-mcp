@@ -55,6 +55,8 @@ class DocumentQuery(BaseModel):
 
 
 type NameOrId = str | int
+type FileVersion = Literal["original", "archive"]
+type FileKind = Literal["thumbnail", "original", "archive"]
 
 
 class NameFilters(BaseModel):
@@ -323,3 +325,74 @@ class ContentSlice(BaseModel):
         int | None, Field(description="Offset of the next slice, null at the end of the text.")
     ]
     web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+
+
+class DocumentFile(BaseModel):
+    """A file of a document as Paperless sends it: the bytes, their MIME type and file name.
+
+    Attributes:
+        content: The file itself.
+        mime_type: The ``Content-Type`` Paperless sent, parameters included
+            (``text/plain; charset=utf-8``).
+        filename: The name Paperless proposes (RFC 6266), non-ASCII characters intact and never
+            holding a path, control or bidi characters; None if it proposes none.
+        truncated: The file is larger than the limit the caller gave; ``content`` is then empty.
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    content: bytes
+    mime_type: str
+    filename: str | None
+    truncated: bool = False
+
+
+class FileReport(BaseModel):
+    """What a tool says about a thumbnail or download, whether or not the bytes came with it."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    document_id: Annotated[int, Field(description="The document the file belongs to.")]
+    kind: Annotated[FileKind, Field(description="Which file: the thumbnail, original or archive.")]
+    filename: Annotated[
+        str | None,
+        Field(
+            description=(
+                "File name, non-ASCII characters intact. An attached file has the name Paperless "
+                "proposes for a download (date, correspondent, title); a file that is not attached "
+                "has the name of the upload (the archive version with .pdf), or null."
+            )
+        ),
+    ]
+    mime_type: Annotated[
+        str, Field(description="MIME type as Paperless sends it, charset parameter included.")
+    ]
+    size_bytes: Annotated[
+        int | None, Field(description="Size of the file in bytes; null if it was not measured.")
+    ]
+    delivered: Annotated[
+        bool, Field(description="The file is attached as content; false: it is over the limit.")
+    ]
+    max_bytes: Annotated[
+        int | None, Field(description="The server's download limit; null for thumbnails.")
+    ]
+    web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+    note: Annotated[str | None, Field(description="Why the file is not attached, if it is not.")]
+
+
+class FileDelivery(BaseModel):
+    """A report and, unless the file is over the size limit, the bytes it describes."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    report: FileReport
+    data: bytes | None
+
+
+class Thumbnail(BaseModel):
+    """A report and the image it describes."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    report: FileReport
+    data: bytes

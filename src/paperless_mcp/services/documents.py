@@ -58,6 +58,11 @@ SECTIONS: tuple[Include, ...] = ("notes", "history", "metadata", "versions", "su
 MONETARY = re.compile(r"([A-Z]{3})(-?\d+(?:\.\d+)?)")
 
 
+def document_link(web_url: str, document_id: int) -> str:
+    """The link to a document in the Paperless web UI under ``web_url``."""
+    return f"{web_url.rstrip('/')}/documents/{document_id}/details"
+
+
 def _check_range(name: str, start: date | None, end: date | None) -> None:
     if start and end and start > end:
         message = f"{name}_from is after {name}_to."
@@ -82,7 +87,7 @@ class DocumentService:
         """Search through ``reader``; ``web_url`` is the base of links to the Paperless UI."""
         self._reader: DocumentReader = reader
         self._taxonomy: TaxonomyResolver = taxonomy
-        self._web_url: str = web_url.rstrip("/")
+        self._web_url: str = web_url
 
     async def search(
         self, names: NameFilters, query: DocumentQuery, *, page: int, page_size: int
@@ -171,7 +176,7 @@ class DocumentService:
         )
 
     def _link(self, document_id: int) -> str:
-        return f"{self._web_url}/documents/{document_id}/details"
+        return document_link(self._web_url, document_id)
 
     async def get(self, document_id: int, include: Collection[Include] = ()) -> DocumentDetail:
         """One document with names, readable custom fields and the sections in ``include``.

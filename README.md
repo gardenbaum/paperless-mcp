@@ -39,6 +39,7 @@ not logged, and an internal error is logged by type, with its traceback only at 
 | `PAPERLESS_PUBLIC_URL` | Base URL for links shown to users, if it differs from `PAPERLESS_URL` |
 | `PAPERLESS_MCP_LOG_LEVEL` | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` or `CRITICAL` |
 | `PAPERLESS_MCP_STARTUP_TIMEOUT` | Seconds the startup check may take (default 5) |
+| `PAPERLESS_MCP_MAX_DOWNLOAD_BYTES` | Largest original or archive file `download_document` attaches, in bytes (default 524288, at most 33554432); larger files are reported with their link only. Attached files travel base64-encoded (a third larger) in one MCP message and cost the client context tokens; the FastMCP client reads at most 1 MiB per HTTP event by default, so raise this only if your clients allow it |
 
 ## Development
 

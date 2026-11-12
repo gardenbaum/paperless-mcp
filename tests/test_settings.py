@@ -194,3 +194,32 @@ def test_malformed_json_names_both_accepted_formats(
     message = caught.value.errors()[0]["msg"]
     assert "comma-separated" in message
     assert "JSON array" in message
+
+
+def test_downloads_up_to_512_kibibytes_are_attached_by_default() -> None:
+    assert ServerSettings.model_validate({}).max_download_bytes == 512 * 1024
+
+
+def test_the_download_limit_has_an_upper_bound_of_32_mebibytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_MAX_DOWNLOAD_BYTES", str(32 * 1024 * 1024))
+    assert ServerSettings.model_validate({}).max_download_bytes == 32 * 1024 * 1024
+
+    monkeypatch.setenv("PAPERLESS_MCP_MAX_DOWNLOAD_BYTES", str(32 * 1024 * 1024 + 1))
+    assert invalid_fields(ServerSettings) == [("max_download_bytes",)]
+
+
+def test_the_download_limit_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_MAX_DOWNLOAD_BYTES", "4096")
+
+    assert ServerSettings.model_validate({}).max_download_bytes == 4096
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "big", "1.5"])
+def test_the_download_limit_must_be_a_positive_whole_number(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_MAX_DOWNLOAD_BYTES", value)
+
+    assert invalid_fields(ServerSettings) == [("max_download_bytes",)]

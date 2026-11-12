@@ -3,10 +3,12 @@
 The seed's ids differ between the backends, so every test looks them up by name first.
 """
 
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from e2e.helpers import pdf
 from fakes.accounts import PRIVATE_CONTENT, PUBLIC_ASN, PUBLIC_NOTE
 
 from paperless_mcp.domain.documents import DocumentQuery
@@ -14,7 +16,7 @@ from paperless_mcp.domain.errors import NotFound, PermissionDenied, Validation
 
 if TYPE_CHECKING:
     from contract.conftest import Backend, Ports
-    from paperless_mcp.domain.documents import DocumentHit
+    from paperless_mcp.domain.documents import DocumentHit, FileVersion
     from paperless_mcp.domain.taxonomy import TaxonomyKind
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-8")]
@@ -428,3 +430,129 @@ async def test_titles_are_given_for_the_documents_the_user_may_see(backend: Back
     }
     assert await backend.reader.documents.get_document_titles(wanted) == {public.id: PUBLIC}
     assert await backend.reader.documents.get_document_titles([]) == {}
+
+
+# --- Files: thumbnails, originals and archive versions -----------------------------------------
+
+MAX = 1_000_000
+NON_ASCII = "Rechnung für Müller 日本語 €"
+
+
+def named(label: str) -> str:
+    """A title unique to the test run, so the live upload cannot collide with another."""
+    return f"{label} {uuid.uuid4().hex[:12]}"
+
+
+def uploaded(backend: Backend, title: str, filename: str, mime_type: str) -> int:
+    content = pdf(uuid.uuid4().hex) if mime_type == "application/pdf" else title.encode()
+    return backend.upload(title, filename, content, mime_type)
+
+
+@pytest.mark.contract("DocumentReader.get_document_thumbnail")
+async def test_a_thumbnail_is_a_webp_image(backend: Backend) -> None:
+    public = await document(backend.reader, PUBLIC)
+
+    thumbnail = await backend.reader.documents.get_document_thumbnail(public.id)
+
+    assert thumbnail.mime_type == "image/webp"
+    assert thumbnail.content[:4] == b"RIFF"
+    assert thumbnail.content[8:12] == b"WEBP"
+
+
+@pytest.mark.contract("DocumentReader.get_document_thumbnail")
+async def test_the_thumbnail_of_a_missing_hidden_or_blind_document(backend: Backend) -> None:
+    private = await document(backend.admin, PRIVATE)
+
+    with pytest.raises(NotFound):
+        _ = await backend.admin.documents.get_document_thumbnail(MISSING)
+    with pytest.raises(PermissionDenied):
+        _ = await backend.reader.documents.get_document_thumbnail(private.id)
+    with pytest.raises(PermissionDenied):
+        _ = await backend.blind.documents.get_document_thumbnail(private.id)
+
+
+@pytest.mark.contract("DocumentReader.get_document_file")
+async def test_the_original_and_the_archive_are_pdfs_of_the_size_the_metadata_names(
+    backend: Backend,
+) -> None:
+    public = await document(backend.reader, PUBLIC)
+    documents = backend.reader.documents
+    metadata = await documents.get_document_metadata(public.id)
+
+    original = await documents.get_document_file(public.id, "original", max_bytes=MAX)
+    archive = await documents.get_document_file(public.id, "archive", max_bytes=MAX)
+
+    assert (original.mime_type, archive.mime_type) == ("application/pdf", "application/pdf")
+    assert original.content.startswith(b"%PDF")
+    assert archive.content.startswith(b"%PDF")
+    assert len(original.content) == metadata.original_size
+    assert len(archive.content) == metadata.archive_size
+    assert original.content != archive.content
+    assert (original.filename or "").endswith(f"{PUBLIC}.pdf")
+    assert (archive.filename or "").endswith(f"{PUBLIC}.pdf")
+
+
+@pytest.mark.contract("DocumentReader.get_document_file")
+async def test_a_non_ascii_title_survives_in_the_file_name(backend: Backend) -> None:
+    title = named(NON_ASCII)
+    number = uploaded(backend, title, f"{NON_ASCII} Käse.pdf", "application/pdf")
+
+    for version in ("original", "archive"):
+        found = await backend.admin.documents.get_document_file(number, version, max_bytes=MAX)
+
+        assert found.mime_type == "application/pdf"
+        assert (found.filename or "").endswith(f" {title}.pdf")
+        assert found.content.startswith(b"%PDF")
+
+
+@pytest.mark.contract("DocumentReader.get_document_file")
+async def test_a_document_without_archive_version_answers_its_original(backend: Backend) -> None:
+    title = named("kein-archiv-ä")
+    number = uploaded(backend, title, "notiz-ä.txt", "text/plain")
+    documents = backend.admin.documents
+
+    metadata = await documents.get_document_metadata(number)
+    original = await documents.get_document_file(number, "original", max_bytes=MAX)
+    archive = await documents.get_document_file(number, "archive", max_bytes=MAX)
+
+    assert not metadata.has_archive_version
+    assert metadata.original_mime_type == "text/plain"
+    assert original.mime_type.startswith("text/plain")
+    assert original.content == title.encode()
+    assert (original.filename or "").endswith(f"{title}.txt")
+    assert archive == original
+
+
+@pytest.mark.contract("DocumentReader.get_document_file")
+async def test_the_file_of_a_missing_hidden_or_blind_document(backend: Backend) -> None:
+    private = await document(backend.admin, PRIVATE)
+
+    for version in ("original", "archive"):
+        with pytest.raises(NotFound):
+            _ = await backend.admin.documents.get_document_file(MISSING, version, max_bytes=MAX)
+        with pytest.raises(PermissionDenied):
+            _ = await backend.reader.documents.get_document_file(private.id, version, max_bytes=MAX)
+        with pytest.raises(PermissionDenied):
+            _ = await backend.blind.documents.get_document_file(private.id, version, max_bytes=MAX)
+
+
+@pytest.mark.contract("DocumentReader.get_document_file")
+async def test_a_file_over_the_byte_limit_is_truncated_but_still_named_and_typed(
+    backend: Backend,
+) -> None:
+    public = await document(backend.reader, PUBLIC)
+    documents = backend.reader.documents
+    metadata = await documents.get_document_metadata(public.id)
+
+    versions: list[tuple[FileVersion, int | None]] = [
+        ("original", metadata.original_size),
+        ("archive", metadata.archive_size),
+    ]
+    for version, size in versions:
+        assert size
+        cut = await documents.get_document_file(public.id, version, max_bytes=size - 1)
+        whole = await documents.get_document_file(public.id, version, max_bytes=size)
+
+        assert (cut.content, cut.truncated, cut.mime_type) == (b"", True, "application/pdf")
+        assert (cut.filename or "").endswith(f"{PUBLIC}.pdf")
+        assert (len(whole.content), whole.truncated) == (size, False)

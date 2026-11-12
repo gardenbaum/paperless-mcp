@@ -108,3 +108,64 @@ def test_listed_response_deviations_pass(path: str, response: httpx2.Response) -
 def test_a_response_deviation_covers_only_its_status() -> None:
     with pytest.raises(SchemaViolationError):
         check_response(get("/api/status/"), httpx2.Response(404, text="<html>Not Found</html>"))
+
+
+FILE_PATHS = ["/api/documents/1/thumb/", "/api/documents/1/download/"]
+FILE_HEADERS = {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": 'inline; filename="a.pdf"',
+}
+
+
+@pytest.mark.parametrize("path", FILE_PATHS)
+def test_a_file_response_passes_although_the_schema_says_json(path: str) -> None:
+    response = httpx2.Response(200, content=b"%PDF-1.4", headers=FILE_HEADERS)
+
+    check_response(get(path), response)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx2.Response(200, content=b"", headers=FILE_HEADERS),
+        httpx2.Response(
+            200, content=b"{}", headers={**FILE_HEADERS, "Content-Type": "application/json"}
+        ),
+        httpx2.Response(200, content=b"x", headers={"Content-Disposition": "inline"}),
+        httpx2.Response(200, content=b"x", headers={"Content-Type": "application/pdf"}),
+        httpx2.Response(200, content=b"x", headers={**FILE_HEADERS, "Content-Disposition": "x"}),
+        httpx2.Response(
+            200, content=b"{}", headers={**FILE_HEADERS, "Content-Type": "Application/JSON; x=1"}
+        ),
+        httpx2.Response(204, headers=FILE_HEADERS),
+    ],
+    ids=[
+        "empty",
+        "json",
+        "no content type",
+        "no disposition",
+        "odd disposition",
+        "json in other case",
+        "undocumented",
+    ],
+)
+def test_a_file_response_is_still_checked_for_what_it_must_have(response: httpx2.Response) -> None:
+    with pytest.raises(SchemaViolationError):
+        check_response(get("/api/documents/1/download/"), response)
+
+
+@pytest.mark.parametrize("path", ["/api/documents/1/metadata/", "/api/documents/1/preview/"])
+def test_the_file_exemption_covers_only_the_endpoints_the_adapter_uses(path: str) -> None:
+    response = httpx2.Response(200, content=b"%PDF-1.4", headers=FILE_HEADERS)
+
+    with pytest.raises(SchemaViolationError):
+        check_response(get(path), response)
+
+
+def test_a_hidden_document_is_answered_with_html_by_the_file_endpoints() -> None:
+    response = httpx2.Response(
+        403, text="Insufficient permissions", headers={"Content-Type": "text/html"}
+    )
+
+    check_response(get("/api/documents/1/thumb/"), response)
+    check_response(get("/api/documents/1/download/"), response)
