@@ -20,8 +20,12 @@ from typing import TYPE_CHECKING, Literal
 import httpx2
 import pydantic
 
-from paperless_mcp.domain.errors import PaperlessMcpError
-from paperless_mcp.paperless.errors import error_for_status, error_for_transport
+from paperless_mcp.domain.errors import PaperlessMcpError, UpstreamTimeout
+from paperless_mcp.paperless.errors import (
+    RETRY_LATER,
+    error_for_status,
+    error_for_transport,
+)
 
 if TYPE_CHECKING:
     from paperless_mcp.domain.credentials import CredentialProvider
@@ -118,6 +122,19 @@ class Download:
     truncated: bool
 
 
+@dataclass(frozen=True, slots=True)
+class Streamed:
+    """A streamed body read within a size and a time limit.
+
+    Attributes:
+        content: The body, or its first bytes if it is ``truncated``.
+        truncated: The body is larger than the size limit or did not end within the time limit.
+    """
+
+    content: bytes
+    truncated: bool
+
+
 class PaperlessClient:
     """Async client for one Paperless instance, over one shared ``httpx2.AsyncClient``.
 
@@ -164,14 +181,21 @@ class PaperlessClient:
         json: object = None,
         data: Mapping[str, str] | None = None,
         files: Files | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 -- the HTTP request timeout, not a cancel scope
+        retry: bool = True,
     ) -> httpx2.Response:
         """Send a request and return the successful response.
+
+        ``timeout`` replaces the client's default timeout (seconds) for this request. With
+        ``retry=False`` transient statuses are not retried, for calls that cost money.
 
         Raises:
             PaperlessMcpError: The matching subclass for an error status or a failed transport.
         """
-        outgoing = self._build(method, path, params=params, json=json, data=data, files=files)
-        response = await self._exchange(outgoing, stream=False)
+        outgoing = self._build(
+            method, path, params=params, json=json, data=data, files=files, timeout=timeout
+        )
+        response = await self._exchange(outgoing, stream=False, retry=retry)
         if response.is_error:
             raise error_for_status(response)
         return response
@@ -209,6 +233,59 @@ class PaperlessClient:
         finally:
             await response.aclose()
 
+    async def stream_post(
+        self,
+        path: str,
+        *,
+        json: object,
+        max_bytes: int,
+        max_seconds: float,
+    ) -> Streamed:
+        """POST ``json`` to ``path`` and read the streamed answer within a size and a time limit.
+
+        At most ``max_bytes`` bytes are kept, and the request, the wait for the first byte
+        included, may take ``max_seconds`` in total. Past either limit the connection is closed
+        and the bytes that arrived come back ``truncated``; running out of time before the first
+        byte is a timeout. A POST is never retried: the answer may cost a model call.
+
+        Deliberately asymmetric with ``download``: running out of time or size keeps the partial
+        text (a half answer is useful and marked ``truncated``), whereas a connection that breaks
+        mid-body is an error and the partial text is discarded, like a broken download.
+
+        Raises:
+            PaperlessMcpError: The matching subclass for an error status, a failed transport, or
+                a time limit used up before any byte arrived.
+        """
+        outgoing = self._build("POST", path, json=json, timeout=max_seconds)
+        received: list[bytes] = []
+        total = 0
+        truncated = False
+        try:
+            async with asyncio.timeout(max_seconds):
+                response = await self._exchange(outgoing, stream=True)
+                try:
+                    if response.is_error:
+                        _ = await response.aread()
+                        raise error_for_status(response)
+                    async for chunk in response.aiter_bytes():
+                        room = max_bytes - total
+                        received.append(chunk[:room])
+                        total += len(received[-1])
+                        if len(chunk) > room:
+                            truncated = True
+                            break
+                finally:
+                    await response.aclose()
+        except TimeoutError:
+            if not total:
+                message = "Paperless did not respond in time."
+                raise UpstreamTimeout(message, hint=RETRY_LATER) from None
+            truncated = True
+        except httpx2.TransportError as error:
+            logger.warning("POST %s failed: %s", outgoing.url.path, type(error).__name__)
+            raise error_for_transport(error) from error
+        return Streamed(b"".join(received), truncated=truncated)
+
     def _build(  # noqa: PLR0913 -- the parts of httpx2's build_request(), keyword-only
         self,
         method: Method,
@@ -218,8 +295,10 @@ class PaperlessClient:
         json: object = None,
         data: Mapping[str, str] | None = None,
         files: Files | None = None,
+        timeout: float | None = None,
     ) -> httpx2.Request:
         name, value = self._credentials.current().header
+        limit = self._upload_timeout if files else timeout
         return self._http.build_request(
             method,
             path,
@@ -228,10 +307,12 @@ class PaperlessClient:
             data=data,
             files=files,
             headers={"Accept": ACCEPT, name: value},
-            timeout=self._upload_timeout if files else httpx2.USE_CLIENT_DEFAULT,
+            timeout=httpx2.USE_CLIENT_DEFAULT if limit is None else limit,
         )
 
-    async def _exchange(self, outgoing: httpx2.Request, *, stream: bool) -> httpx2.Response:
+    async def _exchange(
+        self, outgoing: httpx2.Request, *, stream: bool, retry: bool = True
+    ) -> httpx2.Response:
         """Send ``outgoing``, retrying transient statuses; the last response, errors included.
 
         With ``stream`` the body is not read yet: the caller reads and closes the response.
@@ -241,7 +322,7 @@ class PaperlessClient:
         while True:
             response = await self._send(outgoing, stream=stream)
             logger.debug("%s %s -> %d (attempt %d)", method, path, response.status_code, attempt)
-            delay = self._retry_delay(response, attempt, waited)
+            delay = self._retry_delay(response, attempt, waited) if retry else None
             if delay is None:
                 return response
             if stream:
@@ -266,6 +347,8 @@ class PaperlessClient:
         json: object = None,
         data: Mapping[str, str] | None = None,
         files: Files | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 -- the HTTP request timeout, not a cancel scope
+        retry: bool = True,
     ) -> M:
         """Send a request and parse the JSON body of the successful response into ``model``.
 
@@ -273,15 +356,28 @@ class PaperlessClient:
             PaperlessMcpError: An error response, a failed transport, or a body ``model`` rejects.
         """
         response = await self.request(
-            method, path, params=params, json=json, data=data, files=files
+            method,
+            path,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            timeout=timeout,
+            retry=retry,
         )
         return parse(response, model)
 
     async def get[M: pydantic.BaseModel](
-        self, path: str, model: type[M], *, params: Params | None = None
+        self,
+        path: str,
+        model: type[M],
+        *,
+        params: Params | None = None,
+        timeout: float | None = None,  # noqa: ASYNC109 -- the HTTP request timeout, not a cancel scope
+        retry: bool = True,
     ) -> M:
         """GET ``path`` and parse the JSON body into ``model`` (see ``call``)."""
-        return await self.call("GET", path, model, params=params)
+        return await self.call("GET", path, model, params=params, timeout=timeout, retry=retry)
 
     def _retry_delay(self, response: httpx2.Response, attempt: int, waited: float) -> float | None:
         """Seconds to wait before the next attempt, or None if the response is final."""

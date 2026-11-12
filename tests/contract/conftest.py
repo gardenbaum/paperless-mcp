@@ -17,6 +17,8 @@ implement it in FakePaperless and the adapter, and write its contract tests with
 every port is wired and every method has such a test.
 """
 
+import asyncio
+import contextlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -36,6 +38,7 @@ from fakes.paperless import (
 )
 
 from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
+    AiReader,
     DocumentReader,
     DocumentWriter,
     InstanceReader,
@@ -43,6 +46,7 @@ from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations ar
     TaxonomyReader,
     TaxonomyWriter,
 )
+from paperless_mcp.paperless.ai import PaperlessAiReader
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
 from paperless_mcp.paperless.documents import PaperlessDocumentReader, PaperlessDocumentWriter
@@ -51,7 +55,7 @@ from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncGenerator, AsyncIterator, Callable
 
     from e2e.helpers import Stack
 
@@ -70,6 +74,7 @@ class Ports:
     tasks: TaskReader
     document_writes: DocumentWriter
     taxonomy_writes: TaxonomyWriter
+    ai: AiReader
 
 
 def fake_ports(state: FakeState, user: str) -> Ports:
@@ -83,6 +88,7 @@ def fake_ports(state: FakeState, user: str) -> Ports:
         tasks=fake,
         document_writes=writer,
         taxonomy_writes=writer,
+        ai=fake,
     )
 
 
@@ -95,6 +101,7 @@ def live_ports(client: PaperlessClient) -> Ports:
         tasks=PaperlessTaskReader(client),
         document_writes=PaperlessDocumentWriter(client),
         taxonomy_writes=PaperlessTaxonomyWriter(client),
+        ai=PaperlessAiReader(client),
     )
 
 
@@ -108,6 +115,12 @@ class Upload(Protocol):
     """Uploads a file as a new document, waits for its consumption and returns the document id."""
 
     def __call__(self, title: str, filename: str, content: bytes, mime_type: str) -> int: ...
+
+
+class Share(Protocol):
+    """Makes a document the admin's own and shares it with the restricted user to view only."""
+
+    def __call__(self, document_id: int) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -128,6 +141,8 @@ class Backend:
     # A new document of the admin to write to, after its consumption; the live one is deleted when
     # the test ends. Its tags and custom fields are whatever consumption gave it.
     new_document: Callable[[], int]
+    # Shares an uploaded document view-only with the restricted user (see `Share`).
+    share_read_only: Share
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
     # (`just e2e-latest` runs the suite against a newer release than the pinned one).
     expected_version: str
@@ -182,8 +197,21 @@ def fake_new_document(state: FakeState) -> Callable[[], int]:
     return new_document
 
 
-def fake_backend() -> Backend:
+def fake_share(state: FakeState) -> Share:
+    def share_fake(document_id: int) -> None:
+        [document] = [d for d in state.documents if d.id == document_id]
+        [admin] = [u for u in state.users if u.username == ADMIN[0]]
+        [reader] = [u for u in state.users if u.username == READER[0]]
+        document.owner = admin.id
+        document.viewers = {reader.id}
+
+    return share_fake
+
+
+def fake_backend(*, ai_enabled: bool = False) -> Backend:
+    """The fake's backend; the E2E stack of `just e2e` has AI off, so that is the default."""
     state = seeded()
+    state.ai_enabled = ai_enabled
     return Backend(
         admin=fake_ports(state, ADMIN[0]),
         reader=fake_ports(state, READER[0]),
@@ -191,17 +219,14 @@ def fake_backend() -> Backend:
         consume=fake_consume(state),
         upload=fake_upload(state),
         new_document=fake_new_document(state),
+        share_read_only=fake_share(state),
         expected_version=VERSION,
     )
 
 
-@pytest.fixture(params=["fake", pytest.param("live", marks=pytest.mark.e2e)])
-async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
-    """The backend under contract (the fixture value is created fresh for every test)."""
-    if cast("str", request.param) == "fake":
-        yield fake_backend()
-        return
-    stack = cast("Stack", request.getfixturevalue("stack"))
+@contextlib.asynccontextmanager
+async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
+    """The adapter on the live stack; documents a test uploads are deleted when it ends."""
     created: list[int] = []
 
     def consume_live(*, succeed: bool) -> str:
@@ -225,6 +250,18 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
         created.append(document)
         return document
 
+    def user_id(api: httpx2.Client) -> int:
+        user = cast("dict[str, dict[str, object]]", api.get("/api/ui_settings/").json())["user"]
+        return int(cast("int", user["id"]))
+
+    def share_live(document_id: int) -> None:
+        none: dict[str, list[int]] = {"users": [], "groups": []}
+        permissions = {"view": {"users": [user_id(stack.reader)], "groups": []}, "change": none}
+        _ = stack.admin.patch(
+            f"/api/documents/{document_id}/",
+            json={"owner": user_id(stack.admin), "set_permissions": permissions},
+        ).raise_for_status()
+
     try:
         async with httpx2.AsyncClient(base_url=stack.base_url, timeout=30.0) as http:
 
@@ -241,6 +278,7 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
                 consume=consume_live,
                 upload=upload_live,
                 new_document=new_live_document,
+                share_read_only=share_live,
                 expected_version=EXPECTED_VERSION,
             )
     finally:
@@ -250,3 +288,58 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
         found = stack.admin.get("/api/tags/", params={"name__istartswith": SCRATCH_TAG})
         for row in results(found):
             _ = stack.admin.delete(f"/api/tags/{row['id']}/")
+
+
+@pytest.fixture(params=["fake", pytest.param("live", marks=pytest.mark.e2e)])
+async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
+    """The backend under contract (the fixture value is created fresh for every test)."""
+    if cast("str", request.param) == "fake":
+        yield fake_backend()
+        return
+    async with live_backend(cast("Stack", request.getfixturevalue("stack"))) as live:
+        yield live
+
+
+INDEX_TIMEOUT = 600.0
+
+
+async def build_llm_index(stack: Stack, live: Backend) -> None:
+    """Update the LLM index (the chat answers from it) and wait for the task to end.
+
+    Unverified on a working backend (the CI stack has none): `task_type` is the 3.4.2 name of
+    the task, from the OpenAPI schema.
+    """
+    started = stack.admin.post("/api/tasks/run/", json={"task_type": "llm_index"})
+    _ = started.raise_for_status()
+    task_id = str(cast("dict[str, object]", started.json())["task_id"])
+    deadline = asyncio.get_running_loop().time() + INDEX_TIMEOUT
+    while True:
+        status = await live.admin.tasks.get_task(task_id)
+        if status.is_final:
+            break
+        if asyncio.get_running_loop().time() > deadline:
+            pytest.fail(f"The LLM index update did not end within {INDEX_TIMEOUT:.0f} s.")
+        await asyncio.sleep(3)
+    if status.state != "success":
+        pytest.fail(f"The LLM index update ended {status.state}: {status.message}")
+
+
+AI_SKIPPED = "AI is disabled on this Paperless; `just e2e-ai` runs these against an AI backend."
+
+
+@pytest.fixture(params=["fake", pytest.param("live", marks=[pytest.mark.e2e, pytest.mark.ai_e2e])])
+async def ai_backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
+    """A backend with Paperless AI on: the fake with AI enabled, or a live one that has it.
+
+    The live stack of CI has AI off, so those tests skip there; `just e2e-ai` starts a stack
+    with an AI backend the developer provides and runs them.
+    """
+    if cast("str", request.param) == "fake":
+        yield fake_backend(ai_enabled=True)
+        return
+    stack = cast("Stack", request.getfixturevalue("stack"))
+    async with live_backend(stack) as live:
+        if (await live.admin.instance.get_overview()).ai_enabled is not True:
+            pytest.skip(AI_SKIPPED)
+        await build_llm_index(stack, live)
+        yield live

@@ -20,6 +20,7 @@ from fakes.paperless import FakePaperless, is_write, write
 from contract.conftest import Ports, live_ports
 from paperless_mcp.domain import ports
 from paperless_mcp.domain.ports import (
+    AiReader,
     DocumentReader,
     DocumentWriter,
     InstanceReader,
@@ -168,6 +169,7 @@ def test_ports_are_found_by_introspection() -> None:
         "tasks": TaskReader,
         "document_writes": DocumentWriter,
         "taxonomy_writes": TaxonomyWriter,
+        "ai": AiReader,
     }
 
 

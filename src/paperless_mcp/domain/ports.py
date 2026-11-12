@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer
     from paperless_mcp.domain.documents import (
         DocumentFile,
         DocumentPage,
@@ -198,5 +199,34 @@ class TaxonomyWriter(Protocol):
         Raises:
             PermissionDenied: The user may not add tags.
             Validation: The name is blank, too long, or the user already has such a tag.
+        """
+        ...
+
+
+class AiReader(Protocol):
+    """Paperless AI (a language model over the documents); it changes nothing in Paperless."""
+
+    async def ask(self, question: str, *, document_id: int | None) -> ChatAnswer:
+        """The whole answer of the chat to ``question``, about one document or all the user sees.
+
+        The answer streams in Paperless; this returns it complete, cut at a size or time limit
+        (``truncated``). Paperless names at most three source documents.
+
+        Raises:
+            FeatureUnavailable: Paperless AI is switched off.
+            NotFound: ``document_id`` names no document.
+            PermissionDenied: The user may not view documents, or not this document.
+            UpstreamUnavailable: The language model failed or took too long.
+        """
+        ...
+
+    async def get_ai_suggestions(self, document_id: int) -> AiSuggestions:
+        """What the language model suggests for a document, asked for now (or cached by Paperless).
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user may not change the document (Paperless requires it).
+            FeatureUnavailable: Paperless AI is switched off.
+            UpstreamUnavailable: The language model failed or took too long.
         """
         ...

@@ -1,0 +1,34 @@
+# Overlay of `just e2e-ai` (opt-in, local only): the E2E stack with Paperless AI switched on.
+# CI has no AI backend and never uses this file. The developer provides the backend through the
+# environment of the shell that runs `just e2e-ai`; the recipe maps PAPERLESS_E2E_AI_* to the
+# PAPERLESS_AI_* settings below and skips cleanly (exit 0, nothing started) while the two
+# required variables are missing:
+#
+#   PAPERLESS_E2E_AI_LLM_BACKEND        required: ollama or openai-like
+#   PAPERLESS_E2E_AI_LLM_MODEL          required: the chat/suggestion model, e.g. llama3.2
+#   PAPERLESS_E2E_AI_LLM_ENDPOINT       the backend URL (ollama: required; the container must reach
+#                                       it, e.g. http://host.docker.internal:11434)
+#   PAPERLESS_E2E_AI_LLM_API_KEY        the API key of an openai-like backend
+#   PAPERLESS_E2E_AI_EMBEDDING_BACKEND  huggingface (local), ollama or openai-like; the chat needs
+#                                       the LLM index, which needs an embedding backend
+#   PAPERLESS_E2E_AI_EMBEDDING_MODEL    the embedding model
+#   PAPERLESS_E2E_AI_EMBEDDING_ENDPOINT / PAPERLESS_E2E_AI_EMBEDDING_API_KEY  if they differ
+#   PAPERLESS_E2E_PORT                  host port of this stack (default 8012)
+#
+# A bare name below is passed through from the recipe's environment and left unset when the
+# developer set nothing. Document text is sent to the backend: choose one you accept that for.
+services:
+  paperless:
+    environment:
+      - PAPERLESS_AI_ENABLED=true
+      - PAPERLESS_AI_LLM_BACKEND
+      - PAPERLESS_AI_LLM_MODEL
+      - PAPERLESS_AI_LLM_ENDPOINT
+      - PAPERLESS_AI_LLM_API_KEY
+      - PAPERLESS_AI_LLM_EMBEDDING_BACKEND
+      - PAPERLESS_AI_LLM_EMBEDDING_MODEL
+      - PAPERLESS_AI_LLM_EMBEDDING_ENDPOINT
+      - PAPERLESS_AI_LLM_EMBEDDING_API_KEY
+    extra_hosts:
+      # Lets the container reach a backend on the developer's machine (Linux needs this line).
+      - "host.docker.internal:host-gateway"

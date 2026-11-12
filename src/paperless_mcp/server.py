@@ -18,19 +18,21 @@ from fastmcp.server.transforms.visibility import Visibility
 from paperless_mcp import __version__
 from paperless_mcp.domain.errors import InvalidConfiguration
 from paperless_mcp.observability import CallLogging
+from paperless_mcp.paperless.ai import PaperlessAiReader
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import RetryPolicy, connect
 from paperless_mcp.paperless.documents import PaperlessDocumentReader, PaperlessDocumentWriter
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
+from paperless_mcp.services.ai import AiService
 from paperless_mcp.services.document_edits import DocumentEditor
 from paperless_mcp.services.documents import DocumentService
 from paperless_mcp.services.files import FileService
 from paperless_mcp.services.instance import InstanceService
 from paperless_mcp.services.tasks import TaskService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
-from paperless_mcp.tools import core
+from paperless_mcp.tools import ai, core
 from paperless_mcp.tools._shared import (
     ANNOTATIONS,
     SERVICES,
@@ -54,6 +56,7 @@ if TYPE_CHECKING:
 
     from paperless_mcp.domain.instance import InstanceOverview
     from paperless_mcp.domain.ports import (
+        AiReader,
         DocumentReader,
         DocumentWriter,
         InstanceReader,
@@ -104,7 +107,7 @@ class Catalogue:
 
 
 CATALOGUE: Final = Catalogue(
-    providers=(core.provider,),
+    providers=(core.provider, ai.provider),
     annotations=ANNOTATIONS,
     tool_toolsets=TOOL_TOOLSETS,
     toolsets=TOOLSETS,
@@ -122,6 +125,7 @@ class Ports:
     tasks: TaskReader
     document_writes: DocumentWriter
     taxonomy_writes: TaxonomyWriter
+    ai: AiReader
 
 
 def paperless_ports(client: PaperlessClient) -> Ports:
@@ -133,6 +137,7 @@ def paperless_ports(client: PaperlessClient) -> Ports:
         tasks=PaperlessTaskReader(client),
         document_writes=PaperlessDocumentWriter(client),
         taxonomy_writes=PaperlessTaxonomyWriter(client),
+        ai=PaperlessAiReader(client),
     )
 
 
@@ -205,6 +210,7 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                     documents=documents,
                 ),
                 tasks=TaskService(adapters.tasks, sleep=sleep, clock=clock),
+                ai=AiService(adapters.ai, taxonomy, web_url=web_url),
             )
             overview = await services.instance.probe(settings.startup_timeout)
             if overview is None:

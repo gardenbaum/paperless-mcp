@@ -78,6 +78,18 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
         "an unknown or hidden more_like_id is answered with HttpResponseForbidden, text/html "
         "(PLMCP-10)"
     ),
+    ("POST", "/api/documents/chat/", 200): (
+        "the chat streams text/event-stream, plain text then a metadata trailer; the schema "
+        "describes a JSON ChatStreaming object (PLMCP-20)"
+    ),
+    ("POST", "/api/documents/chat/", 400): (
+        "AI switched off and an unknown document are answered with HttpResponseBadRequest, "
+        "text/html; the schema documents no error response (PLMCP-20)"
+    ),
+    ("POST", "/api/documents/chat/", 403): (
+        "a document the user may not see is answered with HttpResponseForbidden, text/html "
+        "(PLMCP-20)"
+    ),
     ("GET", "/api/status/", 200): (
         "3.4.2 nests index, classifier and sanity check under `tasks` and sends null errors; "
         "the schema has them top-level and non-nullable (PLMCP-7)"

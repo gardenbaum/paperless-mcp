@@ -1,5 +1,6 @@
 """PaperlessClient: headers, retries, error mapping and redaction, on real endpoint shapes."""
 
+import asyncio
 import email.utils
 import logging
 from datetime import timedelta
@@ -22,6 +23,7 @@ from adapter.conftest import (
 from paperless_mcp.domain.errors import (
     AuthenticationFailed,
     Conflict,
+    FeatureUnavailable,
     NotFound,
     PaperlessMcpError,
     PermissionDenied,
@@ -34,6 +36,7 @@ from paperless_mcp.domain.errors import (
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import (
     Method,
+    PaperlessClient,
     RetryPolicy,
     retry_after,
     utc_now,
@@ -690,3 +693,238 @@ async def test_a_download_that_breaks_midway_is_logged_with_path_and_error_type(
 
     messages = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
     assert messages == ["GET /api/documents/1/download/ failed: ReadError"]
+
+
+# --- PLMCP-20: a bounded streaming POST (the Paperless AI chat) and per-request timeouts
+
+
+class Hanging(httpx2.AsyncByteStream):
+    """A body that yields some bytes and then never sends another one."""
+
+    def __init__(self, *chunks: bytes) -> None:
+        self.chunks: tuple[bytes, ...] = chunks
+        self.closed: bool = False
+
+    @override
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self.chunks:
+            yield chunk
+        _ = await asyncio.Event().wait()
+
+    @override
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+async def test_a_streamed_post_returns_the_whole_body_within_the_limits() -> None:
+    body = Chunks(b"abc", b"def")
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=body))
+
+    found = await client.stream_post("/api/documents/chat/", json={}, max_bytes=6, max_seconds=5)
+
+    assert (found.content, found.truncated) == (b"abcdef", False)
+    assert body.closed
+
+
+async def test_a_streamed_post_sends_the_json_the_credential_and_the_time_limit() -> None:
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(200, content=b"x")
+
+    client, _ = streaming(handler)
+
+    _ = await client.stream_post(
+        "/api/documents/chat/", json={"q": "why?"}, max_bytes=9, max_seconds=7
+    )
+
+    [request] = seen
+    assert (request.method, request.url.path) == ("POST", "/api/documents/chat/")
+    assert request.content == b'{"q":"why?"}'
+    assert request.headers["Accept"] == "application/json; version=10"
+    assert request.headers["Authorization"] == f"Token {TOKEN}"
+    assert cast("dict[str, float]", request.extensions["timeout"])["read"] == 7
+
+
+async def test_a_streamed_post_keeps_what_fits_and_stops_reading_at_the_size_limit() -> None:
+    body = Chunks(b"abc", b"def", b"ghi", b"jkl")
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=body))
+
+    found = await client.stream_post("/api/documents/chat/", json={}, max_bytes=4, max_seconds=5)
+
+    assert (found.content, found.truncated) == (b"abcd", True)
+    assert body.pulled == 2
+    assert body.closed
+
+
+async def test_a_body_of_exactly_the_size_limit_is_not_truncated() -> None:
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=Chunks(b"ab", b"cd")))
+
+    found = await client.stream_post("/api/documents/chat/", json={}, max_bytes=4, max_seconds=5)
+
+    assert (found.content, found.truncated) == (b"abcd", False)
+
+
+async def test_a_streamed_post_that_runs_out_of_time_keeps_what_arrived() -> None:
+    body = Hanging(b"abc")
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=body))
+
+    found = await client.stream_post(
+        "/api/documents/chat/", json={}, max_bytes=100, max_seconds=0.05
+    )
+
+    assert (found.content, found.truncated) == (b"abc", True)
+    assert body.closed
+
+
+async def test_a_streamed_post_that_runs_out_of_time_before_any_byte_is_a_timeout() -> None:
+    body = Hanging()
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=body))
+
+    with pytest.raises(UpstreamTimeout) as raised:
+        _ = await client.stream_post(
+            "/api/documents/chat/", json={}, max_bytes=100, max_seconds=0.05
+        )
+
+    assert raised.value.hint
+    assert body.closed
+
+
+async def test_a_streamed_post_error_becomes_the_domain_error_and_is_not_retried() -> None:
+    sent: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        sent.append(request)
+        return httpx2.Response(503, json={"detail": "busy"})
+
+    client, sleep = streaming(handler)
+
+    with pytest.raises(UpstreamUnavailable, match="HTTP 503"):
+        _ = await client.stream_post("/api/documents/chat/", json={}, max_bytes=9, max_seconds=5)
+
+    assert len(sent) == 1
+    assert sleep.delays == []
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(httpx2.ReadTimeout, UpstreamTimeout), (httpx2.ReadError, UpstreamUnreachable)],
+)
+async def test_a_streamed_post_whose_body_fails_midway_is_a_client_safe_error(
+    error: type[httpx2.TransportError],
+    expected: type[UpstreamUnavailable],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.WARNING, logger=CLIENT_LOGGER)
+    body = Failing(error, b"abc")
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=body))
+
+    with pytest.raises(expected) as raised:
+        _ = await client.stream_post("/api/documents/chat/", json={}, max_bytes=100, max_seconds=5)
+
+    assert raised.value.hint
+    assert body.closed
+    assert [r.getMessage() for r in caplog.records] == [
+        f"POST /api/documents/chat/ failed: {error.__name__}"
+    ]
+
+
+async def test_a_request_can_carry_its_own_timeout(make_client: ClientFactory) -> None:
+    script = Script(answer(200, tag(1, "inbox")), answer(200, tag(2, "other")))
+    client = make_client(script)
+
+    _ = await client.get("/api/tags/1/", TagStub, timeout=77)
+    _ = await client.get("/api/tags/2/", TagStub)
+
+    first, second = (cast("dict[str, float]", r.extensions["timeout"]) for r in script.requests)
+    assert first["read"] == 77
+    assert second["read"] != 77
+
+
+# --- PLMCP-20 mutation-testing additions: what a streamed POST reports exactly
+
+
+async def test_a_streamed_error_body_is_read_before_it_is_mapped_and_closed() -> None:
+    body = Chunks(b"AI is required ", b"for this feature")
+    client, _ = streaming(lambda _: httpx2.Response(400, stream=body))
+
+    with pytest.raises(FeatureUnavailable, match="not enabled"):
+        _ = await client.stream_post("/api/documents/chat/", json={}, max_bytes=9, max_seconds=5)
+
+    assert body.closed
+
+
+async def test_the_size_limit_counts_every_chunk_not_just_the_last() -> None:
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=Chunks(b"ab", b"cd", b"ef")))
+
+    found = await client.stream_post("/api/documents/chat/", json={}, max_bytes=5, max_seconds=5)
+
+    assert (found.content, found.truncated) == (b"abcde", True)
+
+
+async def test_running_out_of_time_without_a_byte_says_so_with_a_hint() -> None:
+    client, _ = streaming(lambda _: httpx2.Response(200, stream=Hanging()))
+
+    with pytest.raises(UpstreamTimeout) as raised:
+        _ = await client.stream_post("/api/documents/chat/", json={}, max_bytes=9, max_seconds=0.05)
+
+    assert raised.value.message == "Paperless did not respond in time."
+    assert raised.value.hint == "Try again in a moment."
+
+
+async def test_the_time_limit_covers_the_wait_for_the_response_itself() -> None:
+    async def never() -> None:
+        _ = await asyncio.Event().wait()
+
+    class Slow(httpx2.AsyncBaseTransport):
+        @override
+        async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+            await never()
+            raise AssertionError
+
+    http = httpx2.AsyncClient(base_url="http://paperless.test", transport=Slow())
+    client = PaperlessClient(
+        http, StaticTokenProvider(TOKEN), retry=RetryPolicy(), upload_timeout=1.0
+    )
+
+    with pytest.raises(UpstreamTimeout):
+        _ = await client.stream_post("/api/documents/chat/", json={}, max_bytes=9, max_seconds=0.05)
+    await http.aclose()
+
+
+# --- PLMCP-20 review: an explicit opt-out of retries
+
+
+async def test_a_request_can_opt_out_of_retries(make_client: ClientFactory) -> None:
+    script = Script(answer(503, {"detail": "busy"}), answer(200, tag(1, "inbox")))
+
+    with pytest.raises(UpstreamUnavailable):
+        _ = await make_client(script).request("GET", "/api/tags/1/", retry=False)
+
+    assert len(script.requests) == 1
+
+
+async def test_get_and_call_pass_the_opt_out_on(make_client: ClientFactory) -> None:
+    script = Script(answer(503, {"detail": "busy"}), answer(200, tag(1, "inbox")))
+
+    with pytest.raises(UpstreamUnavailable):
+        _ = await make_client(script).get("/api/tags/1/", TagStub, retry=False)
+
+    assert len(script.requests) == 1
+
+
+async def test_retries_stay_the_default(make_client: ClientFactory) -> None:
+    script = Script(answer(503, {"detail": "busy"}), answer(200, tag(1, "inbox")))
+
+    _ = await make_client(script).get("/api/tags/1/", TagStub)
+
+    assert len(script.requests) == 2
+
+
+async def test_call_retries_by_default(make_client: ClientFactory) -> None:
+    script = Script(answer(503, {"detail": "busy"}), answer(200, tag(1, "inbox")))
+
+    _ = await make_client(script).call("GET", "/api/tags/1/", TagStub)
+
+    assert len(script.requests) == 2

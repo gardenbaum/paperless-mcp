@@ -39,6 +39,7 @@ from fakes.accounts import (
 )
 from fakes.custom_field_query import compile_query
 from fakes.document_values import coerce, reject, tag_closure
+from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer, ChatSource
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
     DocumentFile,
@@ -64,6 +65,7 @@ from paperless_mcp.domain.instance import (
 from paperless_mcp.domain.tasks import TaskState, TaskStatus
 from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyItem
 from paperless_mcp.paperless.documents import beyond_last_page, unseen_document
+from paperless_mcp.paperless.errors import ai_disabled
 from paperless_mcp.paperless.tasks import not_found
 
 if TYPE_CHECKING:
@@ -137,11 +139,17 @@ class Owned:
     Attributes:
         owner: The owning user's id; None means shared, visible to every user.
         viewers: Ids of users with an object-level view grant.
+        editors: Ids of users with an object-level change grant.
     """
 
     id: int
     owner: int | None = None
     viewers: set[int] = field(default_factory=set[int])
+    editors: set[int] = field(default_factory=set[int])
+
+    def changeable_by(self, user: FakeUser) -> bool:
+        """Paperless's `has_perms_owner_aware(user, "change_document", obj)`."""
+        return user.is_superuser or self.owner in {None, user.id} or user.id in self.editors
 
     def visible_to(self, user: FakeUser) -> bool:
         """Paperless's `permitted_object_ids` (group grants are not modelled yet)."""
@@ -190,6 +198,22 @@ NO_SUGGESTIONS = Suggestions(
 )
 
 
+NO_AI_SUGGESTIONS = AiSuggestions(
+    title=None,
+    correspondents=(),
+    new_correspondents=(),
+    tags=(),
+    new_tags=(),
+    document_types=(),
+    new_document_types=(),
+    storage_paths=(),
+    new_storage_paths=(),
+    dates=(),
+)
+# What Paperless's chat answers when it finds no document text to answer from.
+CHAT_NO_CONTENT = "Sorry, I couldn't find any content to answer your question."
+
+
 @dataclass(kw_only=True)
 class FakeDocument(Owned):
     """A document.
@@ -217,6 +241,7 @@ class FakeDocument(Owned):
     history: list[HistoryEntry] = field(default_factory=list[HistoryEntry])
     versions: list[DocumentVersion] = field(default_factory=list[DocumentVersion])
     suggestions: Suggestions = field(default_factory=lambda: NO_SUGGESTIONS)
+    ai_suggestions: AiSuggestions = field(default_factory=lambda: NO_AI_SUGGESTIONS)
     # The name of the uploaded file; the seed's files are named after the title.
     file_name: str | None = None
     original: bytes = b"%PDF-1.4 fake original"
@@ -915,6 +940,48 @@ class FakePaperless:
     async def get_document_suggestions(self, document_id: int) -> Suggestions:
         """`DocumentReader.get_document_suggestions` (the `suggestions` action)."""
         return self._sub(document_id).suggestions
+
+    async def ask(self, question: str, *, document_id: int | None) -> ChatAnswer:
+        """`AiReader.ask` (ChatStreamingView), answering from the documents that match.
+
+        Paperless checks the global `view_document` permission, then that AI is on, then the
+        document (unknown: 400, hidden: 403). The language model is replaced by a lookup: the
+        documents (at most three) that share a word with the question are the sources, and the
+        answer lists their titles; none match, Paperless's no-content sentence.
+        """
+        if not self.user.has("view_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        if not self.state.ai_enabled:
+            raise ai_disabled()
+        if document_id is None:
+            candidates = [d for d in self.state.documents if d.visible_to(self.user)]
+        else:
+            candidates = [self._sub(document_id)]
+        words = _words(question)
+        found = [d for d in candidates if words & _words(f"{d.title} {d.content}")][:3]
+        if not found:
+            return ChatAnswer(answer=CHAT_NO_CONTENT, truncated=False, sources=())
+        titles = ", ".join(d.title for d in found)
+        return ChatAnswer(
+            answer=f"The documents that match are: {titles}.",
+            truncated=False,
+            sources=tuple(ChatSource(id=d.id, title=d.title) for d in found),
+        )
+
+    async def get_ai_suggestions(self, document_id: int) -> AiSuggestions:
+        """`AiReader.get_ai_suggestions` (the `ai_suggestions` action).
+
+        Paperless needs `change_document` on the document (403) before it looks at AI (400):
+        the owner, anyone for an unowned document, or a user with a change grant.
+        """
+        document = self._sub(document_id)
+        if not document.changeable_by(self.user):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        if not self.state.ai_enabled:
+            raise ai_disabled()
+        return document.ai_suggestions
 
 
 type _Match = Callable[[FakeDocument], bool]

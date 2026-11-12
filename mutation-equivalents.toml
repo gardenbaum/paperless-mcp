@@ -119,8 +119,8 @@ function_hash = "5b94a1da0677"
 reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated spelling of Content-Type or Content-Disposition reads the same header."
 
 [[equivalent]]
-mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁrequest__mutmut_16"
-function_hash = "fc5e72e6430c"
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁrequest__mutmut_19"
+function_hash = "d8b329d2b758"
 reason = "stream=None is falsy like stream=False, and httpx2 treats both as 'read the body now'."
 
 [[equivalent]]
@@ -129,18 +129,18 @@ function_hash = "2dcbf2a82a73"
 reason = "httpx2.Request upper-cases the method, so 'get' sends the same request as 'GET'."
 
 [[equivalent]]
-mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_build__mutmut_19"
-function_hash = "76861ea63095"
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_build__mutmut_22"
+function_hash = "7364580e6837"
 reason = "HTTP header names are case-insensitive in httpx2.Headers: 'Accept' and 'accept' set the same header."
 
 [[equivalent]]
-mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_build__mutmut_20"
-function_hash = "76861ea63095"
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_build__mutmut_23"
+function_hash = "7364580e6837"
 reason = "HTTP header names are case-insensitive in httpx2.Headers: 'Accept' and 'accept' set the same header."
 
 [[equivalent]]
-mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁget__mutmut_10"
-function_hash = "3064b7b18af2"
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁget__mutmut_15"
+function_hash = "bc9a82a1c3a1"
 reason = "httpx2.Request upper-cases the method, so 'get' sends the same request as 'GET'."
 
 [[equivalent]]
@@ -262,3 +262,18 @@ reason = "httpx upper-cases the method when it builds the request, so \"post\" i
 mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_create__mutmut_11"
 function_hash = "ede9da9c5a8e"
 reason = "linked is only read in a truth test (`linked and isinstance(...)`), so None and False behave alike."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁstream_post__mutmut_11"
+function_hash = "afcc90128759"
+reason = "httpx2.Request upper-cases the method, so 'post' sends the same request as 'POST'."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.ai.x__without_delimiter_stub__mutmut_7"
+function_hash = "89442233199e"
+reason = "A length of the whole delimiter is never reached: partition() already removed every complete delimiter, so no answer can end with it."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.ai.xǁPaperlessAiReaderǁget_ai_suggestions__mutmut_6"
+function_hash = "0b79ab9c6026"
+reason = "retry=None is falsy like retry=False, so the request is not retried either way."

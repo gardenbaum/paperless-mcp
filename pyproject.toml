@@ -120,6 +120,7 @@ filterwarnings = [
 ]
 markers = [
     "e2e: runs against the real Paperless stack of tests/e2e/compose.yaml (`just e2e`)",
+    "ai_e2e: needs a Paperless with AI enabled and an LLM backend (`just e2e-ai`); skips otherwise",
     "decision(id): the test guards the Backlog decision with this id, e.g. \"decision-1\"",
     "contract(method): a contract test of this port method, e.g. \"InstanceReader.get_overview\"",
 ]

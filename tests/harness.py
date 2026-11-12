@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from paperless_mcp.domain.errors import PaperlessMcpError
     from paperless_mcp.domain.instance import InstanceOverview
     from paperless_mcp.domain.ports import (
+        AiReader,
         DocumentReader,
         DocumentWriter,
         InstanceReader,
@@ -72,6 +73,7 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     tasks: TaskReader | None = None,
     document_writes: DocumentWriter | None = None,
     taxonomy_writes: TaxonomyWriter | None = None,
+    ai: AiReader | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
     startup_timeout: float = 2.0,
@@ -83,8 +85,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
 ) -> FastMCP:
     """The assembled server, with `reader` in place of the Paperless adapter.
 
-    `taxonomy`, `documents`, `tasks` and the two writers default to `reader` if that is a fake,
-    else to the seeded admin's fake (which refuses writes unless it was created to allow them).
+    `taxonomy`, `documents`, `tasks`, `ai` and the two writers default to `reader` if that is a
+    fake, else to the seeded admin's fake (which refuses writes unless created to allow them).
     `sleep` and `clock` replace the real ones the task wait uses. `toolsets`, `read_only` and
     `disabled_tools` go to the server settings; `catalogue` replaces the tools the server
     offers, to try toolsets that do not exist yet. `max_download_bytes` replaces the download
@@ -108,6 +110,7 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
             tasks=tasks or fake,
             document_writes=document_writes or fake,
             taxonomy_writes=taxonomy_writes or fake,
+            ai=ai or fake,
         ),
         sleep=sleep,
         clock=clock,
