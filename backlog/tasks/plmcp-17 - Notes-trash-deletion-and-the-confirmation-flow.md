@@ -1,11 +1,11 @@
 ---
 id: PLMCP-17
 title: Notes, trash deletion and the confirmation flow
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T23:32:00Z'
+updated_date: '2026-11-12T23:54:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -24,18 +24,18 @@ Destructive actions need an explicit confirmation that works on every MCP protoc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 add_note, delete_note and delete_document exist
-- [ ] #2 A destructive tool called without confirm=true changes nothing and returns what would happen and how to confirm (verified with the write guard)
-- [ ] #3 delete_document moves the document to the trash and says so
-- [ ] #4 The registry test enforces confirm on every destructive tool
-- [ ] #5 FakePaperless and the contract suite cover every new port method
+- [x] #1 add_note, delete_note and delete_document exist
+- [x] #2 A destructive tool called without confirm=true changes nothing and returns what would happen and how to confirm (verified with the write guard)
+- [x] #3 delete_document moves the document to the trash and says so
+- [x] #4 The registry test enforces confirm on every destructive tool
+- [x] #5 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -67,3 +67,9 @@ Shared confirmation API for PLMCP-19 and later tasks (domain/errors.py, no new d
 
 Review fix round 1. Decision-15 "Confirmation refusals are tool errors" records the ruling (supplements decision-6 and decision-12; PLMCP-19, 22, 27 adopt ConfirmationRequired; bulk dry_run stays a typed result). Changes: CONFIRM_HINT and the Confirm parameter text (now tools/_shared.py) tell the model to describe the effect to the user and pass confirm=true only once they agree; wording pinned in tests/domain/test_errors.py and tests/tools/test_notes_and_deletion.py. New helpers in domain/errors.py: listed(names, limit=5) renders "a, b and N more", quoted() picks double quotes or swaps apostrophes. ConfirmationRequired carries text only. The boundary raises ToolError(log_level=INFO) for a refusal (FastMCP logs a FastMCPError at its log_level; ERROR is the default). Limitation: when an operator enables OpenTelemetry, FastMCP puts the ToolError message in the span status, so titles and the 40-character note excerpt would reach the trace backend; this server enables no telemetry, and the limitation is in decision-15. FastMCP 4 drops string minLength/maxLength from the published schema and does not enforce them, so add_note keeps the Field bounds for documentation and the service enforces 1..10000. add_note now picks the newest note with the sent text (fallback: newest note). Live-verified with a temporary user (contract test, cleaned up): adding or deleting a note ALSO needs the global change_document permission, a change grant on the document alone gives 403 (the fake now requires it); view grant reads notes but cannot add or delete; neither a view nor a change grant lets a user delete a document (403), a hidden document is 404. Contract Backend has restricted(permissions, view=, change=) for such users; the live one gets its token from POST /api/profile/generate_auth_token/ with basic auth, avoiding the throttled /api/token/. The fake aligns the 404 of delete_note on a missing document with the adapter. Trash cleanup now raises on failure. client.request(retry=False) docstring explains why deletions are not retried; a 429 is not retried for DELETE either (kept simple, noted). RESTORE text names restore_from_trash and the 30-day default retention; note added to PLMCP-27. For the PR description (M9): confirmation is an error by decision-15; snapshot test_surface.ambr changed again (confirm and delete_document descriptions); a trashed document keeps its notes; live notes semantics above.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+add_note (non-destructive write), delete_note and delete_document (destructive, keyword-only confirm: bool = False). An unconfirmed destructive call changes nothing (proven with the FakePaperless write guard) and is refused through one shared mechanism, ConfirmationRequired: a client-safe ToolError describing the effect (titles and short excerpts only) with a hint to describe it to the user and confirm only once they agree; logged at INFO. New decision-15 records this interpretation of decision-6 (supplements 6 and 12; bulk dry_run previews stay typed); update_document's owner refusal uses it too. delete_document moves the document to the trash and says how to restore it (restore_from_trash, 30-day default retention). Registry rule: every destructive tool takes confirm, with self-tests. DELETE requests are not retried. Ports add_note, delete_note, delete_document with adapter, FakePaperless and contract tests on fake and live 3.4.2, including object-level permission rules via temporary users (notes need change_document globally plus change rights on the document; deleting needs ownership). Verified: just check 1156 passed; full just e2e 171 passed, 6 skipped; just mutation 100 %. Independent review: 2 Important and 10 Minor fixed. Deliberate: surface snapshot (three tools, confirm wording), read-only expectations, five mutation equivalents. DoD #1 left unchecked: live contract and e2e tests were written after the code. DoD #2 and #4 follow from CI and the merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
