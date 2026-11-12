@@ -1,11 +1,11 @@
 ---
 id: PLMCP-15
 title: Toolset selection and read-only mode
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T18:39:00Z'
+updated_date: '2026-11-12T18:45:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -24,18 +24,18 @@ The user wants to be able to do everything, but the default tool list must stay 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 PAPERLESS_MCP_TOOLSETS (list or all, default core), PAPERLESS_MCP_READ_ONLY and PAPERLESS_MCP_DISABLED_TOOLS control which tools are visible
-- [ ] #2 Read-only mode leaves only tools with read_only_hint (registry test)
-- [ ] #3 Startup fails with a clear message when the filters leave zero tools
-- [ ] #4 Toolsets whose Paperless capability is missing (e.g. AI disabled) are hidden automatically
-- [ ] #5 The contract snapshot covers the profiles default, all and read-only
+- [x] #1 PAPERLESS_MCP_TOOLSETS (list or all, default core), PAPERLESS_MCP_READ_ONLY and PAPERLESS_MCP_DISABLED_TOOLS control which tools are visible
+- [x] #2 Read-only mode leaves only tools with read_only_hint (registry test)
+- [x] #3 Startup fails with a clear message when the filters leave zero tools
+- [x] #4 Toolsets whose Paperless capability is missing (e.g. AI disabled) are hidden automatically
+- [x] #5 The contract snapshot covers the profiles default, all and read-only
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -62,3 +62,9 @@ Deliberate snapshot change: tests/tools/__snapshots__/test_surface.ambr regenera
 
 Review round 1: tests take the default profile from ServerSettings (toolsets=None in the harness) and run budget, registry and profile snapshots on a fake with ai_enabled=True. Capability hiding is now one Visibility rule registered in create_server whose tags each lifespan entry replaces (no accumulation; a server follows AI on/off across starts). Filters that alone leave no tool fail in create_server before any request, via the new TOOL_TOOLSETS table (registry-tested against tags); the lifespan keeps the capability case. Registry tags rule covers resources, templates and prompts. ALL_TOOLSETS lives in domain/toolsets.py (tools may not import settings). Malformed JSON and unknown names give clear messages with suggestions. Deliberate snapshot change: 3 new entries (resources and prompts per profile), nothing else changed. test_seeding_is_idempotent no longer asserts instance-wide document counts.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Toolset selection: PAPERLESS_MCP_TOOLSETS (comma list or JSON array, or all; default core), PAPERLESS_MCP_READ_ONLY and PAPERLESS_MCP_DISABLED_TOOLS decide the visible surface through FastMCP's enable/disable visibility in the composition root. Read-only hides every tool whose central annotation lacks read_only_hint (non-vacuous self-tests with synthetic providers). Unknown names and filters that leave zero tools fail at startup with a clear message (suggestions via difflib) before any Paperless request; a toolset whose capability is known to be missing (ai_enabled False) is hidden by one replaceable rule per server after the startup probe (unknown or unreachable keeps it visible). Every tool, resource, template and prompt must carry exactly one toolset tag; new TOOL_TOOLSETS table checked against the tags. Surface snapshots for the profiles default, all and read-only (tools, templates, resources, prompts). Handoff to PLMCP-20 recorded as its acceptance criterion (ai joins the default). test_seeding_is_idempotent no longer asserts instance-wide counts. Verified: just check 517 passed, 100 %; just e2e 83 passed. Independent review: 2 Important and 6 Minor fixed. Deliberate: snapshot restructured per profile (content per tool unchanged) and extended. DoD #1 left unchecked: some registry tests and the CLI/stdio tests were written after the code and not run red. DoD #4 is checked by the merge itself.
+<!-- SECTION:FINAL_SUMMARY:END -->
