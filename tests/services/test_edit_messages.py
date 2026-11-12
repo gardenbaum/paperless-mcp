@@ -112,6 +112,8 @@ async def cases() -> dict[str, str]:
         "owner without confirm": {"owner": "admin"},
         "unseen link": {"custom_fields": {"e2e-documentlink": [99]}},
         "unknown tag": {"tags_add": ["e2e-new"]},
+        "blank tag name": {"tags_add": [" "], "create_missing_tags": True},
+        "long tag name": {"tags_set": ["x" * 129], "create_missing_tags": True},
         "unknown tag to remove": {"tags_remove": ["e2e-financ"]},
         "unknown owner id": {"owner": 99, "confirm": True},
     }

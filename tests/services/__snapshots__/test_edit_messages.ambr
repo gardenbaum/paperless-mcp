@@ -1,6 +1,7 @@
 # serializer version: 1
 # name: test_the_errors_of_an_update
   dict({
+    'blank tag name': 'A tag to create has a blank name. Hint: Name the tag, or leave it out.',
     'blank title': 'The title cannot be blank. Hint: Pass a title, or leave it out to keep the current one.',
     'clear and set correspondent': 'correspondent is both set and cleared. Hint: Pass a value or list it in clear, not both.',
     'clear and set document type': 'document_type is both set and cleared. Hint: Pass a value or list it in clear, not both.',
@@ -12,6 +13,7 @@
     'field set and removed': 'A custom field is both set and removed. Hint: Set it or remove it, not both.',
     'field set twice': "Custom field 'e2e-string' is given twice. Hint: Name each field once, by name or by id.",
     'link without permission': 'Insufficient permissions. A document link needs change permission on the linked document. Hint: Linking documents also changes the linked ones: you need change permission there.',
+    'long tag name': "The tag name 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'… is longer than 128 characters. Hint: Use a shorter tag name.",
     'long title': 'The title is longer than 128 characters. Hint: Shorten the title.',
     'no change permission': "The Paperless user may not change this document. Hint: Ask the document's owner for change permission.",
     'nothing': 'Nothing to change: no field was given. Hint: Pass at least one field to change, e.g. title or tags_add.',

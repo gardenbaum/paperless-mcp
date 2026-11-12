@@ -149,6 +149,17 @@ def _refuse_orphans(
         raise Validation(message, hint=hint)
 
 
+def _check_new_names(values: Iterable[int | str]) -> None:
+    """Refuse tag names Paperless would reject, before the first tag is created."""
+    for name in (v for v in values if isinstance(v, str)):
+        if not name:
+            message = "A tag to create has a blank name."
+            raise Validation(message, hint="Name the tag, or leave it out.")
+        if len(name) > MAX_TITLE:
+            message = f"The tag name {name[:30]!r}… is longer than {MAX_TITLE} characters."
+            raise Validation(message, hint="Use a shorter tag name.")
+
+
 def _linked(value: JsonValue | None) -> set[int]:
     """The document ids in a document link value; nothing for any other value."""
     return {n for n in value if isinstance(n, int)} if isinstance(value, list) else set()
@@ -350,6 +361,8 @@ class DocumentEditor:
                     raise NotFound(error.message, hint=hint) from None
             return found
 
+        if not (edit.tags_add or edit.tags_remove or edit.tags_set is not None):
+            return _Tags(add=[], remove=[], replace=None, parents={})  # tags are not touched
         create = edit.create_missing_tags
         removed = [
             t for t in await ids(edit.tags_remove, create=False, adding=False) if isinstance(t, int)
@@ -358,6 +371,7 @@ class DocumentEditor:
         parents = {n: t.parent for n, t in items.items()}
         if edit.tags_set is not None:
             replace = await ids(edit.tags_set, create=create)
+            _check_new_names(replace)
             return _Tags(add=[], remove=removed, replace=replace, parents=parents)
         added = await ids(edit.tags_add, create=create)
         if {t for t in added if isinstance(t, int)} & set(removed):
@@ -365,6 +379,7 @@ class DocumentEditor:
             raise Validation(message, hint="Name each tag once, in tags_add or in tags_remove.")
         known = [t for t in added if isinstance(t, int)]
         _refuse_orphans(current, known, removed, items)
+        _check_new_names(added)
         return _Tags(add=added, remove=removed, replace=None, parents=parents)
 
     async def _create(self, tags: _Tags) -> dict[str, tuple[str, int]]:
@@ -374,7 +389,10 @@ class DocumentEditor:
         try:
             for name in names:
                 if fold(name) not in created:
-                    created[fold(name)] = (name, (await self._tag_writer.create_tag(name)).id)
+                    try:
+                        created[fold(name)] = (name, (await self._tag_writer.create_tag(name)).id)
+                    except PaperlessMcpError as error:
+                        raise _after_creation(error, created, linked=False) from None
         finally:
             if created:
                 self._taxonomy.invalidate("tag")

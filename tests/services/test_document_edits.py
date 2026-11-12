@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from paperless_mcp.domain.documents import DocumentDetail, DocumentRecord, DocumentUpdate
-    from paperless_mcp.domain.taxonomy import TaxonomyKind
+    from paperless_mcp.domain.taxonomy import TaxonomyItem, TaxonomyKind
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
@@ -62,8 +62,15 @@ class Recording(FakePaperless):
 
 @final
 class Setup:
-    def __init__(self, user: str = ADMIN[0], *, can_change: bool = False) -> None:
+    def __init__(
+        self, user: str = ADMIN[0], *, can_change: bool = False, only: frozenset[str] | None = None
+    ) -> None:
         self.state: FakeState = seeded()
+        if only is not None:
+            self.state.users = [
+                replace(u, is_superuser=False, permissions=only) if u.username == user else u
+                for u in self.state.users
+            ]
         if can_change:
             self.state.users = [
                 replace(u, permissions=u.permissions | {"change_document"})
@@ -880,3 +887,82 @@ async def test_a_link_does_not_turn_another_error_into_a_permission_error() -> N
         _ = await setup.update(custom_fields={"e2e-documentlink": [1]}, title="New")
 
     assert (raised.value.message, raised.value.hint) == ("Bad.", "Fix.")
+
+
+# --- Codex review: untouched taxonomy, partially created tags ---------------------------------
+
+
+async def test_a_title_only_update_needs_no_permission_to_list_tags() -> None:
+    setup = Setup(ADMIN[0], only=frozenset({"view_document", "change_document"}))
+
+    detail = await setup.update(title="Only the title")
+
+    assert detail.title == "Only the title"
+    assert setup.document.tags == [1, 2, 4]  # untouched
+    assert [t.id for t in detail.tags] == [1, 2, 4]
+    assert [p.model_fields_set for p in setup.fake.patches] == [{"title"}]
+
+
+async def test_naming_tags_still_needs_the_permission_to_list_them() -> None:
+    setup = Setup(ADMIN[0], only=frozenset({"view_document", "change_document"}))
+
+    with pytest.raises(PermissionDenied):
+        _ = await setup.update(tags_add=["e2e-private"])
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 129])
+async def test_a_tag_name_that_cannot_be_created_is_refused_before_any_tag_is_created(
+    name: str,
+) -> None:
+    setup = Setup()
+
+    with pytest.raises(Validation) as raised:
+        _ = await setup.update(tags_add=["good-new", name], create_missing_tags=True)
+
+    assert raised.value.hint
+    assert len(setup.state.tags) == 4
+
+
+@final
+class FailsOn(Recording):
+    """A fake whose tag creation fails for one name."""
+
+    def __init__(self, state: FakeState, bad: str, error: PaperlessMcpError) -> None:
+        super().__init__(state, user=ADMIN[0])
+        self.bad: str = bad
+        self.error: PaperlessMcpError = error
+
+    @override
+    async def create_tag(self, name: str) -> TaxonomyItem:
+        if name == self.bad:
+            raise self.error
+        return await super().create_tag(name)
+
+
+async def test_a_later_creation_failing_reports_the_earlier_tags_and_keeps_class_and_hint() -> None:
+    setup = Setup()
+    setup.fake = FailsOn(setup.state, "second", PermissionDenied("Nope.", hint="Ask."))
+    setup.taxonomy = TaxonomyResolver(setup.fake, StaticTokenProvider("t"), ttl=60.0)
+    setup.editor = DocumentEditor(
+        setup.fake,
+        setup.fake,
+        setup.fake,
+        setup.taxonomy,
+        documents=DocumentService(setup.fake, setup.taxonomy, web_url=WEB),
+    )
+
+    with pytest.raises(PermissionDenied) as raised:
+        _ = await setup.update(tags_add=["first", "second"], create_missing_tags=True)
+
+    assert raised.value.message == "Nope. Tags created before this failed: 'first'."
+    assert raised.value.hint == "Ask."
+    assert "first" in {t.name for t in setup.state.tags}
+    assert "first" in {t.name for t in await setup.taxonomy.items("tag")}  # cache forgot
+
+
+async def test_a_tag_name_of_exactly_the_longest_length_is_created() -> None:
+    setup = Setup()
+
+    detail = await setup.update(tags_add=["x" * 128], create_missing_tags=True)
+
+    assert "x" * 128 in {t.name for t in detail.tags}

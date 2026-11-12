@@ -229,23 +229,23 @@ function_hash = "da97df5c1f02"
 reason = "A field without a data type and one with the data type \"XXXX\" both find no check in the table and raise the same unsupported-type error (the message reads field.data_type, not the lookup key)."
 
 [[equivalent]]
-mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_24"
-function_hash = "8b18afda51ea"
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_35"
+function_hash = "177ecdf13c3c"
 reason = "create is only read in the branch for names that do not exist when adding; with adding=False the error is re-raised first, so None and False behave alike."
 
 [[equivalent]]
-mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_25"
-function_hash = "8b18afda51ea"
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_36"
+function_hash = "177ecdf13c3c"
 reason = "With adding=None, `not adding` is true exactly as with adding=False, so removal lookups re-raise unknown names the same way."
 
 [[equivalent]]
-mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_29"
-function_hash = "8b18afda51ea"
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_40"
+function_hash = "177ecdf13c3c"
 reason = "With adding=False an unknown tag is re-raised before create is read, so create=True changes nothing for removals."
 
 [[equivalent]]
-mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_43"
-function_hash = "8b18afda51ea"
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_tags__mutmut_55"
+function_hash = "177ecdf13c3c"
 reason = "For tags_set the plan reads only replace and parents; the remove list is used solely when merging add/remove, which tags_set excludes."
 
 [[equivalent]]
@@ -257,3 +257,8 @@ reason = "httpx upper-cases the method when it builds the request, so \"patch\" 
 mutant = "paperless_mcp.paperless.taxonomy.xǁPaperlessTaxonomyWriterǁcreate_tag__mutmut_16"
 function_hash = "a19efbc1c607"
 reason = "httpx upper-cases the method when it builds the request, so \"post\" is sent as POST."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.document_edits.xǁDocumentEditorǁ_create__mutmut_11"
+function_hash = "ede9da9c5a8e"
+reason = "linked is only read in a truth test (`linked and isinstance(...)`), so None and False behave alike."
