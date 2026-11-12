@@ -167,23 +167,55 @@ def test_open_issue_creates_the_label_and_the_issue_when_none_is_open() -> None:
         ("label", "create"),
         ("issue", "create"),
     ]
-    assert gh.calls[0] == (
-        "gh", "issue", "list", "--label", "drift", "--state", "open", "--json", "number",
-    )  # fmt: skip
+    list_open = ("gh", "issue", "list", "--label", "drift", "--state", "open", "--json", "number")
+    assert gh.calls[0] == list_open
     assert gh.calls[1][:6] == ("gh", "label", "create", "drift", "--force", "--description")
-    assert gh.calls[2] == (
-        "gh", "issue", "create", "--title", "T", "--label", "drift", "--body", "B",
-    )  # fmt: skip
+    create = ("gh", "issue", "create", "--title", "T", "--label", "drift", "--body", "B")
+    assert gh.calls[2] == create
 
 
 def test_open_issue_updates_the_open_one_instead_of_creating_a_duplicate() -> None:
     gh = FakeGh([{"number": 7}])
 
-    message = scheduled_jobs.open_issue(gh, title="T", label="drift", body="B")
+    message = scheduled_jobs.open_issue(gh, title="T", label="drift", body="Headline\nmore")
 
     assert message == "updated issue #7"
-    assert [call[1:3] for call in gh.calls] == [("issue", "list"), ("issue", "edit")]
-    assert gh.calls[1] == ("gh", "issue", "edit", "7", "--title", "T", "--body", "B")
+    assert [call[1:3] for call in gh.calls] == [
+        ("issue", "list"),
+        ("issue", "edit"),
+        ("issue", "comment"),
+    ]
+    assert gh.calls[1] == (
+        "gh",
+        "issue",
+        "edit",
+        "7",
+        "--title",
+        "T",
+        "--body",
+        "Headline\nmore",
+    )
+    assert gh.calls[2] == ("gh", "issue", "comment", "7", "--body", "Drift still present. Headline")
+
+
+def test_close_issue_closes_every_open_one_with_a_comment() -> None:
+    gh = FakeGh([{"number": 7}, {"number": 9}])
+
+    message = scheduled_jobs.close_issue(gh, label="drift", comment="Resolved")
+
+    assert message == "closed issue #7, #9"
+    assert [call[1:5] for call in gh.calls[1:]] == [
+        ("issue", "close", "7", "--comment"),
+        ("issue", "close", "9", "--comment"),
+    ]
+    assert gh.calls[1][-1] == "Resolved"
+
+
+def test_close_issue_does_nothing_when_none_is_open() -> None:
+    gh = FakeGh([])
+
+    assert scheduled_jobs.close_issue(gh, label="drift", comment="Resolved") == "no open issue"
+    assert len(gh.calls) == 1
 
 
 def test_run_returns_the_output_of_the_command() -> None:
@@ -234,10 +266,18 @@ def test_mutation_summary_without_tested_mutants_says_so() -> None:
 def run_main(
     argv: list[str], *, stdin: str = "", gh: FakeGh | None = None
 ) -> tuple[int, str, FakeGh]:
-    out = io.StringIO()
+    code, out, _, runner = run_main_err(argv, stdin=stdin, gh=gh)
+    assert isinstance(runner, FakeGh)
+    return code, out, runner
+
+
+def run_main_err(
+    argv: list[str], *, stdin: str = "", gh: FakeGh | FakeDocker | None = None
+) -> tuple[int, str, str, FakeGh | FakeDocker]:
+    out, err = io.StringIO(), io.StringIO()
     runner = gh or FakeGh([])
-    code = scheduled_jobs.main(argv, stdin=io.StringIO(stdin), out=out, runner=runner)
-    return code, out.getvalue(), runner
+    code = scheduled_jobs.main(argv, stdin=io.StringIO(stdin), out=out, err=err, runner=runner)
+    return code, out.getvalue(), err.getvalue(), runner
 
 
 def test_main_latest_3x_reads_ls_remote_output_from_stdin() -> None:
@@ -246,13 +286,11 @@ def test_main_latest_3x_reads_ls_remote_output_from_stdin() -> None:
     assert (code, out) == (0, "3.10.1\n")
 
 
-def test_main_latest_reports_a_missing_release_on_stderr(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    code, out, _ = run_main(["latest", "--major", "9"], stdin=LS_REMOTE)
+def test_main_latest_reports_a_missing_release_on_stderr() -> None:
+    code, out, err, _ = run_main_err(["latest", "--major", "9"], stdin=LS_REMOTE)
 
     assert (code, out) == (1, "")
-    assert "no stable 9.x release" in capsys.readouterr().err
+    assert "no stable 9.x release" in err
 
 
 def test_main_drift_writes_the_report_and_exits_10_on_drift(tmp_path: Path) -> None:
@@ -298,3 +336,81 @@ def test_main_mutation_score_prints_the_summary(tmp_path: Path) -> None:
 
     assert code == 0
     assert "Mutation score: 80.0 %" in out
+
+
+def test_a_report_with_exactly_the_limit_lists_everything_without_a_more_line(
+    tmp_path: Path,
+) -> None:
+    files = {f"doc{n:03}.md": "x" for n in range(scheduled_jobs.MAX_LISTED)}
+    vendored = vendored_tree(tmp_path / "a", version="3.4.2", files={})
+    fresh = vendored_tree(tmp_path / "b", version="3.5.0", files=files)
+
+    report = scheduled_jobs.render_report(scheduled_jobs.compare_vendored(vendored, fresh))
+
+    assert "`doc049.md`" in report
+    assert "more" not in report.replace("Files added", "")
+
+
+class FakeDocker:
+    """Answers `docker manifest inspect` for the images in `published`; fails for the others."""
+
+    def __init__(self, published: set[str]) -> None:
+        self.published: set[str] = published
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, command: Sequence[str]) -> str:
+        self.calls.append(tuple(command))
+        if command[-1] not in self.published:
+            message = f"no such manifest: {command[-1]}"
+            raise scheduled_jobs.JobError(message)
+        return "{}"
+
+
+IMAGE = "ghcr.io/x/p"
+
+
+def test_latest_published_release_takes_the_highest_tag_whose_image_exists() -> None:
+    docker = FakeDocker({f"{IMAGE}:3.4.2", f"{IMAGE}:3.0.0"})
+
+    chosen = scheduled_jobs.latest_published_release(LS_REMOTE, 3, IMAGE, docker)
+
+    assert chosen == "3.4.2"
+    assert [call[-1] for call in docker.calls] == [f"{IMAGE}:3.10.1", f"{IMAGE}:3.4.2"]
+    assert docker.calls[0][:3] == ("docker", "manifest", "inspect")
+
+
+def test_latest_published_release_fails_when_no_image_exists() -> None:
+    with pytest.raises(scheduled_jobs.JobError, match=r"no published image for any 3\.x release"):
+        _ = scheduled_jobs.latest_published_release(LS_REMOTE, 3, IMAGE, FakeDocker(set()))
+
+
+def test_main_latest_with_an_image_skips_unpublished_releases_and_says_so() -> None:
+    docker = FakeDocker({f"{IMAGE}:3.4.2"})
+
+    code, out, err, _ = run_main_err(
+        ["latest", "--major", "3", "--image", IMAGE], stdin=LS_REMOTE, gh=docker
+    )
+
+    assert (code, out) == (0, "3.4.2\n")
+    assert "3.10.1 has no published image" in err
+
+
+def test_main_release_accepts_a_release_of_the_major_version() -> None:
+    assert run_main(["release", "3.5.1", "--major", "3"])[:2] == (0, "3.5.1\n")
+
+
+@pytest.mark.parametrize("text", ["3.5", "v3.5.1", "3.5.1-beta", "4.0.0", ""])
+def test_main_release_rejects_anything_else(text: str) -> None:
+    code, out, err, _ = run_main_err(["release", text, "--major", "3"])
+
+    assert (code, out) == (1, "")
+    assert "scheduled_jobs:" in err
+
+
+def test_main_close_issue_closes_the_open_one() -> None:
+    code, out, gh = run_main(
+        ["close-issue", "--label", "drift", "--comment", "Resolved"], gh=FakeGh([{"number": 4}])
+    )
+
+    assert (code, out) == (0, "closed issue #4\n")
+    assert gh.calls[-1][:4] == ("gh", "issue", "close", "4")

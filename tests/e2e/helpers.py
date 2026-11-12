@@ -25,7 +25,13 @@ DATA_TYPES = (
     *("string", "url", "date", "boolean", "integer", "float", "monetary"),
     *("documentlink", "longtext"),
 )
-LOGS_HINT = "docker compose -f tests/e2e/compose.yaml logs paperless"
+# `just e2e-latest` runs its own compose project and overlay (and sets PAPERLESS_E2E_VERSION).
+_LATEST_FILES = "-f tests/e2e/compose.yaml -f tests/e2e/compose.latest.yaml"
+LOGS_HINT = (
+    f"docker compose -p paperless-mcp-e2e-latest {_LATEST_FILES} logs paperless"
+    if "PAPERLESS_E2E_VERSION" in os.environ
+    else "docker compose -f tests/e2e/compose.yaml logs paperless"
+)
 
 type Json = dict[str, object]
 

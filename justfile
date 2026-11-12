@@ -177,7 +177,13 @@ e2e-latest:
     #!/usr/bin/env bash
     set -euo pipefail
     repo="${PAPERLESS_REPO:-https://github.com/paperless-ngx/paperless-ngx}"
-    PAPERLESS_E2E_VERSION="${PAPERLESS_E2E_VERSION:-$(git ls-remote --tags --refs "$repo" | uv run python scripts/scheduled_jobs.py latest --major 3)}"
+    image="ghcr.io/paperless-ngx/paperless-ngx"
+    if [[ -n "${PAPERLESS_E2E_VERSION:-}" ]]; then
+        PAPERLESS_E2E_VERSION="$(uv run python scripts/scheduled_jobs.py release "$PAPERLESS_E2E_VERSION" --major 3)"
+    else
+        # Highest 3.x.y tag whose image is already published (a tag can precede its image).
+        PAPERLESS_E2E_VERSION="$(git ls-remote --tags --refs "$repo" | uv run python scripts/scheduled_jobs.py latest --major 3 --image "$image")"
+    fi
     export PAPERLESS_E2E_VERSION
     export PAPERLESS_E2E_PORT="${PAPERLESS_E2E_PORT:-8011}"
     compose=(docker compose -p paperless-mcp-e2e-latest -f tests/e2e/compose.yaml -f tests/e2e/compose.latest.yaml)
@@ -217,38 +223,52 @@ audit:
 # tests only, takes a few minutes. Report-only until PLMCP-21 adds the 80 % gate. Extra arguments
 # select mutants, e.g. `just mutation 'paperless_mcp.services.instance*'`. Delete mutants/ to
 # start from scratch. Writes mutants/summary.md (the score as Markdown) and mutants/survivors.txt.
+[positional-arguments]
 mutation *selection:
     #!/usr/bin/env bash
     set -euo pipefail
-    uv run mutmut run {{selection}}
+    if (( $# > 0 )); then
+        echo "note: with a selection the score aggregates earlier results of mutants/ (delete it for a clean score)" >&2
+    fi
+    uv run mutmut run "$@"
     uv run mutmut export-cicd-stats
     uv run mutmut results > mutants/survivors.txt
     uv run python scripts/scheduled_jobs.py mutation-score mutants/mutmut-cicd-stats.json | tee mutants/summary.md
 
 # Compare the vendored Paperless schema and docs with the latest stable 3.x release (weekly job;
 # design 9.5). Needs docker and the network; changes nothing in the repository. DRIFT_REPORT=path
-# also copies the report there; DRIFT_OPEN_ISSUE=1 opens (or refreshes) the one open GitHub issue
-# labelled paperless-drift through `gh`.
+# also copies the report there (drift-issue reads it); the exit code is 0 with or without drift.
 drift-check:
     #!/usr/bin/env bash
     set -euo pipefail
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     repo="${PAPERLESS_REPO:-https://github.com/paperless-ngx/paperless-ngx}"
-    latest="$(git ls-remote --tags --refs "$repo" | uv run python scripts/scheduled_jobs.py latest --major 3)"
+    latest="$(git ls-remote --tags --refs "$repo" | uv run python scripts/scheduled_jobs.py latest --major 3 --image ghcr.io/paperless-ngx/paperless-ngx)"
     PAPERLESS_VERSION_OVERRIDE="$latest" PAPERLESS_DOCS_DIR="$tmp/fresh" {{just_executable()}} docs-sync-paperless
     status=0
     uv run python scripts/scheduled_jobs.py drift docs/vendor/paperless "$tmp/fresh" --report "$tmp/report.md" || status=$?
+    # 10 is DRIFT_EXIT_CODE in scripts/scheduled_jobs.py; keep the two in step.
     if (( status == 10 )); then
         cat "$tmp/report.md"
         if [[ -n "${DRIFT_REPORT:-}" ]]; then cp "$tmp/report.md" "$DRIFT_REPORT"; fi
-        if [[ "${DRIFT_OPEN_ISSUE:-}" == "1" ]]; then
-            uv run python scripts/scheduled_jobs.py open-issue \
-                --title "Vendored Paperless reference differs from the latest 3.x release" \
-                --label paperless-drift --body-file "$tmp/report.md"
-        fi
     elif (( status != 0 )); then
         exit "$status"
+    fi
+
+# Report the result of `drift-check` (its DRIFT_REPORT file) as the one GitHub issue labelled
+# paperless-drift, through `gh` (needs GH_TOKEN with issues: write): open it, or refresh it with a
+# comment; with no report file (no drift) close it. Never duplicates an open issue.
+drift-issue report="drift-report.md":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -f "{{report}}" ]]; then
+        uv run python scripts/scheduled_jobs.py open-issue \
+            --title "Vendored Paperless reference differs from the latest 3.x release" \
+            --label paperless-drift --body-file "{{report}}"
+    else
+        uv run python scripts/scheduled_jobs.py close-issue --label paperless-drift \
+            --comment "Resolved: the vendored Paperless reference matches the latest 3.x release again."
     fi
 
 # Run every pre-commit hook on all files.

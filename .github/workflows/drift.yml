@@ -16,7 +16,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: drift
@@ -30,8 +29,13 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write # only the drift-issue step has a token (GH_TOKEN)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
@@ -47,8 +51,6 @@ jobs:
         run: just drift-check
         env:
           DRIFT_REPORT: drift-report.md
-          DRIFT_OPEN_ISSUE: ${{ (github.event_name == 'schedule' || inputs.open_issue) && '1' || '' }}
-          GH_TOKEN: ${{ github.token }}
 
       - name: Publish the drift report
         run: |
@@ -57,3 +59,9 @@ jobs:
           else
             echo "No drift: the vendored Paperless reference matches the latest 3.x release." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Open, refresh or close the drift issue
+        if: ${{ github.event_name == 'schedule' || inputs.open_issue }}
+        run: just drift-issue
+        env:
+          GH_TOKEN: ${{ github.token }}
