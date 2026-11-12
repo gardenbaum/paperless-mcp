@@ -118,11 +118,11 @@ def test_the_startup_timeout_must_be_a_positive_number(
     assert invalid_fields(ServerSettings) == [("startup_timeout",)]
 
 
-def test_only_the_core_toolset_is_on_by_default() -> None:
+def test_the_core_and_ai_toolsets_are_on_by_default() -> None:
     settings = ServerSettings.model_validate({})
 
     assert (settings.toolsets, settings.read_only, settings.disabled_tools) == (
-        ("core",),
+        ("core", "ai"),
         False,
         (),
     )

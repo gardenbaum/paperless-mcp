@@ -9,6 +9,7 @@ import httpx2
 from paperless_mcp.domain.errors import (
     AuthenticationFailed,
     Conflict,
+    FeatureUnavailable,
     NotFound,
     PaperlessMcpError,
     PermissionDenied,
@@ -24,6 +25,8 @@ MAX_MESSAGE_LENGTH = 200
 # DRF keys whose messages are not about one field.
 GENERAL_KEYS = frozenset({"detail", "non_field_errors"})
 RETRY_LATER = "Try again in a moment."
+# What Paperless 3.4 answers (400, text/html) to every AI endpoint while AI is switched off.
+AI_DISABLED_BODY = "AI is required for this feature"
 
 
 def _clean(text: str) -> str:
@@ -92,9 +95,19 @@ _FIXED: dict[int, tuple[type[PaperlessMcpError], str, str | None]] = {
 }
 
 
+def ai_disabled() -> FeatureUnavailable:
+    """The error for an AI endpoint of an instance that has Paperless AI switched off."""
+    return FeatureUnavailable(
+        "Paperless AI is not enabled on this instance.",
+        hint="An administrator enables it with PAPERLESS_AI_ENABLED and an LLM backend.",
+    )
+
+
 def error_for_status(response: httpx2.Response) -> PaperlessMcpError:
     """The domain error for a non-success response."""
     status = response.status_code
+    if status == HTTPStatus.BAD_REQUEST and AI_DISABLED_BODY in response.text:
+        return ai_disabled()
     if status in _WITH_DETAILS:
         error, prefix = _WITH_DETAILS[status]
         details = _details(response)

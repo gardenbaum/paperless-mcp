@@ -5,6 +5,7 @@ import pytest
 
 from paperless_mcp.domain.errors import (
     Conflict,
+    FeatureUnavailable,
     PaperlessMcpError,
     UpstreamTimeout,
     UpstreamUnavailable,
@@ -109,3 +110,28 @@ def test_a_timeout_and_an_unreachable_paperless_say_so_and_what_to_do() -> None:
         "Paperless is unreachable.",
         "Check that Paperless is running and its URL is right.",
     )
+
+
+# --- PLMCP-20: Paperless AI switched off
+
+
+def test_a_400_saying_ai_is_required_is_a_feature_error_with_a_hint() -> None:
+    # 3.4.2 ChatStreamingView and ai_suggestions: HttpResponseBadRequest("AI is required ...")
+    mapped = error_for_status(
+        httpx2.Response(
+            400, text="AI is required for this feature", headers={"Content-Type": "text/html"}
+        )
+    )
+
+    assert type(mapped) is FeatureUnavailable
+    assert mapped.message == "Paperless AI is not enabled on this instance."
+    assert (
+        mapped.hint == "An administrator enables it with PAPERLESS_AI_ENABLED and an LLM backend."
+    )
+
+
+def test_other_400s_are_not_mistaken_for_disabled_ai() -> None:
+    mapped = error_for_status(httpx2.Response(400, json={"ai": ["Invalid AI configuration."]}))
+
+    assert type(mapped) is Validation
+    assert str(mapped) == "Paperless rejected the request: ai: Invalid AI configuration."

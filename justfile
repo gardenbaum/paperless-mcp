@@ -197,6 +197,44 @@ e2e-latest:
     "${compose[@]}" up -d
     uv run pytest -m e2e --no-cov
 
+# Run the AI E2E tests (marker `ai_e2e`) against a Paperless with AI enabled and an LLM backend the
+# developer provides through the environment (variables in tests/e2e/compose.ai.yaml); CI has no
+# such backend and does not run this. Without PAPERLESS_E2E_AI_LLM_BACKEND and
+# PAPERLESS_E2E_AI_LLM_MODEL it prints a notice and succeeds without starting anything. Own
+# compose project and port (8012), so a stack from `e2e-up` is untouched; the stack is removed
+# afterwards, container logs of a failed run land in e2e-ai-containers.log. Sends document text of
+# the test seed to the backend. The first run builds the LLM index, which can take minutes.
+e2e-ai:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${PAPERLESS_E2E_AI_LLM_BACKEND:-}" || -z "${PAPERLESS_E2E_AI_LLM_MODEL:-}" ]]; then
+        echo "e2e-ai: skipped. Set PAPERLESS_E2E_AI_LLM_BACKEND (ollama or openai-like) and" >&2
+        echo "PAPERLESS_E2E_AI_LLM_MODEL to run the AI tests; see tests/e2e/compose.ai.yaml." >&2
+        exit 0
+    fi
+    # PAPERLESS_E2E_AI_X becomes PAPERLESS_AI_X, only when set (an empty value is not "unset").
+    for name in LLM_BACKEND LLM_MODEL LLM_ENDPOINT LLM_API_KEY EMBEDDING_BACKEND EMBEDDING_MODEL \
+                EMBEDDING_ENDPOINT EMBEDDING_API_KEY; do
+        given="PAPERLESS_E2E_AI_$name"
+        if [[ -n "${!given:-}" ]]; then
+            case "$name" in
+                EMBEDDING_*) export "PAPERLESS_AI_LLM_$name=${!given}" ;;
+                *) export "PAPERLESS_AI_$name=${!given}" ;;
+            esac
+        fi
+    done
+    export PAPERLESS_E2E_PORT="${PAPERLESS_E2E_PORT:-8012}"
+    compose=(docker compose -p paperless-mcp-e2e-ai -f tests/e2e/compose.yaml -f tests/e2e/compose.ai.yaml)
+    cleanup() {
+        local status=$?
+        if (( status != 0 )); then "${compose[@]}" logs --no-color > e2e-ai-containers.log || true; fi
+        "${compose[@]}" down --volumes --remove-orphans
+    }
+    trap cleanup EXIT
+    echo "E2E against Paperless AI ($PAPERLESS_E2E_AI_LLM_BACKEND) on port $PAPERLESS_E2E_PORT"
+    "${compose[@]}" up -d
+    uv run pytest -m ai_e2e --no-cov
+
 # Stop the E2E stack and delete its volumes, so the next start is a fresh instance.
 e2e-down:
     docker compose -f tests/e2e/compose.yaml down --volumes --remove-orphans

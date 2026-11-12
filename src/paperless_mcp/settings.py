@@ -65,7 +65,8 @@ class ServerSettings(BaseSettings):
             (``PAPERLESS_MCP_STARTUP_TIMEOUT``); a Paperless that does not answer in time does
             not stop the start.
         toolsets: Toolsets whose tools are offered (``PAPERLESS_MCP_TOOLSETS``): names, or
-            ``all``; comma-separated or a JSON array. Default ``core``.
+            ``all``; comma-separated or a JSON array. Default ``core,ai``; ``ai`` is hidden
+            while Paperless AI is disabled.
         read_only: Offer only tools that do not change anything (``PAPERLESS_MCP_READ_ONLY``).
         disabled_tools: Tools never offered, whatever the toolsets say
             (``PAPERLESS_MCP_DISABLED_TOOLS``).
@@ -82,7 +83,7 @@ class ServerSettings(BaseSettings):
 
     log_level: LogLevel = "INFO"
     startup_timeout: float = Field(default=5.0, gt=0)
-    toolsets: Annotated[tuple[str, ...], NoDecode] = ("core",)
+    toolsets: Annotated[tuple[str, ...], NoDecode] = ("core", "ai")
     read_only: bool = False
     disabled_tools: Annotated[tuple[str, ...], NoDecode] = ()
     max_download_bytes: int = Field(default=512 * 1024, ge=1, le=32 * 1024 * 1024)

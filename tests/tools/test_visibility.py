@@ -1,7 +1,8 @@
 """Toolset selection, read-only mode and capabilities on the assembled server.
 
-The shipped catalogue has only the core toolset so far; the synthetic catalogue adds the toolsets
-later tasks bring (ai, bulk) so that every rule is proven for them now.
+The synthetic catalogue adds an ai tool of its own and the bulk toolset that a later task brings,
+so that every rule is proven for toolsets of any size. The shipped ai toolset is covered in
+test_ai.py.
 """
 
 from dataclasses import replace
@@ -68,7 +69,8 @@ SYNTHETIC = replace(
     toolsets=CATALOGUE.toolsets | {"ai", "bulk"},
     requires={"ai": "ai"},
 )
-CORE = set(ANNOTATIONS)
+CORE = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "core"}
+SHIPPED_AI = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "ai"}
 
 
 async def names(server: FastMCP) -> set[str]:
@@ -99,7 +101,11 @@ async def test_several_toolsets_combine() -> None:
 async def test_all_offers_every_toolset_the_server_may_offer() -> None:
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"])
 
-    assert await names(server) == CORE | {"ask_something", "bulk_change", "bulk_preview"}
+    assert await names(server) == CORE | SHIPPED_AI | {
+        "ask_something",
+        "bulk_change",
+        "bulk_preview",
+    }
 
 
 async def test_a_toolset_not_selected_takes_its_resources_with_it() -> None:
@@ -113,7 +119,8 @@ async def test_read_only_mode_offers_only_tools_with_the_read_only_hint() -> Non
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"], read_only=True)
 
     # update_document is core's first tool that changes data, so read-only mode hides it.
-    assert await names(server) == (CORE - {"update_document"}) | {"ask_something", "bulk_preview"}
+    expected = (CORE - {"update_document"}) | SHIPPED_AI | {"ask_something", "bulk_preview"}
+    assert await names(server) == expected
 
 
 async def test_disabled_tools_are_not_offered() -> None:
@@ -156,7 +163,7 @@ async def test_the_zero_tool_check_does_not_wait_for_paperless() -> None:
     with pytest.raises(InvalidConfiguration, match="No tools are left"):
         _ = create_server(
             paperless_settings(refused_url()),
-            server_settings(disabled_tools=list(CORE)),
+            server_settings(disabled_tools=list(ANNOTATIONS)),
         )
 
 
@@ -169,7 +176,7 @@ async def test_a_toolset_whose_capability_is_missing_is_hidden() -> None:
 async def test_a_toolset_whose_capability_is_present_is_offered() -> None:
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["core", "ai"])
 
-    assert await names(server) == CORE | {"ask_something"}
+    assert await names(server) == CORE | SHIPPED_AI | {"ask_something"}
 
 
 async def test_an_unknown_capability_leaves_the_toolset_visible() -> None:

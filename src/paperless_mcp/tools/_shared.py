@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from fastmcp import Context
 
     from paperless_mcp.services.document_edits import DocumentEditor
+    from paperless_mcp.services.ai import AiService
     from paperless_mcp.services.documents import DocumentService
     from paperless_mcp.services.files import FileService
     from paperless_mcp.services.instance import InstanceService
@@ -30,7 +31,7 @@ if TYPE_CHECKING:
     from paperless_mcp.services.taxonomy import TaxonomyResolver
 
 # Every toolset; each tool carries exactly one of them as its only tag.
-TOOLSETS: Final = frozenset({"core"})
+TOOLSETS: Final = frozenset({"core", "ai"})
 
 # Tools whose result is an image or a file as MCP content blocks, with no output schema and no
 # structured content (decision-11); every other tool has a typed return model (decision-4).
@@ -48,11 +49,13 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "download_document": "core",
     "get_task": "core",
     "update_document": "core",
+    "ask_paperless_ai": "ai",
+    "get_ai_suggestions": "ai",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
 # hides such a toolset when the capability is known to be missing.
-TOOLSET_REQUIRES: Final[Mapping[str, str]] = {}
+TOOLSET_REQUIRES: Final[Mapping[str, str]] = {"ai": "ai"}
 
 # The one place tool titles and behaviour hints are set (decision-4), keyed by tool name.
 ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
@@ -113,6 +116,20 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
+    # The AI tools change nothing in Paperless but are not repeatable (a language model answers
+    # differently each time) and reach beyond it: Paperless sends document text to its LLM backend.
+    "ask_paperless_ai": ToolAnnotations(
+        title="Ask Paperless AI",
+        read_only_hint=True,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    "get_ai_suggestions": ToolAnnotations(
+        title="Get AI suggestions",
+        read_only_hint=True,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
 }
 
 logger = logging.getLogger(__name__)
@@ -131,6 +148,7 @@ class Services:
     files: FileService
     edits: DocumentEditor
     tasks: TaskService
+    ai: AiService
 
 
 def services(ctx: Context) -> Services:
