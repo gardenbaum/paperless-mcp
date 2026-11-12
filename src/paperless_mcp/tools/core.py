@@ -17,7 +17,9 @@ from paperless_mcp.domain.documents import (
 )
 from paperless_mcp.domain.errors import PaperlessMcpError
 from paperless_mcp.domain.instance import InstanceOverview
+from paperless_mcp.domain.tasks import TaskReport
 from paperless_mcp.domain.taxonomy import TaxonomyKind, TaxonomyListing
+from paperless_mcp.services.tasks import MAX_WAIT_SECONDS
 from paperless_mcp.tools._shared import ANNOTATIONS, boundary, services
 
 TOOLSET = "core"
@@ -164,6 +166,35 @@ async def search_documents(  # noqa: PLR0913 -- one parameter per filter, descri
         ordering=ordering,
     )
     return await services(ctx).documents.search(names, filters, page=page, page_size=page_size)
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["get_task"])
+@boundary
+async def get_task(
+    ctx: Context,
+    task_id: Annotated[
+        str, Field(description="The task id an upload or other background work returned.")
+    ],
+    wait_seconds: Annotated[
+        int,
+        Field(
+            ge=0,
+            le=MAX_WAIT_SECONDS,
+            description=(
+                f"Wait up to this many seconds (at most {MAX_WAIT_SECONDS}) for the task to end; "
+                "0 reads it once."
+            ),
+        ),
+    ] = 0,
+) -> TaskReport:
+    """Follow a Paperless background task, such as an upload being processed, to its result.
+
+    Reports state (pending, started, success, failure, revoked), the error message of a failed
+    task and the document id once known. With wait_seconds it polls until the task ends or the
+    wait is used up; wait says which: finished, timed_out (still running, call again) or
+    not_requested. Needs the permission to view tasks in Paperless.
+    """
+    return await services(ctx).tasks.get(task_id, wait_seconds=wait_seconds)
 
 
 @provider.resource(

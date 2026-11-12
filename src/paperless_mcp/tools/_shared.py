@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
     from paperless_mcp.services.documents import DocumentService
     from paperless_mcp.services.instance import InstanceService
+    from paperless_mcp.services.tasks import TaskService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
 
 # Every toolset; each tool carries exactly one of them as its only tag.
@@ -48,6 +49,12 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
+    "get_task": ToolAnnotations(
+        title="Get task",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
 }
 
 logger = logging.getLogger(__name__)
@@ -63,6 +70,7 @@ class Services:
     instance: InstanceService
     taxonomy: TaxonomyResolver
     documents: DocumentService
+    tasks: TaskService
 
 
 def services(ctx: Context) -> Services:

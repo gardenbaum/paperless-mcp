@@ -369,6 +369,136 @@
         'idempotentHint': True,
         'openWorldHint': False,
         'readOnlyHint': True,
+        'title': 'Get task',
+      }),
+      'description': '''
+        Follow a Paperless background task, such as an upload being processed, to its result.
+        
+        Reports state (pending, started, success, failure, revoked), the error message of a failed
+        task and the document id once known. With wait_seconds it polls until the task ends or the
+        wait is used up; wait says which: finished, timed_out (still running, call again) or
+        not_requested. Needs the permission to view tasks in Paperless.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'task_id': dict({
+            'description': 'The task id an upload or other background work returned.',
+            'type': 'string',
+          }),
+          'wait_seconds': dict({
+            'default': 0,
+            'description': 'Wait up to this many seconds (at most 30) for the task to end; 0 reads it once.',
+            'maximum': 30,
+            'minimum': 0,
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'task_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'get_task',
+      'outputSchema': dict({
+        'description': 'A task, and what waiting for it did.',
+        'properties': dict({
+          'created': dict({
+            'format': 'date-time',
+            'type': 'string',
+          }),
+          'document_id': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The document the task created or changed, once known.',
+          }),
+          'finished': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date-time',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null while the task is running.',
+          }),
+          'message': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Why the task failed; null otherwise.',
+          }),
+          'state': dict({
+            'description': 'pending, started, success, failure or revoked.',
+            'enum': list([
+              'pending',
+              'started',
+              'success',
+              'failure',
+              'revoked',
+            ]),
+            'type': 'string',
+          }),
+          'task_id': dict({
+            'type': 'string',
+          }),
+          'task_type': dict({
+            'description': 'E.g. consume_file (an upload).',
+            'type': 'string',
+          }),
+          'wait': dict({
+            'description': 'not_requested: wait_seconds was 0, so the task was read once; finished: the task ended within the wait (see state); timed_out: still running after waited_seconds, ask again.',
+            'enum': list([
+              'not_requested',
+              'finished',
+              'timed_out',
+            ]),
+            'type': 'string',
+          }),
+          'waited_seconds': dict({
+            'type': 'number',
+          }),
+        }),
+        'required': list([
+          'task_id',
+          'task_type',
+          'state',
+          'message',
+          'document_id',
+          'created',
+          'finished',
+          'wait',
+          'waited_seconds',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get task',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
         'title': 'List taxonomy',
       }),
       'description': '''

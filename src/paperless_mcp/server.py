@@ -5,7 +5,9 @@ server's lifespan connects: it owns the one ``httpx2.AsyncClient`` of the proces
 services on it and probes Paperless before the first request is served.
 """
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -18,17 +20,24 @@ from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import RetryPolicy, connect
 from paperless_mcp.paperless.documents import PaperlessDocumentReader
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
+from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
 from paperless_mcp.services.documents import DocumentService
 from paperless_mcp.services.instance import InstanceService
+from paperless_mcp.services.tasks import TaskService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
 from paperless_mcp.tools import core
 from paperless_mcp.tools._shared import SERVICES, Services
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from paperless_mcp.domain.ports import DocumentReader, InstanceReader, TaxonomyReader
+    from paperless_mcp.domain.ports import (
+        DocumentReader,
+        InstanceReader,
+        TaskReader,
+        TaxonomyReader,
+    )
     from paperless_mcp.paperless.client import PaperlessClient
     from paperless_mcp.settings import PaperlessSettings, ServerSettings
 
@@ -54,6 +63,7 @@ class Ports:
     instance: InstanceReader
     taxonomy: TaxonomyReader
     documents: DocumentReader
+    tasks: TaskReader
 
 
 def paperless_ports(client: PaperlessClient) -> Ports:
@@ -62,6 +72,7 @@ def paperless_ports(client: PaperlessClient) -> Ports:
         instance=PaperlessInstanceReader(client),
         taxonomy=PaperlessTaxonomyReader(client),
         documents=PaperlessDocumentReader(client),
+        tasks=PaperlessTaskReader(client),
     )
 
 
@@ -70,6 +81,8 @@ def create_server(
     settings: ServerSettings,
     *,
     ports: Callable[[PaperlessClient], Ports] = paperless_ports,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    clock: Callable[[], float] = time.monotonic,
 ) -> FastMCP:
     """Assemble the MCP server.
 
@@ -77,6 +90,8 @@ def create_server(
         paperless: Where Paperless is and the token to use.
         settings: Settings of this server.
         ports: Builds the ports on the connected client; tests pass fakes here.
+        sleep: Waits between task polls; tests pass one that does not wait.
+        clock: Measures the task wait; tests pass the clock their ``sleep`` advances.
 
     Returns:
         The server. Starting it (its lifespan) raises the probe's ``PaperlessMcpError`` when
@@ -100,6 +115,7 @@ def create_server(
                 instance=InstanceService(adapters.instance),
                 taxonomy=taxonomy,
                 documents=DocumentService(adapters.documents, taxonomy, web_url=web_url),
+                tasks=TaskService(adapters.tasks, sleep=sleep, clock=clock),
             )
             overview = await services.instance.probe(settings.startup_timeout)
             if overview is None:
