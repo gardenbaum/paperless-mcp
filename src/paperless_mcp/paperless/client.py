@@ -182,10 +182,12 @@ class PaperlessClient:
         data: Mapping[str, str] | None = None,
         files: Files | None = None,
         timeout: float | None = None,  # noqa: ASYNC109 -- the HTTP request timeout, not a cancel scope
+        retry: bool = True,
     ) -> httpx2.Response:
         """Send a request and return the successful response.
 
-        ``timeout`` replaces the client's default timeout (seconds) for this request.
+        ``timeout`` replaces the client's default timeout (seconds) for this request. With
+        ``retry=False`` transient statuses are not retried, for calls that cost money.
 
         Raises:
             PaperlessMcpError: The matching subclass for an error status or a failed transport.
@@ -193,7 +195,7 @@ class PaperlessClient:
         outgoing = self._build(
             method, path, params=params, json=json, data=data, files=files, timeout=timeout
         )
-        response = await self._exchange(outgoing, stream=False)
+        response = await self._exchange(outgoing, stream=False, retry=retry)
         if response.is_error:
             raise error_for_status(response)
         return response
@@ -245,6 +247,10 @@ class PaperlessClient:
         included, may take ``max_seconds`` in total. Past either limit the connection is closed
         and the bytes that arrived come back ``truncated``; running out of time before the first
         byte is a timeout. A POST is never retried: the answer may cost a model call.
+
+        Deliberately asymmetric with ``download``: running out of time or size keeps the partial
+        text (a half answer is useful and marked ``truncated``), whereas a connection that breaks
+        mid-body is an error and the partial text is discarded, like a broken download.
 
         Raises:
             PaperlessMcpError: The matching subclass for an error status, a failed transport, or
@@ -304,7 +310,9 @@ class PaperlessClient:
             timeout=httpx2.USE_CLIENT_DEFAULT if limit is None else limit,
         )
 
-    async def _exchange(self, outgoing: httpx2.Request, *, stream: bool) -> httpx2.Response:
+    async def _exchange(
+        self, outgoing: httpx2.Request, *, stream: bool, retry: bool = True
+    ) -> httpx2.Response:
         """Send ``outgoing``, retrying transient statuses; the last response, errors included.
 
         With ``stream`` the body is not read yet: the caller reads and closes the response.
@@ -314,7 +322,7 @@ class PaperlessClient:
         while True:
             response = await self._send(outgoing, stream=stream)
             logger.debug("%s %s -> %d (attempt %d)", method, path, response.status_code, attempt)
-            delay = self._retry_delay(response, attempt, waited)
+            delay = self._retry_delay(response, attempt, waited) if retry else None
             if delay is None:
                 return response
             if stream:
@@ -340,6 +348,7 @@ class PaperlessClient:
         data: Mapping[str, str] | None = None,
         files: Files | None = None,
         timeout: float | None = None,  # noqa: ASYNC109 -- the HTTP request timeout, not a cancel scope
+        retry: bool = True,
     ) -> M:
         """Send a request and parse the JSON body of the successful response into ``model``.
 
@@ -347,7 +356,14 @@ class PaperlessClient:
             PaperlessMcpError: An error response, a failed transport, or a body ``model`` rejects.
         """
         response = await self.request(
-            method, path, params=params, json=json, data=data, files=files, timeout=timeout
+            method,
+            path,
+            params=params,
+            json=json,
+            data=data,
+            files=files,
+            timeout=timeout,
+            retry=retry,
         )
         return parse(response, model)
 
@@ -358,9 +374,10 @@ class PaperlessClient:
         *,
         params: Params | None = None,
         timeout: float | None = None,  # noqa: ASYNC109 -- the HTTP request timeout, not a cancel scope
+        retry: bool = True,
     ) -> M:
         """GET ``path`` and parse the JSON body into ``model`` (see ``call``)."""
-        return await self.call("GET", path, model, params=params, timeout=timeout)
+        return await self.call("GET", path, model, params=params, timeout=timeout, retry=retry)
 
     def _retry_delay(self, response: httpx2.Response, attempt: int, waited: float) -> float | None:
         """Seconds to wait before the next attempt, or None if the response is final."""

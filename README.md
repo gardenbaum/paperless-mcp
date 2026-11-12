@@ -40,6 +40,8 @@ not logged, and an internal error is logged by type, with its traceback only at 
 | `PAPERLESS_MCP_LOG_LEVEL` | `DEBUG`, `INFO` (default), `WARNING`, `ERROR` or `CRITICAL` |
 | `PAPERLESS_MCP_STARTUP_TIMEOUT` | Seconds the startup check may take (default 5) |
 | `PAPERLESS_MCP_MAX_DOWNLOAD_BYTES` | Largest original or archive file `download_document` attaches, in bytes (default 524288, at most 33554432); larger files are reported with their link only. Attached files travel base64-encoded (a third larger) in one MCP message and cost the client context tokens; the FastMCP client reads at most 1 MiB per HTTP event by default, so raise this only if your clients allow it |
+| `PAPERLESS_MCP_TOOLSETS` | Toolsets to offer, comma-separated or `all` (default `core,ai`). `ai` (`ask_paperless_ai`, `get_ai_suggestions`) appears only while Paperless AI is enabled. These tools are read-only, but each call makes Paperless query its LLM backend, which may cost money and sends document text to it: a client that auto-approves read-only tools will run them unasked. Use `core` to leave them out |
+| `PAPERLESS_MCP_DISABLED_TOOLS` | Tools never offered, e.g. `ask_paperless_ai,get_ai_suggestions` |
 
 ## Development
 

@@ -139,11 +139,17 @@ class Owned:
     Attributes:
         owner: The owning user's id; None means shared, visible to every user.
         viewers: Ids of users with an object-level view grant.
+        editors: Ids of users with an object-level change grant.
     """
 
     id: int
     owner: int | None = None
     viewers: set[int] = field(default_factory=set[int])
+    editors: set[int] = field(default_factory=set[int])
+
+    def changeable_by(self, user: FakeUser) -> bool:
+        """Paperless's `has_perms_owner_aware(user, "change_document", obj)`."""
+        return user.is_superuser or self.owner in {None, user.id} or user.id in self.editors
 
     def visible_to(self, user: FakeUser) -> bool:
         """Paperless's `permitted_object_ids` (group grants are not modelled yet)."""
@@ -966,9 +972,13 @@ class FakePaperless:
     async def get_ai_suggestions(self, document_id: int) -> AiSuggestions:
         """`AiReader.get_ai_suggestions` (the `ai_suggestions` action).
 
-        Paperless needs `change_document` on the document (403) before it looks at AI (400).
+        Paperless needs `change_document` on the document (403) before it looks at AI (400):
+        the owner, anyone for an unowned document, or a user with a change grant.
         """
         document = self._sub(document_id)
+        if not document.changeable_by(self.user):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
         if not self.state.ai_enabled:
             raise ai_disabled()
         return document.ai_suggestions

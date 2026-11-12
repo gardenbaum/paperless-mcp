@@ -8,9 +8,11 @@ backend (the live parameter skips on a stack without AI). Their assertions hold 
 language model: shape, visibility and existence, never the wording of an answer.
 """
 
+import uuid
 from typing import TYPE_CHECKING
 
 import pytest
+from e2e.helpers import pdf
 from fakes.paperless import FakeDocument, FakePaperless, seeded
 
 from paperless_mcp.domain.ai import AiSuggestions
@@ -76,6 +78,20 @@ async def test_ai_suggestions_of_a_missing_or_hidden_document(backend: Backend) 
         _ = await backend.reader.ai.get_ai_suggestions(MISSING)
     with pytest.raises(PermissionDenied):
         _ = await backend.reader.ai.get_ai_suggestions(private)
+
+
+@pytest.mark.contract(SUGGEST)
+async def test_ai_suggestions_need_the_right_to_change_the_document(backend: Backend) -> None:
+    title = f"ai-shared-{uuid.uuid4().hex[:12]}"
+    shared = backend.upload(title, f"{title}.pdf", pdf(title), "application/pdf")
+    backend.share_read_only(shared)
+
+    # the restricted user sees the document but may not change it: 403 comes before the AI check
+    assert await backend.reader.documents.get_document_titles([shared]) == {shared: title}
+    with pytest.raises(PermissionDenied):
+        _ = await backend.reader.ai.get_ai_suggestions(shared)
+    with pytest.raises(FeatureUnavailable):  # the owner passes that check and meets disabled AI
+        _ = await backend.admin.ai.get_ai_suggestions(shared)
 
 
 # --- With AI on (the fake; a live Paperless in `just e2e-ai`) -----------------------------------

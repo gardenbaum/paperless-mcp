@@ -66,7 +66,10 @@ class ServerSettings(BaseSettings):
             not stop the start.
         toolsets: Toolsets whose tools are offered (``PAPERLESS_MCP_TOOLSETS``): names, or
             ``all``; comma-separated or a JSON array. Default ``core,ai``; ``ai`` is hidden
-            while Paperless AI is disabled.
+            while Paperless AI is disabled. The ai tools are read-only but each call may cost
+            money (Paperless asks its LLM backend), so clients that auto-approve read-only tools
+            will run them unasked: set ``core`` to leave them out, or name them in
+            ``PAPERLESS_MCP_DISABLED_TOOLS`` (``ask_paperless_ai,get_ai_suggestions``).
         read_only: Offer only tools that do not change anything (``PAPERLESS_MCP_READ_ONLY``).
         disabled_tools: Tools never offered, whatever the toolsets say
             (``PAPERLESS_MCP_DISABLED_TOOLS``).

@@ -27,6 +27,8 @@ GENERAL_KEYS = frozenset({"detail", "non_field_errors"})
 RETRY_LATER = "Try again in a moment."
 # What Paperless 3.4 answers (400, text/html) to every AI endpoint while AI is switched off.
 AI_DISABLED_BODY = "AI is required for this feature"
+# What the chat answers (400, text/html) to a document_id that names no document.
+DOCUMENT_NOT_FOUND_BODY = "Document not found"
 
 
 def _clean(text: str) -> str:
@@ -99,7 +101,10 @@ def ai_disabled() -> FeatureUnavailable:
     """The error for an AI endpoint of an instance that has Paperless AI switched off."""
     return FeatureUnavailable(
         "Paperless AI is not enabled on this instance.",
-        hint="An administrator enables it with PAPERLESS_AI_ENABLED and an LLM backend.",
+        hint=(
+            "An administrator enables it with PAPERLESS_AI_ENABLED and an LLM backend, in the "
+            "environment or under Settings → Application Configuration."
+        ),
     )
 
 
@@ -108,6 +113,8 @@ def error_for_status(response: httpx2.Response) -> PaperlessMcpError:
     status = response.status_code
     if status == HTTPStatus.BAD_REQUEST and AI_DISABLED_BODY in response.text:
         return ai_disabled()
+    if status == HTTPStatus.BAD_REQUEST and response.text.strip() == DOCUMENT_NOT_FOUND_BODY:
+        return NotFound(_FIXED[HTTPStatus.NOT_FOUND][1])
     if status in _WITH_DETAILS:
         error, prefix = _WITH_DETAILS[status]
         details = _details(response)

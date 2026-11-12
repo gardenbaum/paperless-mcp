@@ -340,3 +340,83 @@ async def test_bytes_that_are_not_utf8_are_replaced_not_fatal(make_client: Clien
     found = await PaperlessAiReader(make_client(Chat(body))).ask("?", document_id=None)
 
     assert found.answer == "ok \ufffd end"
+
+
+async def test_ai_suggestions_are_never_retried(make_client: ClientFactory) -> None:
+    # every attempt is a model call that may cost money
+    server = Suggestions(httpx2.Response(503, json={"ai": ["AI backend request timed out."]}))
+
+    with pytest.raises(UpstreamUnavailable):
+        _ = await PaperlessAiReader(make_client(server)).get_ai_suggestions(1)
+
+    assert len(server.sent) == 1
+
+
+# --- PLMCP-20 review
+
+
+async def test_the_failure_sentence_after_part_of_an_answer_is_still_an_error(
+    make_client: ClientFactory,
+) -> None:
+    # the generator can fail midway: the sentence is appended to what was already streamed.
+    # Only this exact wording is recognised; if Paperless rewords it the text reads as an answer.
+    server = Chat(stream("The invoice is ", CHAT_ERROR))
+
+    with pytest.raises(UpstreamUnavailable, match="could not generate"):
+        _ = await PaperlessAiReader(make_client(server)).ask("?", document_id=None)
+
+
+async def test_a_cut_inside_the_metadata_delimiter_leaves_no_delimiter_stub(
+    make_client: ClientFactory,
+) -> None:
+    server = Chat(stream("Answer" + METADATA_DELIMITER))
+    reader = PaperlessAiReader(make_client(server), max_bytes=len("Answer") + 9)
+
+    found = await reader.ask("?", document_id=None)
+
+    assert (found.answer, found.truncated) == ("Answer", True)
+
+
+async def test_text_that_merely_ends_like_the_delimiter_is_kept_when_not_truncated(
+    make_client: ClientFactory,
+) -> None:
+    found = await PaperlessAiReader(make_client(Chat(stream("Done.\n")))).ask("?", document_id=None)
+
+    assert (found.answer, found.truncated) == ("Done.\n", False)
+
+
+async def test_another_400_for_a_question_about_a_document_stays_a_validation_error(
+    make_client: ClientFactory,
+) -> None:
+    other = httpx2.Response(400, text="Invalid request", headers={"Content-Type": "text/html"})
+
+    with pytest.raises(Validation):
+        _ = await PaperlessAiReader(make_client(Chat(other))).ask("?", document_id=9)
+
+
+async def test_not_found_without_a_document_is_passed_on(make_client: ClientFactory) -> None:
+    missing = httpx2.Response(400, text="Document not found", headers={"Content-Type": "text/html"})
+
+    with pytest.raises(NotFound, match="does not exist"):
+        _ = await PaperlessAiReader(make_client(Chat(missing))).ask("?", document_id=None)
+
+
+@pytest.mark.parametrize("cut", [1, len(METADATA_DELIMITER) - 1])
+async def test_every_length_of_delimiter_stub_is_removed(
+    make_client: ClientFactory, cut: int
+) -> None:
+    server = Chat(stream("Answer" + METADATA_DELIMITER[:cut] + "tail beyond the limit"))
+    reader = PaperlessAiReader(make_client(server), max_bytes=len("Answer") + cut)
+
+    found = await reader.ask("?", document_id=None)
+
+    assert (found.answer, found.truncated) == ("Answer", True)
+
+
+async def test_the_failure_sentence_is_found_before_trailing_whitespace(
+    make_client: ClientFactory,
+) -> None:
+    server = Chat(stream("Part ", CHAT_ERROR + "\n"))
+
+    with pytest.raises(UpstreamUnavailable):
+        _ = await PaperlessAiReader(make_client(server)).ask("?", document_id=None)

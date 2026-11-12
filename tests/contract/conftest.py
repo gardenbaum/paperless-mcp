@@ -117,6 +117,12 @@ class Upload(Protocol):
     def __call__(self, title: str, filename: str, content: bytes, mime_type: str) -> int: ...
 
 
+class Share(Protocol):
+    """Makes a document the admin's own and shares it with the restricted user to view only."""
+
+    def __call__(self, document_id: int) -> None: ...
+
+
 @dataclass(frozen=True)
 class Backend:
     """One Paperless, seen through the seeded superuser, restricted user and blind user.
@@ -135,6 +141,8 @@ class Backend:
     # A new document of the admin to write to, after its consumption; the live one is deleted when
     # the test ends. Its tags and custom fields are whatever consumption gave it.
     new_document: Callable[[], int]
+    # Shares an uploaded document view-only with the restricted user (see `Share`).
+    share_read_only: Share
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
     # (`just e2e-latest` runs the suite against a newer release than the pinned one).
     expected_version: str
@@ -189,6 +197,17 @@ def fake_new_document(state: FakeState) -> Callable[[], int]:
     return new_document
 
 
+def fake_share(state: FakeState) -> Share:
+    def share_fake(document_id: int) -> None:
+        [document] = [d for d in state.documents if d.id == document_id]
+        [admin] = [u for u in state.users if u.username == ADMIN[0]]
+        [reader] = [u for u in state.users if u.username == READER[0]]
+        document.owner = admin.id
+        document.viewers = {reader.id}
+
+    return share_fake
+
+
 def fake_backend(*, ai_enabled: bool = False) -> Backend:
     """The fake's backend; the E2E stack of `just e2e` has AI off, so that is the default."""
     state = seeded()
@@ -200,6 +219,7 @@ def fake_backend(*, ai_enabled: bool = False) -> Backend:
         consume=fake_consume(state),
         upload=fake_upload(state),
         new_document=fake_new_document(state),
+        share_read_only=fake_share(state),
         expected_version=VERSION,
     )
 
@@ -230,6 +250,18 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
         created.append(document)
         return document
 
+    def user_id(api: httpx2.Client) -> int:
+        user = cast("dict[str, dict[str, object]]", api.get("/api/ui_settings/").json())["user"]
+        return int(cast("int", user["id"]))
+
+    def share_live(document_id: int) -> None:
+        none: dict[str, list[int]] = {"users": [], "groups": []}
+        permissions = {"view": {"users": [user_id(stack.reader)], "groups": []}, "change": none}
+        _ = stack.admin.patch(
+            f"/api/documents/{document_id}/",
+            json={"owner": user_id(stack.admin), "set_permissions": permissions},
+        ).raise_for_status()
+
     try:
         async with httpx2.AsyncClient(base_url=stack.base_url, timeout=30.0) as http:
 
@@ -246,6 +278,7 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
                 consume=consume_live,
                 upload=upload_live,
                 new_document=new_live_document,
+                share_read_only=share_live,
                 expected_version=EXPECTED_VERSION,
             )
     finally:

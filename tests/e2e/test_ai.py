@@ -7,6 +7,7 @@ tests marked `ai_e2e` need a Paperless with an LLM backend and skip without one 
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from contract.conftest import build_llm_index, live_backend
 from fastmcp import Client
 from harness import paperless_settings, server_settings
 
@@ -42,6 +43,8 @@ async def test_the_ai_tools_are_hidden_while_paperless_ai_is_disabled(stack: Sta
 async def test_the_assistant_answers_and_suggests_through_the_server(stack: Stack) -> None:
     if stack.admin.get("/api/ui_settings/").json()["settings"]["ai_enabled"] is not True:
         pytest.skip(SKIPPED)
+    async with live_backend(stack) as live:
+        await build_llm_index(stack, live)
     settings = paperless_settings(BASE_URL, stack.admin_token)
     async with Client(create_server(settings, server_settings())) as client:
         tools = {tool.name for tool in await client.list_tools()}
@@ -56,5 +59,6 @@ async def test_the_assistant_answers_and_suggests_through_the_server(stack: Stac
     answer, suggestions = asked.structured_content, suggested.structured_content
     assert answer is not None
     assert str(cast("object", answer["answer"])).strip()
+    assert cast("list[object]", answer["sources"]), "the answer named no source document"
     assert suggestions is not None
     assert suggestions["document_id"] == stack.seeded.public_document

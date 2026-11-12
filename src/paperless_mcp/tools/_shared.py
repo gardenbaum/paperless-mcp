@@ -116,18 +116,20 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
-    # The AI tools change nothing in Paperless but are not repeatable (a language model answers
-    # differently each time) and reach beyond it: Paperless sends document text to its LLM backend.
+    # The AI tools change nothing in Paperless (read-only; repeating a call leaves the environment
+    # unchanged, which is what MCP's idempotent hint means, though the text differs) and reach
+    # beyond it: Paperless sends document text to its LLM backend (open world), at a cost per call.
+    # Read-only clients may therefore auto-confirm paid calls; see PAPERLESS_MCP_TOOLSETS.
     "ask_paperless_ai": ToolAnnotations(
         title="Ask Paperless AI",
         read_only_hint=True,
-        idempotent_hint=False,
+        idempotent_hint=True,
         open_world_hint=True,
     ),
     "get_ai_suggestions": ToolAnnotations(
         title="Get AI suggestions",
         read_only_hint=True,
-        idempotent_hint=False,
+        idempotent_hint=True,
         open_world_hint=True,
     ),
 }

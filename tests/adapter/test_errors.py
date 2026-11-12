@@ -6,6 +6,7 @@ import pytest
 from paperless_mcp.domain.errors import (
     Conflict,
     FeatureUnavailable,
+    NotFound,
     PaperlessMcpError,
     UpstreamTimeout,
     UpstreamUnavailable,
@@ -125,8 +126,9 @@ def test_a_400_saying_ai_is_required_is_a_feature_error_with_a_hint() -> None:
 
     assert type(mapped) is FeatureUnavailable
     assert mapped.message == "Paperless AI is not enabled on this instance."
-    assert (
-        mapped.hint == "An administrator enables it with PAPERLESS_AI_ENABLED and an LLM backend."
+    assert mapped.hint == (
+        "An administrator enables it with PAPERLESS_AI_ENABLED and an LLM backend, in the "
+        "environment or under Settings → Application Configuration."
     )
 
 
@@ -135,3 +137,11 @@ def test_other_400s_are_not_mistaken_for_disabled_ai() -> None:
 
     assert type(mapped) is Validation
     assert str(mapped) == "Paperless rejected the request: ai: Invalid AI configuration."
+
+
+def test_a_400_saying_document_not_found_is_not_found() -> None:
+    mapped = error_for_status(
+        httpx2.Response(400, text="Document not found", headers={"Content-Type": "text/html"})
+    )
+
+    assert type(mapped) is NotFound

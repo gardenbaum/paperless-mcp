@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ValidationError
 
 from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer, ChatSource
-from paperless_mcp.domain.errors import NotFound, UpstreamUnavailable, Validation
+from paperless_mcp.domain.errors import NotFound, UpstreamUnavailable
 from paperless_mcp.paperless.documents import unseen_document
 
 if TYPE_CHECKING:
@@ -64,6 +64,14 @@ def _sources(trailer: str) -> tuple[ChatSource, ...]:
     return tuple(ChatSource(id=ref.id, title=ref.title) for ref in found.references)
 
 
+def _without_delimiter_stub(answer: str) -> str:
+    """``answer`` without the start of the metadata delimiter a cut left at its end."""
+    for length in range(len(METADATA_DELIMITER) - 1, 0, -1):
+        if answer.endswith(METADATA_DELIMITER[:length]):
+            return answer[:-length]
+    return answer
+
+
 class PaperlessAiReader:
     """``AiReader`` over the Paperless REST API."""
 
@@ -82,8 +90,8 @@ class PaperlessAiReader:
     async def ask(self, question: str, *, document_id: int | None) -> ChatAnswer:
         """See ``AiReader.ask``.
 
-        3.4.2 answers 400 "Document not found" to an unknown document and 403 to one the user
-        may not see; the first one is the only 400 a valid question can get besides disabled AI.
+        3.4.2 answers 400 "Document not found" to an unknown document (the error mapping makes
+        that ``NotFound``) and 403 to one the user may not see.
         """
         body: dict[str, object] = {"q": question}
         if document_id is not None:
@@ -92,23 +100,29 @@ class PaperlessAiReader:
             streamed = await self._client.stream_post(
                 CHAT_PATH, json=body, max_bytes=self._max_bytes, max_seconds=self._max_seconds
             )
-        except Validation:
+        except NotFound:
             if document_id is None:
                 raise
             raise unseen_document(document_id) from None
+        # Bytes cut inside a multi-byte character decode to U+FFFD at the very end of a
+        # truncated answer; that is accepted (the answer is marked truncated anyway).
         text = streamed.content.decode(errors="replace")
         answer, _, trailer = text.partition(METADATA_DELIMITER)
-        if answer.strip() == CHAT_ERROR:
+        # Paperless appends this sentence to whatever was streamed before the failure. Only this
+        # exact wording is recognised: if Paperless rewords it, the text reads as an answer.
+        if answer.rstrip().endswith(CHAT_ERROR):
             message = "Paperless AI could not generate a response."
             hint = "Ask again; if it keeps failing, check the LLM backend and the Paperless log."
             raise UpstreamUnavailable(message, hint=hint)
+        if streamed.truncated:
+            answer = _without_delimiter_stub(answer)
         return ChatAnswer(answer=answer, truncated=streamed.truncated, sources=_sources(trailer))
 
     async def get_ai_suggestions(self, document_id: int) -> AiSuggestions:
         """See ``AiReader.get_ai_suggestions``."""
         path = f"{DOCUMENTS_PATH}{document_id}/ai_suggestions/"
         try:
-            row = await self._client.get(path, _Suggestions, timeout=AI_TIMEOUT)
+            row = await self._client.get(path, _Suggestions, timeout=AI_TIMEOUT, retry=False)
         except NotFound:
             raise unseen_document(document_id) from None
         return AiSuggestions(

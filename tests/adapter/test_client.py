@@ -891,3 +891,40 @@ async def test_the_time_limit_covers_the_wait_for_the_response_itself() -> None:
     with pytest.raises(UpstreamTimeout):
         _ = await client.stream_post("/api/documents/chat/", json={}, max_bytes=9, max_seconds=0.05)
     await http.aclose()
+
+
+# --- PLMCP-20 review: an explicit opt-out of retries
+
+
+async def test_a_request_can_opt_out_of_retries(make_client: ClientFactory) -> None:
+    script = Script(answer(503, {"detail": "busy"}), answer(200, tag(1, "inbox")))
+
+    with pytest.raises(UpstreamUnavailable):
+        _ = await make_client(script).request("GET", "/api/tags/1/", retry=False)
+
+    assert len(script.requests) == 1
+
+
+async def test_get_and_call_pass_the_opt_out_on(make_client: ClientFactory) -> None:
+    script = Script(answer(503, {"detail": "busy"}), answer(200, tag(1, "inbox")))
+
+    with pytest.raises(UpstreamUnavailable):
+        _ = await make_client(script).get("/api/tags/1/", TagStub, retry=False)
+
+    assert len(script.requests) == 1
+
+
+async def test_retries_stay_the_default(make_client: ClientFactory) -> None:
+    script = Script(answer(503, {"detail": "busy"}), answer(200, tag(1, "inbox")))
+
+    _ = await make_client(script).get("/api/tags/1/", TagStub)
+
+    assert len(script.requests) == 2
+
+
+async def test_call_retries_by_default(make_client: ClientFactory) -> None:
+    script = Script(answer(503, {"detail": "busy"}), answer(200, tag(1, "inbox")))
+
+    _ = await make_client(script).call("GET", "/api/tags/1/", TagStub)
+
+    assert len(script.requests) == 2

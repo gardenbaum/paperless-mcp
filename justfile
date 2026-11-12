@@ -212,6 +212,9 @@ e2e-ai:
         echo "PAPERLESS_E2E_AI_LLM_MODEL to run the AI tests; see tests/e2e/compose.ai.yaml." >&2
         exit 0
     fi
+    # Only the PAPERLESS_E2E_AI_* variables count: a PAPERLESS_AI_* already exported in this shell
+    # would otherwise leak into the stack.
+    while read -r leaked; do unset "$leaked"; done < <(compgen -e | grep '^PAPERLESS_AI_' || true)
     # PAPERLESS_E2E_AI_X becomes PAPERLESS_AI_X, only when set (an empty value is not "unset").
     for name in LLM_BACKEND LLM_MODEL LLM_ENDPOINT LLM_API_KEY EMBEDDING_BACKEND EMBEDDING_MODEL \
                 EMBEDDING_ENDPOINT EMBEDDING_API_KEY; do
