@@ -9,6 +9,34 @@
           ]),
         }),
       }),
+      'description': 'A document as get_document returns it, without the include sections or the text.',
+      'mimeType': 'application/json',
+      'name': 'document',
+      'title': 'Document',
+      'uriTemplate': 'paperless://documents/{document_id}',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'description': 'A slice of the OCR text as get_document_content returns it (first 20000 characters).',
+      'mimeType': 'application/json',
+      'name': 'document_content',
+      'title': 'Document content',
+      'uriTemplate': 'paperless://documents/{document_id}/content{?offset,max_chars}',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
       'description': '''
         Every tag, correspondent, document type, storage path, custom field, saved view, user or
         group the current user may see, as JSON rows with id, name and document count.
@@ -22,6 +50,810 @@
 # ---
 # name: test_the_surface_matches_the_snapshot
   list([
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get document',
+      }),
+      'description': '''
+        Read one document: names, dates, tags, readable custom fields, notes count and web_url.
+        
+        Never returns the document text; use get_document_content for it. Custom fields are
+        rendered by type: select as its label, monetary as 'EUR 12.50', document links as the
+        linked document ids. Sections in include that the user may not read in Paperless (notes
+        and history need their own permissions) are listed in unavailable instead of failing.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'include': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'enum': list([
+                    'notes',
+                    'history',
+                    'metadata',
+                    'versions',
+                    'suggestions',
+                  ]),
+                  'type': 'string',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Extra sections: notes (their text), history (the newest 50 changes, no OCR text), metadata (file names, sizes, checksums), versions (file versions), suggestions (the classifier's correspondents, tags, types, paths, dates).",
+          }),
+        }),
+        'required': list([
+          'document_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'get_document',
+      'outputSchema': dict({
+        'description': 'A document with names, readable custom fields and what ``include`` asked for.',
+        'properties': dict({
+          'added': dict({
+            'format': 'date-time',
+            'type': 'string',
+          }),
+          'archive_serial_number': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+          }),
+          'correspondent': dict({
+            'anyOf': list([
+              dict({
+                'description': 'An object a document refers to; name is null if the user may not see it.',
+                'properties': dict({
+                  'id': dict({
+                    'type': 'integer',
+                  }),
+                  'name': dict({
+                    'anyOf': list([
+                      dict({
+                        'type': 'string',
+                      }),
+                      dict({
+                        'type': 'null',
+                      }),
+                    ]),
+                  }),
+                }),
+                'required': list([
+                  'id',
+                  'name',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+          }),
+          'created': dict({
+            'format': 'date',
+            'type': 'string',
+          }),
+          'custom_fields': dict({
+            'items': dict({
+              'description': 'A custom field\'s value, readable: select labels, "EUR 12.50", document ids.',
+              'properties': dict({
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'value': dict({
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+                'value',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'document_type': dict({
+            'anyOf': list([
+              dict({
+                'description': 'An object a document refers to; name is null if the user may not see it.',
+                'properties': dict({
+                  'id': dict({
+                    'type': 'integer',
+                  }),
+                  'name': dict({
+                    'anyOf': list([
+                      dict({
+                        'type': 'string',
+                      }),
+                      dict({
+                        'type': 'null',
+                      }),
+                    ]),
+                  }),
+                }),
+                'required': list([
+                  'id',
+                  'name',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+          }),
+          'file_metadata': dict({
+            'anyOf': list([
+              dict({
+                'description': 'What Paperless knows about the files of a document.',
+                'properties': dict({
+                  'archive_checksum': dict({
+                    'anyOf': list([
+                      dict({
+                        'type': 'string',
+                      }),
+                      dict({
+                        'type': 'null',
+                      }),
+                    ]),
+                  }),
+                  'archive_media_filename': dict({
+                    'anyOf': list([
+                      dict({
+                        'type': 'string',
+                      }),
+                      dict({
+                        'type': 'null',
+                      }),
+                    ]),
+                  }),
+                  'archive_size': dict({
+                    'anyOf': list([
+                      dict({
+                        'type': 'integer',
+                      }),
+                      dict({
+                        'type': 'null',
+                      }),
+                    ]),
+                    'description': 'Bytes; null without archive version.',
+                  }),
+                  'has_archive_version': dict({
+                    'type': 'boolean',
+                  }),
+                  'media_filename': dict({
+                    'type': 'string',
+                  }),
+                  'original_checksum': dict({
+                    'type': 'string',
+                  }),
+                  'original_filename': dict({
+                    'type': 'string',
+                  }),
+                  'original_mime_type': dict({
+                    'type': 'string',
+                  }),
+                  'original_size': dict({
+                    'description': 'Bytes.',
+                    'type': 'integer',
+                  }),
+                }),
+                'required': list([
+                  'original_filename',
+                  'original_mime_type',
+                  'original_size',
+                  'original_checksum',
+                  'media_filename',
+                  'has_archive_version',
+                  'archive_size',
+                  'archive_checksum',
+                  'archive_media_filename',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only with include metadata.',
+          }),
+          'history': dict({
+            'anyOf': list([
+              dict({
+                'description': 'The newest changes of a document, newest first.',
+                'properties': dict({
+                  'entries': dict({
+                    'items': dict({
+                      'description': 'One change of a document in its audit log; the OCR text is never part of it.',
+                      'properties': dict({
+                        'action': dict({
+                          'type': 'string',
+                        }),
+                        'actor': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                          'description': 'Username; null for system changes.',
+                        }),
+                        'changes': dict({
+                          'additionalProperties': dict({
+                          }),
+                          'description': 'Changed attribute to its old and new value, or to the m2m change.',
+                          'type': 'object',
+                        }),
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'timestamp': dict({
+                          'format': 'date-time',
+                          'type': 'string',
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'timestamp',
+                        'action',
+                        'actor',
+                        'changes',
+                      ]),
+                      'type': 'object',
+                    }),
+                    'type': 'array',
+                  }),
+                  'total': dict({
+                    'description': 'How many changes the document has in total.',
+                    'type': 'integer',
+                  }),
+                  'truncated': dict({
+                    'description': 'Older changes exist beyond the entries.',
+                    'type': 'boolean',
+                  }),
+                }),
+                'required': list([
+                  'total',
+                  'truncated',
+                  'entries',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only with include history.',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'mime_type': dict({
+            'type': 'string',
+          }),
+          'modified': dict({
+            'format': 'date-time',
+            'type': 'string',
+          }),
+          'notes': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'A note on a document.',
+                  'properties': dict({
+                    'created': dict({
+                      'anyOf': list([
+                        dict({
+                          'format': 'date-time',
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                    }),
+                    'id': dict({
+                      'type': 'integer',
+                    }),
+                    'note': dict({
+                      'type': 'string',
+                    }),
+                    'user': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'description': 'Username of the author, if known.',
+                    }),
+                  }),
+                  'required': list([
+                    'id',
+                    'note',
+                    'created',
+                    'user',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only with include notes.',
+          }),
+          'notes_count': dict({
+            'type': 'integer',
+          }),
+          'original_file_name': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+          }),
+          'owner': dict({
+            'anyOf': list([
+              dict({
+                'description': 'An object a document refers to; name is null if the user may not see it.',
+                'properties': dict({
+                  'id': dict({
+                    'type': 'integer',
+                  }),
+                  'name': dict({
+                    'anyOf': list([
+                      dict({
+                        'type': 'string',
+                      }),
+                      dict({
+                        'type': 'null',
+                      }),
+                    ]),
+                  }),
+                }),
+                'required': list([
+                  'id',
+                  'name',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Null: no owner, visible to every user.',
+          }),
+          'page_count': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+          }),
+          'storage_path': dict({
+            'anyOf': list([
+              dict({
+                'description': 'An object a document refers to; name is null if the user may not see it.',
+                'properties': dict({
+                  'id': dict({
+                    'type': 'integer',
+                  }),
+                  'name': dict({
+                    'anyOf': list([
+                      dict({
+                        'type': 'string',
+                      }),
+                      dict({
+                        'type': 'null',
+                      }),
+                    ]),
+                  }),
+                }),
+                'required': list([
+                  'id',
+                  'name',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+          }),
+          'suggestions': dict({
+            'anyOf': list([
+              dict({
+                'description': 'Suggestions with names; a name is null if the user may not see that object.',
+                'properties': dict({
+                  'correspondents': dict({
+                    'items': dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    'type': 'array',
+                  }),
+                  'dates': dict({
+                    'items': dict({
+                      'type': 'string',
+                    }),
+                    'type': 'array',
+                  }),
+                  'document_types': dict({
+                    'items': dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    'type': 'array',
+                  }),
+                  'storage_paths': dict({
+                    'items': dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    'type': 'array',
+                  }),
+                  'tags': dict({
+                    'items': dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    'type': 'array',
+                  }),
+                }),
+                'required': list([
+                  'correspondents',
+                  'tags',
+                  'document_types',
+                  'storage_paths',
+                  'dates',
+                ]),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only with include suggestions.',
+          }),
+          'tags': dict({
+            'items': dict({
+              'description': 'An object a document refers to; name is null if the user may not see it.',
+              'properties': dict({
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'title': dict({
+            'type': 'string',
+          }),
+          'unavailable': dict({
+            'default': list([
+            ]),
+            'description': 'Included sections the user may not read in Paperless.',
+            'items': dict({
+              'enum': list([
+                'notes',
+                'history',
+                'metadata',
+                'versions',
+                'suggestions',
+              ]),
+              'type': 'string',
+            }),
+            'type': 'array',
+          }),
+          'versions': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'One file version of a document.',
+                  'properties': dict({
+                    'added': dict({
+                      'format': 'date-time',
+                      'type': 'string',
+                    }),
+                    'id': dict({
+                      'type': 'integer',
+                    }),
+                    'is_root': dict({
+                      'description': 'True for the original upload.',
+                      'type': 'boolean',
+                    }),
+                    'version_label': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                    }),
+                  }),
+                  'required': list([
+                    'id',
+                    'added',
+                    'version_label',
+                    'is_root',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Only with include versions.',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'id',
+          'title',
+          'created',
+          'added',
+          'modified',
+          'archive_serial_number',
+          'owner',
+          'correspondent',
+          'document_type',
+          'storage_path',
+          'tags',
+          'custom_fields',
+          'original_file_name',
+          'mime_type',
+          'page_count',
+          'notes_count',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get document',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get document content',
+      }),
+      'description': '''
+        Read the OCR text of a document in slices of max_chars characters (default 20000).
+        
+        total_chars is the length of the whole text; while next_offset is set, pass it as offset
+        to read on. An offset past the end returns an empty slice with total_chars. Prefer
+        search_documents with a full-text query to find the passage you need first.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'max_chars': dict({
+            'default': 20000,
+            'description': 'Characters to return, at most 100000.',
+            'maximum': 100000,
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'offset': dict({
+            'default': 0,
+            'description': 'Character offset to start at.',
+            'minimum': 0,
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'get_document_content',
+      'outputSchema': dict({
+        'description': 'A slice of the OCR text of a document.',
+        'properties': dict({
+          'content': dict({
+            'type': 'string',
+          }),
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'next_offset': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Offset of the next slice, null at the end of the text.',
+          }),
+          'offset': dict({
+            'description': 'Where the slice starts, in characters.',
+            'type': 'integer',
+          }),
+          'total_chars': dict({
+            'description': 'Length of the whole text.',
+            'type': 'integer',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'offset',
+          'content',
+          'total_chars',
+          'next_offset',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get document content',
+    }),
     dict({
       '_meta': dict({
         'fastmcp': dict({

@@ -27,3 +27,5 @@ PUBLIC_ASN, PRIVATE_ASN = 2, 10
 # keeps only the 12 best-scoring terms; without it, extra indexed fields such as the ASN push the
 # one shared term out and live Paperless finds no similar document.
 PRIVATE_CONTENT = "E2E private admin only note 2026 2026 2026 2026"
+# The note on the public document: text no other seeded object (or the search tests) uses.
+PUBLIC_NOTE = "e2e remark zebra"

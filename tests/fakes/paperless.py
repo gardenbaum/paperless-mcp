@@ -32,6 +32,7 @@ from fakes.accounts import (
     PRIVATE_ASN,
     PRIVATE_CONTENT,
     PUBLIC_ASN,
+    PUBLIC_NOTE,
     READER,
     READER_PERMISSIONS,
 )
@@ -41,6 +42,12 @@ from paperless_mcp.domain.documents import (
     DocumentHit,
     DocumentPage,
     DocumentQuery,
+    DocumentRecord,
+    DocumentVersion,
+    FileMetadata,
+    HistoryEntry,
+    Note,
+    Suggestions,
 )
 from paperless_mcp.domain.errors import PermissionDenied, Validation
 from paperless_mcp.domain.instance import (
@@ -154,6 +161,11 @@ class FakeGroup:
 SEED_DAY = date(2026, 11, 11)
 
 
+NO_SUGGESTIONS = Suggestions(
+    correspondents=(), tags=(), document_types=(), storage_paths=(), dates=()
+)
+
+
 @dataclass(kw_only=True)
 class FakeDocument(Owned):
     """A document.
@@ -174,6 +186,18 @@ class FakeDocument(Owned):
     document_type: int | None = None
     storage_path: int | None = None
     custom_fields: dict[int, JsonValue] = field(default_factory=dict[int, JsonValue])
+    mime_type: str = "application/pdf"
+    page_count: int | None = 1
+    notes: list[Note] = field(default_factory=list[Note])
+    # Newest first, as Paperless sends it; a "create" entry holds the OCR text as `content`.
+    history: list[HistoryEntry] = field(default_factory=list[HistoryEntry])
+    versions: list[DocumentVersion] = field(default_factory=list[DocumentVersion])
+    suggestions: Suggestions = field(default_factory=lambda: NO_SUGGESTIONS)
+
+    @property
+    def original_filename(self) -> str:
+        """Paperless names the uploaded file after the title in the seed."""
+        return f"{self.title}.pdf"
 
 
 @dataclass(kw_only=True)
@@ -250,6 +274,26 @@ SEED_VALUES: dict[str, JsonValue] = {
 }
 
 
+def _created(document_id: int, title: str, content: str) -> HistoryEntry:
+    """The audit log entry Paperless writes when it consumes a document (it holds the text)."""
+    return HistoryEntry(
+        id=document_id * 10,
+        timestamp=datetime(2026, 11, 11, 19, 47, tzinfo=UTC),
+        action="create",
+        actor="admin",
+        changes={"title": ["None", title], "content": ["None", content]},
+    )
+
+
+def _root_version(document_id: int) -> DocumentVersion:
+    return DocumentVersion(
+        id=document_id,
+        added=datetime(2026, 11, 11, 19, 47, tzinfo=UTC),
+        version_label=None,
+        is_root=True,
+    )
+
+
 def seeded() -> FakeState:
     """A fresh state with the objects and users of the E2E seed."""
     admin = FakeUser(id=2, username=ADMIN[0], is_superuser=True, is_staff=True)
@@ -294,6 +338,25 @@ def seeded() -> FakeState:
                 storage_path=1,
                 archive_serial_number=PUBLIC_ASN,
                 custom_fields={f.id: SEED_VALUES[f.data_type] for f in fields},
+                notes=[
+                    Note(
+                        id=1,
+                        note=PUBLIC_NOTE,
+                        created=datetime(2026, 11, 11, 20, 0, tzinfo=UTC),
+                        user="admin",
+                    )
+                ],
+                history=[
+                    HistoryEntry(
+                        id=15,
+                        timestamp=datetime(2026, 11, 11, 20, 0, tzinfo=UTC),
+                        action="update",
+                        actor=None,
+                        changes={"Note Added": ["None", 1]},
+                    ),
+                    _created(1, "e2e-public-invoice", "E2E public invoice ACME 2026"),
+                ],
+                versions=[_root_version(1)],
             ),
             FakeDocument(
                 id=2,
@@ -302,6 +365,8 @@ def seeded() -> FakeState:
                 owner=admin.id,
                 archive_serial_number=PRIVATE_ASN,
                 tags=[3],
+                history=[_created(2, "e2e-private-note", PRIVATE_CONTENT)],
+                versions=[_root_version(2)],
             ),
         ],
     )
@@ -537,6 +602,107 @@ class FakePaperless:
                     finished=task.finished,
                 )
         raise not_found(task_id)
+
+    def _document(self, document_id: int) -> FakeDocument:
+        """The document if it exists (`NotFound` otherwise); callers check visibility."""
+        found = [d for d in self.state.documents if d.id == document_id]
+        if not found:
+            raise unseen_document(document_id)
+        return found[0]
+
+    def _seen(self, document_id: int) -> FakeDocument:
+        """The document for the detail view: a hidden document looks like a missing one (404)."""
+        if not self.user.has("view_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        document = self._document(document_id)
+        if not document.visible_to(self.user):
+            raise unseen_document(document_id)
+        return document
+
+    def _sub(self, document_id: int, permission: str | None = None) -> FakeDocument:
+        """The document for a sub-resource.
+
+        The global permission is checked first (403), then existence (404); a hidden document
+        is 403, which differs from the detail view.
+        """
+        for needed in ("view_document", permission):
+            if needed and not self.user.has(needed):
+                message = "The Paperless user may not perform this action."
+                raise PermissionDenied(message)
+        document = self._document(document_id)
+        if not document.visible_to(self.user):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        return document
+
+    async def get_document(self, document_id: int) -> DocumentRecord:
+        """`DocumentReader.get_document` (DocumentViewSet.retrieve, `fields=` without content)."""
+        document = self._seen(document_id)
+        return DocumentRecord(
+            id=document.id,
+            title=document.title,
+            created=document.created,
+            added=document.added,
+            modified=document.modified,
+            archive_serial_number=document.archive_serial_number,
+            owner=document.owner,
+            correspondent=document.correspondent,
+            document_type=document.document_type,
+            storage_path=document.storage_path,
+            tags=tuple(document.tags),
+            custom_fields=tuple(
+                CustomFieldValue(field=number, value=value)
+                for number, value in document.custom_fields.items()
+            ),
+            original_file_name=document.original_filename,
+            mime_type=document.mime_type,
+            page_count=document.page_count,
+            notes_count=len(document.notes),
+            versions=tuple(document.versions),
+        )
+
+    async def get_document_content(self, document_id: int) -> str:
+        """`DocumentReader.get_document_content` (retrieve with `fields=content`)."""
+        return self._seen(document_id).content
+
+    async def list_document_notes(self, document_id: int) -> tuple[Note, ...]:
+        """`DocumentReader.list_document_notes` (the `notes` action: `view_note` is required)."""
+        return tuple(self._sub(document_id, "view_note").notes)
+
+    async def list_document_history(self, document_id: int) -> tuple[HistoryEntry, ...]:
+        """`DocumentReader.list_document_history` (the `history` action: `view_logentry`).
+
+        The audit log of the create action holds the OCR text as `content`; the adapter drops it.
+        """
+        entries = self._sub(document_id, "view_logentry").history
+        return tuple(
+            entry.model_copy(
+                update={
+                    "changes": {k: v for k, v in entry.changes.items() if k != "content"},
+                }
+            )
+            for entry in entries
+        )
+
+    async def get_document_metadata(self, document_id: int) -> FileMetadata:
+        """`DocumentReader.get_document_metadata` (the `metadata` action)."""
+        document = self._sub(document_id)
+        return FileMetadata(
+            original_filename=document.original_filename,
+            original_mime_type=document.mime_type,
+            original_size=644,
+            original_checksum=f"{document.id:064x}",
+            media_filename=f"e2e/2026/{document.original_filename}",
+            has_archive_version=True,
+            archive_size=9138,
+            archive_checksum=f"{document.id + 1000:064x}",
+            archive_media_filename=f"e2e/2026/{document.original_filename}",
+        )
+
+    async def get_document_suggestions(self, document_id: int) -> Suggestions:
+        """`DocumentReader.get_document_suggestions` (the `suggestions` action)."""
+        return self._sub(document_id).suggestions
 
 
 type _Match = Callable[[FakeDocument], bool]

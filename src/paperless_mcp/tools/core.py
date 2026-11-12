@@ -9,8 +9,11 @@ from fastmcp.server.providers import LocalProvider
 from pydantic import Field, JsonValue
 
 from paperless_mcp.domain.documents import (
+    ContentSlice,
+    DocumentDetail,
     DocumentQuery,
     DocumentSearchResult,
+    Include,
     NameFilters,
     NameOrId,
     Ordering,
@@ -19,6 +22,7 @@ from paperless_mcp.domain.errors import PaperlessMcpError
 from paperless_mcp.domain.instance import InstanceOverview
 from paperless_mcp.domain.tasks import TaskReport
 from paperless_mcp.domain.taxonomy import TaxonomyKind, TaxonomyListing
+from paperless_mcp.services.documents import DEFAULT_SLICE, HISTORY_LIMIT
 from paperless_mcp.services.tasks import MAX_WAIT_SECONDS
 from paperless_mcp.tools._shared import ANNOTATIONS, boundary, services
 
@@ -27,8 +31,16 @@ TOOLSET = "core"
 LIST_LIMIT = 100
 PAGE_SIZE = 25
 UUID_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+# Most characters of document text one call returns (the default is DEFAULT_SLICE).
+MAX_SLICE = 100_000
 
 type Named = Annotated[NameOrId | None, Field(description="Name or id; see list_taxonomy.")]
+type DocumentId = Annotated[int, Field(description="Document id, from search_documents.")]
+type Offset = Annotated[int, Field(ge=0, description="Character offset to start at.")]
+type SliceSize = Annotated[
+    int,
+    Field(ge=1, le=MAX_SLICE, description="Characters to return, at most 100000."),
+]
 type Day = Annotated[date | None, Field(description="Date (YYYY-MM-DD), inclusive.")]
 
 provider = LocalProvider()
@@ -199,6 +211,89 @@ async def get_task(
     running, call again) or not_requested. Needs the permission to view tasks in Paperless.
     """
     return await services(ctx).tasks.get(task_id, wait_seconds=wait_seconds)
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["get_document"])
+@boundary
+async def get_document(
+    ctx: Context,
+    document_id: DocumentId,
+    include: Annotated[
+        list[Include] | None,
+        Field(
+            description=(
+                "Extra sections: notes (their text), history "
+                f"(the newest {HISTORY_LIMIT} changes, no OCR text), "
+                "metadata (file names, sizes, checksums), versions (file versions), "
+                "suggestions (the classifier's correspondents, tags, types, paths, dates)."
+            )
+        ),
+    ] = None,
+) -> DocumentDetail:
+    """Read one document: names, dates, tags, readable custom fields, notes count and web_url.
+
+    Never returns the document text; use get_document_content for it. Custom fields are
+    rendered by type: select as its label, monetary as 'EUR 12.50', document links as the
+    linked document ids. Sections in include that the user may not read in Paperless (notes
+    and history need their own permissions) are listed in unavailable instead of failing.
+    """
+    return await services(ctx).documents.get(document_id, tuple(include or ()))
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["get_document_content"])
+@boundary
+async def get_document_content(
+    ctx: Context,
+    document_id: DocumentId,
+    offset: Offset = 0,
+    max_chars: SliceSize = DEFAULT_SLICE,
+) -> ContentSlice:
+    """Read the OCR text of a document in slices of max_chars characters (default 20000).
+
+    total_chars is the length of the whole text; while next_offset is set, pass it as offset
+    to read on. An offset past the end returns an empty slice with total_chars. Prefer
+    search_documents with a full-text query to find the passage you need first.
+    """
+    return await services(ctx).documents.content(document_id, offset=offset, max_chars=max_chars)
+
+
+@provider.resource(
+    "paperless://documents/{document_id}",
+    name="document",
+    title="Document",
+    mime_type="application/json",
+    tags={TOOLSET},
+)
+async def document_detail(ctx: Context, document_id: int) -> dict[str, object]:
+    """A document as get_document returns it, without the include sections or the text."""
+    try:
+        detail = await services(ctx).documents.get(document_id)
+    except PaperlessMcpError as error:
+        raise ResourceError(error.describe()) from None
+    return detail.model_dump(mode="json")
+
+
+@provider.resource(
+    "paperless://documents/{document_id}/content{?offset,max_chars}",
+    name="document_content",
+    title="Document content",
+    mime_type="application/json",
+    tags={TOOLSET},
+)
+async def document_content(
+    ctx: Context, document_id: int, offset: int = 0, max_chars: int = DEFAULT_SLICE
+) -> dict[str, object]:
+    """A slice of the OCR text as get_document_content returns it (first 20000 characters)."""
+    if offset < 0 or not 1 <= max_chars <= MAX_SLICE:
+        message = f"offset must be at least 0 and max_chars between 1 and {MAX_SLICE}."
+        raise ResourceError(message)
+    try:
+        piece = await services(ctx).documents.content(
+            document_id, offset=offset, max_chars=max_chars
+        )
+    except PaperlessMcpError as error:
+        raise ResourceError(error.describe()) from None
+    return piece.model_dump(mode="json")
 
 
 @provider.resource(

@@ -1,11 +1,14 @@
 """search_documents through the in-memory client on the seeded fake."""
 
+import json
 from typing import cast
 
 import pytest
 from fakes.paperless import FakeDocument, FakePaperless, seeded
 from fastmcp import Client
 from harness import admin, serve
+from mcp.shared.exceptions import MCPError
+from mcp.types import TextResourceContents
 
 pytestmark = pytest.mark.anyio
 
@@ -63,3 +66,167 @@ async def test_bad_filters_are_tool_errors_with_a_hint(arguments: Json, message:
 
     assert result.is_error
     assert message in str(result.content)
+
+
+async def get(name: str, arguments: Json, fake: FakePaperless | None = None) -> Json:
+    async with Client(serve(fake or admin())) as client:
+        result = await client.call_tool(name, arguments)
+    assert result.structured_content is not None
+    return result.structured_content
+
+
+async def test_get_document_returns_names_readable_fields_and_a_link() -> None:
+    output = await get("get_document", {"document_id": 1})
+
+    assert output["title"] == "e2e-public-invoice"
+    assert output["correspondent"] == {"id": 1, "name": "e2e-acme"}
+    assert output["notes_count"] == 1
+    assert output["web_url"] == "http://paperless.test/documents/1/details"
+    values = {f["name"]: f["value"] for f in cast("list[Json]", output["custom_fields"])}
+    assert (values["e2e-select"], values["e2e-monetary"]) == ("alpha", "EUR 12.50")
+    for absent in ("content", "notes", "history", "file_metadata", "versions", "suggestions"):
+        assert absent not in output or output[absent] is None
+    assert output["unavailable"] == []
+
+
+async def test_get_document_include_adds_the_asked_sections() -> None:
+    output = await get(
+        "get_document", {"document_id": 1, "include": ["notes", "history", "metadata"]}
+    )
+
+    assert [n["note"] for n in cast("list[Json]", output["notes"])] == ["e2e remark zebra"]
+    history = cast("Json", output["history"])
+    assert history["total"] == 2
+    assert "ACME" not in str(history)
+    assert cast("Json", output["file_metadata"])["original_filename"] == "e2e-public-invoice.pdf"
+    assert output["versions"] is None
+
+
+async def test_a_section_the_user_may_not_read_is_listed_as_unavailable() -> None:
+    fake = FakePaperless(seeded(), user="e2e-reader")
+
+    output = await get("get_document", {"document_id": 1, "include": ["notes", "metadata"]}, fake)
+
+    assert output["unavailable"] == ["notes"]
+    assert output["notes"] is None
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"document_id": 999}, "No document 999 exists that this user may see"),
+        ({"document_id": 1, "include": ["content"]}, "Input should be"),
+    ],
+)
+async def test_get_document_errors_are_tool_errors(arguments: Json, message: str) -> None:
+    async with Client(serve(admin())) as client:
+        result = await client.call_tool("get_document", arguments, raise_on_error=False)
+
+    assert result.is_error
+    assert message in str(result.content)
+
+
+async def test_a_missing_document_error_names_the_next_tool() -> None:
+    async with Client(serve(admin())) as client:
+        result = await client.call_tool("get_document", {"document_id": 999}, raise_on_error=False)
+
+    assert "Hint: Take the id from a search_documents row." in str(result.content)
+
+
+async def test_get_document_content_returns_a_slice_with_the_next_offset() -> None:
+    state = seeded()
+    state.documents[0].content = "0123456789"
+
+    output = await get(
+        "get_document_content",
+        {"document_id": 1, "offset": 2, "max_chars": 5},
+        FakePaperless(state, user="admin"),
+    )
+
+    assert output == {
+        "document_id": 1,
+        "offset": 2,
+        "content": "23456",
+        "total_chars": 10,
+        "next_offset": 7,
+        "web_url": "http://paperless.test/documents/1/details",
+    }
+
+
+async def test_get_document_content_defaults_to_20000_characters_from_the_start() -> None:
+    state = seeded()
+    state.documents[0].content = "x" * 50_000
+
+    output = await get(
+        "get_document_content", {"document_id": 1}, FakePaperless(state, user="admin")
+    )
+
+    assert (output["offset"], len(cast("str", output["content"]))) == (0, 20_000)
+    assert (output["total_chars"], output["next_offset"]) == (50_000, 20_000)
+
+
+async def test_get_document_content_past_the_end_is_empty_with_the_total() -> None:
+    output = await get("get_document_content", {"document_id": 1, "offset": 9999})
+
+    assert (output["content"], output["total_chars"], output["next_offset"]) == ("", 28, None)
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"document_id": 999}, "No document 999"),
+        ({"document_id": 1, "offset": -1}, "greater than or equal to 0"),
+        ({"document_id": 1, "max_chars": 0}, "greater than or equal to 1"),
+        ({"document_id": 1, "max_chars": 100_001}, "less than or equal to 100000"),
+    ],
+)
+async def test_get_document_content_errors_are_tool_errors(arguments: Json, message: str) -> None:
+    async with Client(serve(admin())) as client:
+        result = await client.call_tool("get_document_content", arguments, raise_on_error=False)
+
+    assert result.is_error
+    assert message in str(result.content)
+
+
+async def read_json(uri: str, fake: FakePaperless | None = None) -> Json:
+    async with Client(serve(fake or admin())) as client:
+        [content] = await client.read_resource(uri)
+    assert isinstance(content, TextResourceContents)
+    assert content.mime_type == "application/json"
+    return cast("Json", json.loads(content.text))
+
+
+async def test_the_document_resource_is_the_detail_as_json() -> None:
+    assert await read_json("paperless://documents/1") == await get(
+        "get_document", {"document_id": 1}
+    )
+
+
+async def test_the_content_resource_is_a_slice_as_json() -> None:
+    state = seeded()
+    state.documents[0].content = "0123456789"
+    fake = FakePaperless(state, user="admin")
+
+    first = await read_json("paperless://documents/1/content", fake)
+    later = await read_json("paperless://documents/1/content?offset=4&max_chars=3", fake)
+
+    assert (first["content"], first["next_offset"], first["total_chars"]) == (
+        "0123456789",
+        None,
+        10,
+    )
+    assert (later["content"], later["offset"], later["next_offset"]) == ("456", 4, 7)
+
+
+@pytest.mark.parametrize("uri", ["paperless://documents/999", "paperless://documents/999/content"])
+async def test_a_resource_of_a_missing_document_is_an_error_with_the_hint(uri: str) -> None:
+    async with Client(serve(admin())) as client:
+        with pytest.raises(MCPError, match="No document 999 exists that this user may see"):
+            _ = await client.read_resource(uri)
+
+
+@pytest.mark.parametrize("query", ["offset=-1", "max_chars=0", "max_chars=100001"])
+async def test_the_content_resource_rejects_a_slice_out_of_range(query: str) -> None:
+    async with Client(serve(admin())) as client:
+        with pytest.raises(MCPError, match="offset must be at least 0 and max_chars between 1"):
+            _ = await client.read_resource(f"paperless://documents/1/content?{query}")

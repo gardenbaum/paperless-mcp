@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import pytest
+from fakes.accounts import PRIVATE_CONTENT, PUBLIC_ASN, PUBLIC_NOTE
 
 from paperless_mcp.domain.documents import DocumentQuery
 from paperless_mcp.domain.errors import NotFound, PermissionDenied, Validation
@@ -218,3 +219,196 @@ async def test_ordering_by_archive_serial_number_is_numeric(backend: Backend) ->
 
     assert [hit.title for hit in ascending] == by_asn
     assert [hit.title for hit in descending] == by_asn[::-1]
+
+
+MISSING = 999_999
+
+
+async def users(ports: Ports) -> dict[str, int]:
+    return {item.name: item.id for item in await ports.taxonomy.list_taxonomy("user")}
+
+
+@pytest.mark.contract("DocumentReader.get_document")
+async def test_a_document_carries_ids_dates_and_the_stored_custom_field_values(
+    backend: Backend,
+) -> None:
+    tags = await ids(backend.reader, "tag")
+    fields = await ids(backend.reader, "custom_field")
+    private = await document(backend.admin, PRIVATE)
+    hit = await document(backend.reader, PUBLIC)
+
+    record = await backend.reader.documents.get_document(hit.id)
+
+    assert (record.id, record.title, record.created) == (hit.id, PUBLIC, hit.created)
+    assert set(record.tags) == {tags["e2e-finance"], tags["e2e-invoices"], tags["e2e-inbox"]}
+    assert record.correspondent == (await ids(backend.reader, "correspondent"))["e2e-acme"]
+    assert (record.document_type, record.storage_path) == (hit.document_type, hit.storage_path)
+    values = {value.field: value.value for value in record.custom_fields}
+    assert values[fields["e2e-monetary"]] == "EUR12.50"
+    assert values[fields["e2e-documentlink"]] == [private.id]
+    assert values[fields["e2e-longtext"]] == "line one\nline two"
+    assert record.archive_serial_number == PUBLIC_ASN
+    assert record.owner is None
+    assert record.original_file_name == f"{PUBLIC}.pdf"
+    assert (record.mime_type, record.page_count) == ("application/pdf", 1)
+    assert record.added <= record.modified
+
+
+@pytest.mark.contract("DocumentReader.get_document")
+async def test_a_document_counts_its_notes_and_lists_its_versions(backend: Backend) -> None:
+    public = await backend.admin.documents.get_document((await document(backend.admin, PUBLIC)).id)
+    private = await backend.admin.documents.get_document(
+        (await document(backend.admin, PRIVATE)).id
+    )
+
+    assert (public.notes_count, private.notes_count) == (1, 0)
+    [version] = public.versions
+    assert (version.is_root, version.version_label) == (True, None)
+    assert private.owner == (await users(backend.admin))["admin"]
+
+
+@pytest.mark.contract("DocumentReader.get_document")
+async def test_a_missing_or_hidden_document_is_not_found(backend: Backend) -> None:
+    private = await document(backend.admin, PRIVATE)
+
+    with pytest.raises(NotFound) as missing:
+        _ = await backend.admin.documents.get_document(MISSING)
+    with pytest.raises(NotFound) as hidden:
+        _ = await backend.reader.documents.get_document(private.id)
+
+    assert "No document" in missing.value.message
+    assert missing.value.hint
+    assert hidden.value.message.startswith(f"No document {private.id} exists")
+
+
+@pytest.mark.contract("DocumentReader.get_document")
+async def test_a_user_without_view_document_may_not_get_a_document(backend: Backend) -> None:
+    public = await document(backend.admin, PUBLIC)
+
+    with pytest.raises(PermissionDenied):
+        _ = await backend.blind.documents.get_document(public.id)
+
+
+@pytest.mark.contract("DocumentReader.get_document_content")
+async def test_the_content_is_the_whole_text(backend: Backend) -> None:
+    public = await document(backend.reader, PUBLIC)
+    private = await document(backend.admin, PRIVATE)
+
+    assert await backend.reader.documents.get_document_content(public.id) == (
+        "E2E public invoice ACME 2026"
+    )
+    assert await backend.admin.documents.get_document_content(private.id) == PRIVATE_CONTENT
+
+
+@pytest.mark.contract("DocumentReader.get_document_content")
+async def test_the_content_of_a_missing_or_hidden_document_is_not_found(backend: Backend) -> None:
+    private = await document(backend.admin, PRIVATE)
+
+    with pytest.raises(NotFound):
+        _ = await backend.admin.documents.get_document_content(MISSING)
+    with pytest.raises(NotFound):
+        _ = await backend.reader.documents.get_document_content(private.id)
+    with pytest.raises(PermissionDenied):
+        _ = await backend.blind.documents.get_document_content(private.id)
+
+
+@pytest.mark.contract("DocumentReader.list_document_notes")
+async def test_notes_come_with_their_author(backend: Backend) -> None:
+    public = await document(backend.admin, PUBLIC)
+
+    [note] = await backend.admin.documents.list_document_notes(public.id)
+
+    assert (note.note, note.user) == (PUBLIC_NOTE, "admin")
+    assert note.created is not None
+    assert (
+        await backend.admin.documents.list_document_notes(
+            (await document(backend.admin, PRIVATE)).id
+        )
+        == ()
+    )
+
+
+@pytest.mark.contract("DocumentReader.list_document_notes")
+async def test_notes_need_the_view_note_permission_and_an_existing_document(
+    backend: Backend,
+) -> None:
+    public = await document(backend.reader, PUBLIC)
+
+    with pytest.raises(PermissionDenied):
+        _ = await backend.reader.documents.list_document_notes(public.id)
+    with pytest.raises(NotFound):
+        _ = await backend.admin.documents.list_document_notes(MISSING)
+
+
+@pytest.mark.contract("DocumentReader.list_document_history")
+async def test_the_history_runs_newest_first_and_never_holds_the_ocr_text(
+    backend: Backend,
+) -> None:
+    private = await document(backend.admin, PRIVATE)
+
+    entries = await backend.admin.documents.list_document_history(private.id)
+
+    assert entries
+    assert entries[-1].action == "create"
+    assert [entry.id for entry in entries] == sorted((e.id for e in entries), reverse=True)
+    assert all("content" not in entry.changes for entry in entries)
+    assert "private admin only" not in repr(entries)
+    assert any(entry.actor == "admin" for entry in entries)
+
+
+@pytest.mark.contract("DocumentReader.list_document_history")
+async def test_the_history_needs_its_permission_and_an_existing_document(
+    backend: Backend,
+) -> None:
+    public = await document(backend.reader, PUBLIC)
+
+    with pytest.raises(PermissionDenied):
+        _ = await backend.reader.documents.list_document_history(public.id)
+    with pytest.raises(NotFound):
+        _ = await backend.admin.documents.list_document_history(MISSING)
+
+
+@pytest.mark.contract("DocumentReader.get_document_metadata")
+async def test_the_file_metadata_describes_the_files(backend: Backend) -> None:
+    public = await document(backend.reader, PUBLIC)
+
+    metadata = await backend.reader.documents.get_document_metadata(public.id)
+
+    assert metadata.original_filename == f"{PUBLIC}.pdf"
+    assert metadata.original_mime_type == "application/pdf"
+    assert metadata.original_size > 0
+    assert metadata.original_checksum
+    assert metadata.media_filename.endswith(f"{PUBLIC}.pdf")
+    assert metadata.has_archive_version
+    assert (metadata.archive_size or 0) > 0
+    assert metadata.archive_checksum
+
+
+@pytest.mark.contract("DocumentReader.get_document_metadata")
+async def test_the_file_metadata_of_a_missing_or_hidden_document(backend: Backend) -> None:
+    private = await document(backend.admin, PRIVATE)
+
+    with pytest.raises(NotFound):
+        _ = await backend.reader.documents.get_document_metadata(MISSING)
+    with pytest.raises(PermissionDenied):
+        _ = await backend.reader.documents.get_document_metadata(private.id)
+
+
+@pytest.mark.contract("DocumentReader.get_document_suggestions")
+async def test_a_fresh_instance_suggests_nothing(backend: Backend) -> None:
+    public = await document(backend.reader, PUBLIC)
+
+    found = await backend.reader.documents.get_document_suggestions(public.id)
+
+    assert (found.correspondents, found.tags, found.document_types) == ((), (), ())
+    assert (found.storage_paths, found.dates) == ((), ())
+
+
+@pytest.mark.contract("DocumentReader.get_document_suggestions")
+async def test_suggestions_of_a_missing_or_hidden_document(backend: Backend) -> None:
+    private = await document(backend.admin, PRIVATE)
+
+    with pytest.raises(NotFound):
+        _ = await backend.reader.documents.get_document_suggestions(MISSING)
+    with pytest.raises(PermissionDenied):
+        _ = await backend.reader.documents.get_document_suggestions(private.id)

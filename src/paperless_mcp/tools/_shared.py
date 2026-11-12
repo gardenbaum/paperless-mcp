@@ -49,6 +49,18 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
+    "get_document": ToolAnnotations(
+        title="Get document",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "get_document_content": ToolAnnotations(
+        title="Get document content",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
     "get_task": ToolAnnotations(
         title="Get task",
         read_only_hint=True,

@@ -18,6 +18,7 @@ from fakes.accounts import (
     PRIVATE_ASN,
     PRIVATE_CONTENT,
     PUBLIC_ASN,
+    PUBLIC_NOTE,
     READER,
     READER_PERMISSIONS,
 )
@@ -338,6 +339,11 @@ def seed(admin: httpx2.Client) -> Seeded:
             "custom_fields": [{"field": fields[kind], "value": v} for kind, v in values.items()],
         },
     ).raise_for_status()
+    notes = seq(parse(admin.get(f"/api/documents/{public}/notes/").raise_for_status()))
+    if not any(obj(note)["note"] == PUBLIC_NOTE for note in notes):
+        _ = admin.post(
+            f"/api/documents/{public}/notes/", json={"note": PUBLIC_NOTE}
+        ).raise_for_status()
     admin_id = num(
         results(admin.get("/api/users/", params={"username__iexact": ADMIN[0]}))[0]["id"]
     )
