@@ -60,5 +60,9 @@ class UpstreamUnreachable(UpstreamUnavailable):
     """No connection to Paperless could be made."""
 
 
+class FeatureUnavailable(PaperlessMcpError):
+    """The instance has the feature switched off (e.g. the audit log)."""
+
+
 class UnsupportedVersion(PaperlessMcpError):
     """The Paperless instance does not speak the API version this server needs."""

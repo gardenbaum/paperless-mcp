@@ -12,6 +12,8 @@ read-only tests of tools, find writes by that name alone.
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from paperless_mcp.domain.documents import (
         DocumentPage,
         DocumentQuery,
@@ -80,11 +82,12 @@ class DocumentReader(Protocol):
 
         Raises:
             NotFound: No such document, or the user may not see it.
+            PermissionDenied: The user lacks the global ``view_document`` permission.
         """
         ...
 
     async def list_document_notes(self, document_id: int) -> tuple[Note, ...]:
-        """The notes of a document, oldest first.
+        """The notes of a document, in Paperless order.
 
         Raises:
             NotFound: No such document.
@@ -97,7 +100,9 @@ class DocumentReader(Protocol):
 
         Raises:
             NotFound: No such document.
-            PermissionDenied: The user may not view the audit log.
+            PermissionDenied: The user may not view the audit log (it needs ``view_logentry``
+                and a document that is unowned or the user's own; a view grant is not enough).
+            FeatureUnavailable: The instance has the audit log switched off.
         """
         ...
 
@@ -116,6 +121,13 @@ class DocumentReader(Protocol):
         Raises:
             NotFound: No such document.
             PermissionDenied: The user may not see the document.
+        """
+        ...
+
+    async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
+        """The titles of those documents the user may see; missing and hidden ones are left out.
+
+        One request for at most as many documents as ``document_ids`` holds distinct ids.
         """
         ...
 

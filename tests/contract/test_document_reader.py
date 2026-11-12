@@ -366,6 +366,8 @@ async def test_the_history_needs_its_permission_and_an_existing_document(
         _ = await backend.reader.documents.list_document_history(public.id)
     with pytest.raises(NotFound):
         _ = await backend.admin.documents.list_document_history(MISSING)
+    with pytest.raises(NotFound):  # existence is checked before the log permission
+        _ = await backend.reader.documents.list_document_history(MISSING)
 
 
 @pytest.mark.contract("DocumentReader.get_document_metadata")
@@ -412,3 +414,17 @@ async def test_suggestions_of_a_missing_or_hidden_document(backend: Backend) -> 
         _ = await backend.reader.documents.get_document_suggestions(MISSING)
     with pytest.raises(PermissionDenied):
         _ = await backend.reader.documents.get_document_suggestions(private.id)
+
+
+@pytest.mark.contract("DocumentReader.get_document_titles")
+async def test_titles_are_given_for_the_documents_the_user_may_see(backend: Backend) -> None:
+    public = await document(backend.admin, PUBLIC)
+    private = await document(backend.admin, PRIVATE)
+    wanted = [public.id, private.id, MISSING]
+
+    assert await backend.admin.documents.get_document_titles(wanted) == {
+        public.id: PUBLIC,
+        private.id: PRIVATE,
+    }
+    assert await backend.reader.documents.get_document_titles(wanted) == {public.id: PUBLIC}
+    assert await backend.reader.documents.get_document_titles([]) == {}

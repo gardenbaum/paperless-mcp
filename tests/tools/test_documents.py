@@ -1,7 +1,8 @@
 """search_documents through the in-memory client on the seeded fake."""
 
 import json
-from typing import cast
+import logging
+from typing import TYPE_CHECKING, cast, override
 
 import pytest
 from fakes.paperless import FakeDocument, FakePaperless, seeded
@@ -9,6 +10,9 @@ from fastmcp import Client
 from harness import admin, serve
 from mcp.shared.exceptions import MCPError
 from mcp.types import TextResourceContents
+
+if TYPE_CHECKING:
+    from paperless_mcp.domain.documents import DocumentRecord
 
 pytestmark = pytest.mark.anyio
 
@@ -177,7 +181,7 @@ async def test_get_document_content_past_the_end_is_empty_with_the_total() -> No
         ({"document_id": 999}, "No document 999"),
         ({"document_id": 1, "offset": -1}, "greater than or equal to 0"),
         ({"document_id": 1, "max_chars": 0}, "greater than or equal to 1"),
-        ({"document_id": 1, "max_chars": 100_001}, "less than or equal to 100000"),
+        ({"document_id": 1, "max_chars": 20_001}, "less than or equal to 20000"),
     ],
 )
 async def test_get_document_content_errors_are_tool_errors(arguments: Json, message: str) -> None:
@@ -221,12 +225,56 @@ async def test_the_content_resource_is_a_slice_as_json() -> None:
 @pytest.mark.parametrize("uri", ["paperless://documents/999", "paperless://documents/999/content"])
 async def test_a_resource_of_a_missing_document_is_an_error_with_the_hint(uri: str) -> None:
     async with Client(serve(admin())) as client:
-        with pytest.raises(MCPError, match="No document 999 exists that this user may see"):
+        with pytest.raises(
+            MCPError, match="No document 999 exists that this user may see"
+        ) as raised:
             _ = await client.read_resource(uri)
+    assert "Hint: Take the id from a search_documents row." in str(raised.value)
 
 
-@pytest.mark.parametrize("query", ["offset=-1", "max_chars=0", "max_chars=100001"])
+@pytest.mark.parametrize("query", ["offset=-1", "max_chars=0", "max_chars=20001"])
 async def test_the_content_resource_rejects_a_slice_out_of_range(query: str) -> None:
     async with Client(serve(admin())) as client:
         with pytest.raises(MCPError, match="offset must be at least 0 and max_chars between 1"):
             _ = await client.read_resource(f"paperless://documents/1/content?{query}")
+
+
+class BrokenDocuments(FakePaperless):
+    """Fails like a bug in the adapter: the exception message holds response content."""
+
+    @override
+    async def get_document(self, document_id: int) -> DocumentRecord:
+        message = f"secret-detail of {document_id}"
+        raise RuntimeError(message)
+
+
+async def test_a_resource_bug_is_masked_and_logged_by_type_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    server = serve(admin(), documents=BrokenDocuments(seeded(), user="admin"))
+    caplog.set_level(logging.DEBUG)
+
+    async with Client(server) as client:
+        with pytest.raises(MCPError) as raised:
+            _ = await client.read_resource("paperless://documents/1")
+
+    assert "Internal error in document_detail; the server log has details." in str(raised.value)
+    assert "secret-detail" not in str(raised.value)
+    errors = [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR]
+    assert "document_detail failed: RuntimeError" in errors
+    assert not [line for line in errors if "secret-detail" in line]
+
+
+async def test_a_resource_domain_error_is_logged_at_info_with_its_hint(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    async with Client(serve(admin())) as client:
+        with pytest.raises(MCPError):
+            _ = await client.read_resource("paperless://documents/999")
+
+    logged = [r.getMessage() for r in caplog.records if r.levelno == logging.INFO]
+    assert any(
+        "document_detail: No document 999 exists" in line and "Hint:" in line for line in logged
+    )

@@ -226,7 +226,7 @@ async def test_custom_fields_of_every_data_type_are_rendered_readably() -> None:
         "e2e-integer": 42,
         "e2e-float": 3.25,
         "e2e-monetary": "EUR 12.50",
-        "e2e-documentlink": [2],
+        "e2e-documentlink": [{"id": 2, "name": "e2e-private-note"}],
         "e2e-longtext": "line one\nline two",
         "e2e-select": "alpha",
     }
@@ -397,3 +397,49 @@ async def test_a_document_of_over_a_million_characters_is_served_slice_by_slice(
 async def test_the_content_of_a_missing_document_is_not_found() -> None:
     with pytest.raises(NotFound):
         _ = await admin().content(999, offset=0, max_chars=10)
+
+
+async def test_a_disabled_audit_log_makes_only_the_history_unavailable() -> None:
+    state = seeded()
+    state.audit_log_enabled = False
+
+    detail = await service(FakePaperless(state, user=ADMIN[0])).get(1, ("history", "notes"))
+
+    assert detail.unavailable == ("history",)
+    assert detail.notes is not None
+
+
+async def test_a_document_link_is_rendered_as_the_linked_documents_with_titles() -> None:
+    detail = await admin().get(1)
+
+    values = {value.name: value.value for value in detail.custom_fields}
+    assert values["e2e-documentlink"] == [{"id": 2, "name": "e2e-private-note"}]
+
+
+async def test_a_linked_document_the_user_may_not_see_has_no_title() -> None:
+    state = seeded()
+    state.documents[0].custom_fields[8] = [2, 99]
+
+    detail = await service(FakePaperless(state, user=READER[0])).get(1)
+
+    values = {value.name: value.value for value in detail.custom_fields}
+    assert values["e2e-documentlink"] == [{"id": 2, "name": None}, {"id": 99, "name": None}]
+
+
+async def test_search_rows_keep_document_links_as_ids() -> None:
+    found = await admin().search(NameFilters(), DocumentQuery(query="invoice"), page=1, page_size=5)
+
+    values = {value.name: value.value for value in found.documents[0].custom_fields}
+    assert values["e2e-documentlink"] == [2]
+
+
+async def test_only_the_first_hundred_linked_documents_are_titled() -> None:
+    state = seeded()
+    state.documents[0].custom_fields[8] = [2, *range(1000, 1150)]
+
+    detail = await service(FakePaperless(state, user=ADMIN[0])).get(1)
+
+    [links] = [v.value for v in detail.custom_fields if v.name == "e2e-documentlink"]
+    assert isinstance(links, list)
+    assert len(links) == 151
+    assert links[0] == {"id": 2, "name": "e2e-private-note"}

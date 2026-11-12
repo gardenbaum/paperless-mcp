@@ -4,8 +4,9 @@ Rows name what they refer to and render custom field values readably, without th
 kind the user may not list leaves its names null instead of failing the search.
 """
 
+import asyncio
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from paperless_mcp.domain.documents import (
     ContentSlice,
@@ -17,7 +18,7 @@ from paperless_mcp.domain.documents import (
     Ref,
     SuggestionNames,
 )
-from paperless_mcp.domain.errors import PermissionDenied, Validation
+from paperless_mcp.domain.errors import FeatureUnavailable, PermissionDenied, Validation
 
 if TYPE_CHECKING:
     from collections.abc import Collection
@@ -50,6 +51,8 @@ REFERRED: tuple[TaxonomyKind, ...] = (
 DEFAULT_SLICE = 20_000
 # Newest audit log entries returned with include history; the rest is counted.
 HISTORY_LIMIT = 50
+# Most distinct linked documents whose titles a document read looks up.
+LINK_LIMIT = 100
 # The order sections are fetched and reported in.
 SECTIONS: tuple[Include, ...] = ("notes", "history", "metadata", "versions", "suggestions")
 MONETARY = re.compile(r"([A-Z]{3})(-?\d+(?:\.\d+)?)")
@@ -174,23 +177,25 @@ class DocumentService:
         """One document with names, readable custom fields and the sections in ``include``.
 
         A section the user may not read in Paperless (notes and the audit log need their own
-        permissions) is named in ``unavailable`` instead of failing the call.
+        permissions, and the audit log can be switched off) is named in ``unavailable``
+        instead of failing the call.
 
         Raises:
             NotFound: No such document, or the user may not see it.
             PermissionDenied: The user may not view documents at all.
         """
         record = await self._reader.get_document(document_id)
-        known: dict[TaxonomyKind, dict[int, TaxonomyItem]] = {
-            kind: await self._known(kind) for kind in (*REFERRED, "user")
-        }
+        kinds: tuple[TaxonomyKind, ...] = (*REFERRED, "user")
+        loaded = await asyncio.gather(*(self._known(kind) for kind in kinds))
+        known = dict(zip(kinds, loaded, strict=True))
+        titles = await self._linked_titles(record, known)
         wanted: list[Include] = [section for section in SECTIONS if section in include]
         sections: dict[str, object] = {}
         unavailable: list[Include] = []
         for section in wanted:
             try:
                 sections.update(await self._section(section, record, known))
-            except PermissionDenied:
+            except PermissionDenied, FeatureUnavailable:
                 unavailable.append(section)
         return DocumentDetail(
             id=record.id,
@@ -204,13 +209,25 @@ class DocumentService:
             document_type=_maybe(known, "document_type", record.document_type),
             storage_path=_maybe(known, "storage_path", record.storage_path),
             tags=tuple(_ref(known, "tag", tag) for tag in record.tags),
-            custom_fields=_fields(known, record.custom_fields),
+            custom_fields=_fields(known, record.custom_fields, titles),
             original_file_name=record.original_file_name,
             mime_type=record.mime_type,
             page_count=record.page_count,
             notes_count=record.notes_count,
             web_url=self._link(record.id),
         ).model_copy(update={**sections, "unavailable": tuple(unavailable)})
+
+    async def _linked_titles(
+        self, record: DocumentRecord, known: dict[TaxonomyKind, dict[int, TaxonomyItem]]
+    ) -> dict[int, str]:
+        """Titles of the documents the document-link fields of ``record`` point to."""
+        linked = [
+            number
+            for value in record.custom_fields
+            if _is_link(known, value)
+            for number in cast("list[int]", value.value)
+        ]
+        return await self._reader.get_document_titles(list(dict.fromkeys(linked))[:LINK_LIMIT])
 
     async def _section(
         self,
@@ -287,15 +304,30 @@ def _maybe(
     return None if number is None else _ref(known, kind, number)
 
 
+def _is_link(known: dict[TaxonomyKind, dict[int, TaxonomyItem]], value: CustomFieldValue) -> bool:
+    """Whether ``value`` is a document-link field holding a list of document ids."""
+    item = known["custom_field"].get(value.field)
+    return bool(item and item.data_type == "documentlink" and isinstance(value.value, list))
+
+
 def _fields(
-    known: dict[TaxonomyKind, dict[int, TaxonomyItem]], values: tuple[CustomFieldValue, ...]
+    known: dict[TaxonomyKind, dict[int, TaxonomyItem]],
+    values: tuple[CustomFieldValue, ...],
+    titles: dict[int, str] | None = None,
 ) -> tuple[FieldValue, ...]:
+    """Custom field values, readable; with ``titles`` document links name their documents."""
     fields = known["custom_field"]
+
+    def render(value: CustomFieldValue) -> JsonValue:
+        if titles is not None and _is_link(known, value):
+            return [{"id": n, "name": titles.get(n)} for n in cast("list[int]", value.value)]
+        return _readable(value.value, fields.get(value.field))
+
     return tuple(
         FieldValue(
             id=value.field,
             name=item.name if (item := fields.get(value.field)) else None,
-            value=_readable(value.value, item),
+            value=render(value),
         )
         for value in values
     )

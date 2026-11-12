@@ -10,7 +10,7 @@ from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from paperless_mcp.domain.credentials import PaperlessCredential
-from paperless_mcp.domain.errors import Ambiguous, NotFound
+from paperless_mcp.domain.errors import Ambiguous, NotFound, PermissionDenied
 from paperless_mcp.domain.taxonomy import TaxonomyItem
 from paperless_mcp.services.taxonomy import TaxonomyResolver, fold, pick
 
@@ -270,3 +270,23 @@ async def test_items_filter_by_name_contains_insensitively(resolver: TaxonomyRes
 
     assert [item.name for item in found] == ["e2e-inbox", "e2e-invoices"]
     assert len(await resolver.items("tag")) == 5
+
+
+@pytest.mark.anyio
+async def test_a_denied_kind_is_not_asked_again_within_the_ttl(
+    resolver: TaxonomyResolver,
+    reader: PerCredential,
+    credentials: Credentials,
+    clock: Clock,
+) -> None:
+    credentials.fingerprint = "reader"
+    for _ in range(2):
+        with pytest.raises(PermissionDenied, match="may not perform this action"):
+            _ = await resolver.items("user")
+    clock.now += TTL
+    with pytest.raises(PermissionDenied):
+        _ = await resolver.items("user")
+    credentials.fingerprint = "admin"
+    assert await resolver.items("user")
+
+    assert reader.loads == [("reader", "user"), ("reader", "user"), ("admin", "user")]

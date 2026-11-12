@@ -63,7 +63,7 @@ async def test_a_document_reads_as_names_and_readable_custom_fields_of_every_typ
         "e2e-integer": 42,
         "e2e-float": 3.25,
         "e2e-monetary": "EUR 12.50",
-        "e2e-documentlink": [stack.seeded.private_document],
+        "e2e-documentlink": [{"id": stack.seeded.private_document, "name": "e2e-private-note"}],
         "e2e-longtext": "line one\nline two",
         "e2e-select": "alpha",
     }
@@ -176,10 +176,11 @@ def huge_document(stack: Stack) -> Iterator[int]:
     """A throwaway document whose text is a little over a million characters."""
     title = f"e2e-huge-{uuid.uuid4().hex[:8]}"
     document_id = ensure_document(stack.admin, title, "huge")
-    _ = stack.admin.patch(
-        f"/api/documents/{document_id}/", json={"content": "0123456789" * (MILLION // 10 + 5000)}
-    ).raise_for_status()
     try:
+        _ = stack.admin.patch(
+            f"/api/documents/{document_id}/",
+            json={"content": "0123456789" * (MILLION // 10 + 5000)},
+        ).raise_for_status()
         yield document_id
     finally:
         _ = stack.admin.delete(f"/api/documents/{document_id}/")
@@ -193,21 +194,30 @@ async def test_a_document_of_over_a_million_characters_is_served_slice_by_slice(
     stored = obj(
         parse(stack.admin.get(f"/api/documents/{huge_document}/", params={"fields": "content"}))
     )
-    assert len(cast("str", stored["content"])) == total
+    text = cast("str", stored["content"])
+    assert len(text) == total
 
-    pieces: list[str] = []
+    slice_size = 20_000
+    last_start = total - total % slice_size  # 1_040_000: the final, shorter slice
     offset: int | None = 0
     async with Client(server(stack, stack.admin_token)) as client:
-        while offset is not None:
+
+        async def read(start: int) -> Json:
             result = await client.call_tool(
                 "get_document_content",
-                {"document_id": huge_document, "offset": offset, "max_chars": 100_000},
+                {"document_id": huge_document, "offset": start, "max_chars": slice_size},
             )
-            piece = result.structured_content
-            assert piece is not None
-            assert piece["total_chars"] == total
-            pieces.append(cast("str", piece["content"]))
-            offset = cast("int | None", piece["next_offset"])
+            assert result.structured_content is not None
+            assert result.structured_content["total_chars"] == total
+            return result.structured_content
 
-    assert len(pieces) == 11
-    assert "".join(pieces) == stored["content"]
+        for _ in range(3):  # chain the first slices through next_offset
+            assert offset is not None
+            piece = await read(offset)
+            assert piece["content"] == text[offset : offset + slice_size]
+            assert piece["next_offset"] == offset + slice_size
+            offset = cast("int", piece["next_offset"])
+        last = await read(last_start)
+
+    assert last["content"] == text[last_start:]
+    assert (len(cast("str", last["content"])), last["next_offset"]) == (10_000, None)

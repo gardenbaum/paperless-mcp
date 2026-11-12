@@ -49,7 +49,7 @@ from paperless_mcp.domain.documents import (
     Note,
     Suggestions,
 )
-from paperless_mcp.domain.errors import PermissionDenied, Validation
+from paperless_mcp.domain.errors import FeatureUnavailable, PermissionDenied, Validation
 from paperless_mcp.domain.instance import (
     ComponentStatus,
     CurrentUser,
@@ -63,7 +63,7 @@ from paperless_mcp.paperless.documents import beyond_last_page, unseen_document
 from paperless_mcp.paperless.tasks import not_found
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Collection
 
     from _typeshed import SupportsRichComparison
 
@@ -239,6 +239,7 @@ class FakeState:
     tasks: list[FakeTask] = field(default_factory=list[FakeTask])
     system_status: SystemStatus = HEALTHY
     ai_enabled: bool = False
+    audit_log_enabled: bool = True
 
 
 # The seeded custom fields in creation order (tests/e2e/helpers.py `seed`), `select` comes last.
@@ -671,11 +672,26 @@ class FakePaperless:
         return tuple(self._sub(document_id, "view_note").notes)
 
     async def list_document_history(self, document_id: int) -> tuple[HistoryEntry, ...]:
-        """`DocumentReader.list_document_history` (the `history` action: `view_logentry`).
+        """`DocumentReader.list_document_history` (the `history` action).
 
-        The audit log of the create action holds the OCR text as `content`; the adapter drops it.
+        Order in Paperless 3.4.2: `view_document` (viewset), audit log enabled (400), the
+        document exists (404, even without `view_logentry`), then `view_logentry` and ownership:
+        an object-level view grant is not enough, the document must be unowned, the user's own,
+        or the user a superuser (403). The create entry's `content` (OCR text) is dropped.
         """
-        entries = self._sub(document_id, "view_logentry").history
+        user = self.user
+        if not user.has("view_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        if not self.state.audit_log_enabled:
+            message = "The Paperless audit log is disabled on this instance."
+            raise FeatureUnavailable(message, hint="Leave history out of include.")
+        document = self._document(document_id)
+        owns = document.owner in {None, user.id} or user.is_superuser
+        if not (user.has("view_logentry") and owns):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        entries = document.history
         return tuple(
             entry.model_copy(
                 update={
@@ -699,6 +715,18 @@ class FakePaperless:
             archive_checksum=f"{document.id + 1000:064x}",
             archive_media_filename=f"e2e/2026/{document.original_filename}",
         )
+
+    async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
+        """`DocumentReader.get_document_titles` (the list view filtered by `id__in`)."""
+        if not self.user.has("view_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        wanted = set(document_ids)
+        return {
+            d.id: d.title
+            for d in self.state.documents
+            if d.id in wanted and d.visible_to(self.user)
+        }
 
     async def get_document_suggestions(self, document_id: int) -> Suggestions:
         """`DocumentReader.get_document_suggestions` (the `suggestions` action)."""

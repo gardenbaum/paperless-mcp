@@ -7,7 +7,7 @@ import httpx2
 import pytest
 
 from paperless_mcp.domain.documents import CustomFieldValue, DocumentHit, DocumentQuery
-from paperless_mcp.domain.errors import NotFound, PermissionDenied, Validation
+from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
 from paperless_mcp.paperless.documents import FIELDS, PaperlessDocumentReader
 
 if TYPE_CHECKING:
@@ -504,3 +504,32 @@ async def test_the_suggestions_are_ids_and_dates(make_client: ClientFactory) -> 
         "storage_paths": (4,),
         "dates": ("2026-01-15",),
     }
+
+
+async def test_a_disabled_audit_log_is_a_feature_error(make_client: ClientFactory) -> None:
+    def answer(_request: httpx2.Request) -> httpx2.Response:
+        # 3.4.2 `history`: HttpResponseBadRequest("Audit log is disabled")
+        return httpx2.Response(
+            400, text="Audit log is disabled", headers={"Content-Type": "text/html"}
+        )
+
+    with pytest.raises(FeatureUnavailable, match="audit log is disabled") as raised:
+        _ = await PaperlessDocumentReader(make_client(answer)).list_document_history(1)
+
+    assert raised.value.hint
+
+
+async def test_titles_are_asked_for_by_id_in_one_request(make_client: ClientFactory) -> None:
+    server = Documents({"id": 1, "title": "one"}, {"id": 2, "title": "two"})
+
+    titles = await PaperlessDocumentReader(make_client(server)).get_document_titles([1, 2, 1])
+
+    assert titles == {1: "one", 2: "two"}
+    assert server.sent == [{"id__in": "1,2", "fields": "id,title", "page_size": "2"}]
+
+
+async def test_no_titles_are_asked_for_without_ids(make_client: ClientFactory) -> None:
+    server = Documents()
+
+    assert await PaperlessDocumentReader(make_client(server)).get_document_titles([]) == {}
+    assert server.sent == []

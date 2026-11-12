@@ -69,8 +69,9 @@
         
         Never returns the document text; use get_document_content for it. Custom fields are
         rendered by type: select as its label, monetary as 'EUR 12.50', document links as the
-        linked document ids. Sections in include that the user may not read in Paperless (notes
-        and history need their own permissions) are listed in unavailable instead of failing.
+        linked documents' id and title (title null if hidden). Sections in include that the user
+        may not read in Paperless (notes and history need their own permissions, the audit log can
+        be off) are listed in unavailable instead of failing.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -791,8 +792,8 @@
           }),
           'max_chars': dict({
             'default': 20000,
-            'description': 'Characters to return, at most 100000.',
-            'maximum': 100000,
+            'description': 'Characters to return, at most 20000.',
+            'maximum': 20000,
             'minimum': 1,
             'type': 'integer',
           }),

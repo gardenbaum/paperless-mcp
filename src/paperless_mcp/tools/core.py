@@ -18,28 +18,28 @@ from paperless_mcp.domain.documents import (
     NameOrId,
     Ordering,
 )
-from paperless_mcp.domain.errors import PaperlessMcpError
 from paperless_mcp.domain.instance import InstanceOverview
 from paperless_mcp.domain.tasks import TaskReport
 from paperless_mcp.domain.taxonomy import TaxonomyKind, TaxonomyListing
 from paperless_mcp.services.documents import DEFAULT_SLICE, HISTORY_LIMIT
 from paperless_mcp.services.tasks import MAX_WAIT_SECONDS
-from paperless_mcp.tools._shared import ANNOTATIONS, boundary, services
+from paperless_mcp.tools._shared import ANNOTATIONS, boundary, resource_boundary, services
 
 TOOLSET = "core"
 # Most rows list_taxonomy returns and largest search page (decision-4: lists hold at most 100).
 LIST_LIMIT = 100
 PAGE_SIZE = 25
 UUID_PATTERN = r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-# Most characters of document text one call returns (the default is DEFAULT_SLICE).
-MAX_SLICE = 100_000
+# Most characters of document text one call returns: the default slice. FastMCP sends results
+# twice (content and structured) and clients cap tool output around 25k tokens (design 7).
+MAX_SLICE = DEFAULT_SLICE
 
 type Named = Annotated[NameOrId | None, Field(description="Name or id; see list_taxonomy.")]
 type DocumentId = Annotated[int, Field(description="Document id, from search_documents.")]
 type Offset = Annotated[int, Field(ge=0, description="Character offset to start at.")]
 type SliceSize = Annotated[
     int,
-    Field(ge=1, le=MAX_SLICE, description="Characters to return, at most 100000."),
+    Field(ge=1, le=MAX_SLICE, description=f"Characters to return, at most {MAX_SLICE}."),
 ]
 type Day = Annotated[date | None, Field(description="Date (YYYY-MM-DD), inclusive.")]
 
@@ -234,8 +234,9 @@ async def get_document(
 
     Never returns the document text; use get_document_content for it. Custom fields are
     rendered by type: select as its label, monetary as 'EUR 12.50', document links as the
-    linked document ids. Sections in include that the user may not read in Paperless (notes
-    and history need their own permissions) are listed in unavailable instead of failing.
+    linked documents' id and title (title null if hidden). Sections in include that the user
+    may not read in Paperless (notes and history need their own permissions, the audit log can
+    be off) are listed in unavailable instead of failing.
     """
     return await services(ctx).documents.get(document_id, tuple(include or ()))
 
@@ -264,12 +265,10 @@ async def get_document_content(
     mime_type="application/json",
     tags={TOOLSET},
 )
+@resource_boundary
 async def document_detail(ctx: Context, document_id: int) -> dict[str, object]:
     """A document as get_document returns it, without the include sections or the text."""
-    try:
-        detail = await services(ctx).documents.get(document_id)
-    except PaperlessMcpError as error:
-        raise ResourceError(error.describe()) from None
+    detail = await services(ctx).documents.get(document_id)
     return detail.model_dump(mode="json")
 
 
@@ -280,6 +279,7 @@ async def document_detail(ctx: Context, document_id: int) -> dict[str, object]:
     mime_type="application/json",
     tags={TOOLSET},
 )
+@resource_boundary
 async def document_content(
     ctx: Context, document_id: int, offset: int = 0, max_chars: int = DEFAULT_SLICE
 ) -> dict[str, object]:
@@ -287,12 +287,7 @@ async def document_content(
     if offset < 0 or not 1 <= max_chars <= MAX_SLICE:
         message = f"offset must be at least 0 and max_chars between 1 and {MAX_SLICE}."
         raise ResourceError(message)
-    try:
-        piece = await services(ctx).documents.content(
-            document_id, offset=offset, max_chars=max_chars
-        )
-    except PaperlessMcpError as error:
-        raise ResourceError(error.describe()) from None
+    piece = await services(ctx).documents.content(document_id, offset=offset, max_chars=max_chars)
     return piece.model_dump(mode="json")
 
 
@@ -303,12 +298,10 @@ async def document_content(
     mime_type="application/json",
     tags={TOOLSET},
 )
+@resource_boundary
 async def taxonomy_table(ctx: Context, kind: TaxonomyKind) -> list[dict[str, object]]:
     """Every tag, correspondent, document type, storage path, custom field, saved view, user or
     group the current user may see, as JSON rows with id, name and document count.
     """  # noqa: D205 -- see list_taxonomy
-    try:
-        rows = await services(ctx).taxonomy.items(kind)
-    except PaperlessMcpError as error:
-        raise ResourceError(error.describe()) from None
+    rows = await services(ctx).taxonomy.items(kind)
     return [row.model_dump(mode="json") for row in rows]

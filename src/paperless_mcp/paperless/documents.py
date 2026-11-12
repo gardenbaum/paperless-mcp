@@ -21,10 +21,12 @@ from paperless_mcp.domain.documents import (
     Note,
     Suggestions,
 )
-from paperless_mcp.domain.errors import NotFound, PermissionDenied
+from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
 from paperless_mcp.paperless.pagination import Page
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from paperless_mcp.domain.documents import DocumentQuery
     from paperless_mcp.paperless.client import PaperlessClient, Params
 
@@ -97,6 +99,11 @@ class _Detail(BaseModel):
     page_count: int | None
     notes: list[_Note]
     versions: list[_Version]
+
+
+class _Title(BaseModel):
+    id: int
+    title: str
 
 
 class _Content(BaseModel):
@@ -298,9 +305,15 @@ class PaperlessDocumentReader:
     async def list_document_history(self, document_id: int) -> tuple[HistoryEntry, ...]:
         """See ``DocumentReader.list_document_history``.
 
-        The endpoint answers a bare list although the schema says paginated.
+        The endpoint answers a bare list although the schema says paginated, and 400 "Audit log
+        is disabled" when the instance runs with PAPERLESS_AUDIT_LOG_ENABLED=false (the only
+        400 this endpoint has).
         """
-        found = await self._one(document_id, "history/", _History)
+        try:
+            found = await self._one(document_id, "history/", _History)
+        except Validation:
+            message = "The Paperless audit log is disabled on this instance."
+            raise FeatureUnavailable(message, hint="Leave history out of include.") from None
         return tuple(_entry(row) for row in found.root)
 
     async def get_document_metadata(self, document_id: int) -> FileMetadata:
@@ -318,6 +331,19 @@ class PaperlessDocumentReader:
             storage_paths=tuple(row.storage_paths),
             dates=tuple(row.dates),
         )
+
+    async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
+        """See ``DocumentReader.get_document_titles``; ``id__in`` leaves hidden ids out."""
+        wanted = sorted(set(document_ids))
+        if not wanted:
+            return {}
+        sent: Params = {
+            "id__in": ",".join(map(str, wanted)),
+            "fields": "id,title",
+            "page_size": len(wanted),
+        }
+        found = await self._client.get(PATH, Page[_Title], params=sent)
+        return {row.id: row.title for row in found.results}
 
     async def _one[M: BaseModel](
         self, document_id: int, tail: str, model: type[M], params: Params | None = None
