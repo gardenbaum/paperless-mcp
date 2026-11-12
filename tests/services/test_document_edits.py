@@ -1,11 +1,12 @@
 """DocumentEditor: names to ids, diff against the current state, merged lists, caches."""
 
+from dataclasses import replace
 from datetime import date
 from typing import TYPE_CHECKING, final, override
 
 import pytest
 from fakes.accounts import ADMIN, READER
-from fakes.paperless import FakeDocument, FakePaperless, FakeState, seeded
+from fakes.paperless import FakeDocument, FakePaperless, FakeState, FakeUser, seeded
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -19,7 +20,7 @@ from paperless_mcp.services.taxonomy import TaxonomyResolver
 if TYPE_CHECKING:
     from pydantic import JsonValue
 
-    from paperless_mcp.domain.documents import DocumentDetail, DocumentRecord
+    from paperless_mcp.domain.documents import DocumentDetail, DocumentRecord, DocumentUpdate
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
@@ -43,8 +44,15 @@ class Recording(FakePaperless):
 
 @final
 class Setup:
-    def __init__(self, user: str = ADMIN[0]) -> None:
+    def __init__(self, user: str = ADMIN[0], *, can_change: bool = False) -> None:
         self.state: FakeState = seeded()
+        if can_change:
+            self.state.users = [
+                replace(u, permissions=u.permissions | {"change_document"})
+                if u.username == user
+                else u
+                for u in self.state.users
+            ]
         self.fake: Recording = Recording(self.state, user=user)
         self.taxonomy: TaxonomyResolver = TaxonomyResolver(
             self.fake, StaticTokenProvider("t"), ttl=3600.0
@@ -58,7 +66,7 @@ class Setup:
     def document(self) -> FakeDocument:
         return self.state.documents[0]
 
-    async def update(self, document_id: int = PUBLIC, /, **edit: object) -> DocumentDetail:
+    async def update(self, document_id: int = PUBLIC, /, **edit: object) -> DocumentUpdate:
         return await self.editor.update(document_id, DocumentEdit.model_validate(edit))
 
     def field(self, name: str) -> int:
@@ -272,12 +280,7 @@ async def test_a_name_that_exists_ignoring_case_is_used_not_created() -> None:
 
 
 async def test_creating_tags_needs_the_permission_and_stops_before_any_change() -> None:
-    setup = Setup(READER[0])
-    setup.state.users[2] = setup.state.users[2].__class__(
-        id=3,
-        username=READER[0],
-        permissions=setup.state.users[2].permissions | {"change_document"},
-    )
+    setup = Setup(READER[0], can_change=True)
 
     with pytest.raises(PermissionDenied):
         _ = await setup.update(tags_add=["e2e-new"], create_missing_tags=True)
@@ -311,9 +314,9 @@ async def test_title_date_serial_number_and_owner_change() -> None:
     setup = Setup()
 
     detail = await setup.update(
-        title="New", created=date(2025, 5, 6), archive_serial_number=77, owner="admin"
+        title="New", created=date(2025, 5, 6), archive_serial_number=77, owner="admin", confirm=True
     )
-    cleared = await setup.update(clear=["archive_serial_number", "owner"])
+    cleared = await setup.update(clear=["archive_serial_number", "owner"], confirm=True)
 
     assert (detail.title, detail.created, detail.archive_serial_number) == (
         "New",
@@ -328,7 +331,7 @@ async def test_title_date_serial_number_and_owner_change() -> None:
 async def test_the_owner_may_be_given_as_an_id_without_listing_users() -> None:
     setup = Setup()
 
-    detail = await setup.update(owner=2)
+    detail = await setup.update(owner=2, confirm=True)
 
     assert detail.owner is not None
     assert detail.owner.id == 2
@@ -397,11 +400,13 @@ async def test_a_missing_document_is_not_found_before_names_are_resolved() -> No
         _ = await Setup().update(99, tags_add=["e2e-new"], create_missing_tags=True)
 
 
-async def test_a_user_who_may_not_change_documents_is_denied() -> None:
+async def test_a_user_who_may_not_change_documents_is_denied_before_any_tag_is_created() -> None:
     setup = Setup(READER[0])
 
     with pytest.raises(PermissionDenied):
-        _ = await setup.update(title="x")
+        _ = await setup.update(tags_add=["e2e-new"], create_missing_tags=True)
+
+    assert len(setup.state.tags) == 4
 
 
 async def test_the_taxonomy_cache_forgets_the_counts_a_write_changed() -> None:
@@ -425,18 +430,15 @@ async def test_the_taxonomy_cache_forgets_the_counts_a_write_changed() -> None:
 
 
 async def test_an_owner_change_forgets_every_count_because_visibility_changes() -> None:
-    setup = Setup()
-    _ = await setup.taxonomy.items("document_type")
+    setup = Setup(READER[0], can_change=True)  # the reader sees the public document and owns it
+    warm = {i.name: i.document_count for i in await setup.taxonomy.items("document_type")}
+    assert warm["e2e-invoice"] == 1
 
-    _ = await setup.update(owner="admin")
+    _ = await setup.update(owner=2, confirm=True)  # to the admin: the reader no longer sees it
 
-    reader = TaxonomyResolver(
-        FakePaperless(setup.state, user=READER[0]), StaticTokenProvider("r"), ttl=60.0
-    )
-    assert {i.name: i.document_count for i in await reader.items("document_type")}[
-        "e2e-invoice"
-    ] == 0
-    assert {i.id: i.document_count for i in await setup.taxonomy.items("document_type")}[1] == 1
+    assert setup.document.owner == 2
+    after = {i.name: i.document_count for i in await setup.taxonomy.items("document_type")}
+    assert after["e2e-invoice"] == 0
 
 
 current_fields = st.dictionaries(
@@ -484,3 +486,256 @@ def test_merging_tags_adds_and_removes_exactly_what_was_named(
     assert len(merged) == len(set(merged))
     assert set(merged) == (set(current) | set(add)) - remove
     assert [t for t in merged if t in current] == [t for t in current if t not in remove]
+
+
+# --- review round 1 -------------------------------------------------------------------------
+
+
+async def test_tags_set_to_a_child_keeps_its_parent_and_repeating_it_changes_nothing() -> None:
+    setup = Setup()  # e2e-finance, e2e-invoices (child of finance), e2e-inbox
+
+    first = await setup.update(tags_set=["e2e-invoices"])
+    second = await setup.update(tags_set=["e2e-invoices"])
+
+    assert {t.name for t in first.tags} == {"e2e-finance", "e2e-invoices"}
+    assert second == first
+    assert len(setup.fake.patches) == 1
+    assert first.implicit_tags == ()
+
+
+async def test_a_child_added_alone_brings_its_parent_and_the_result_says_so() -> None:
+    setup = Setup()
+    setup.document.tags = []
+
+    detail = await setup.update(tags_add=["e2e-invoices"])
+    again = await setup.update(tags_add=["e2e-invoices"])
+
+    assert {t.name for t in detail.tags} == {"e2e-finance", "e2e-invoices"}
+    assert [(t.id, t.name) for t in detail.implicit_tags] == [(1, "e2e-finance")]
+    assert again.implicit_tags == ()
+    [patch] = setup.fake.patches
+    assert patch.tags is not None
+    assert sorted(patch.tags) == [1, 2]
+
+
+async def test_a_created_child_needs_no_parent() -> None:
+    setup = Setup()
+
+    detail = await setup.update(tags_set=["e2e-new"], create_missing_tags=True)
+
+    assert [t.name for t in detail.tags] == ["e2e-new"]
+    assert detail.implicit_tags == ()
+
+
+async def test_removing_a_parent_whose_children_stay_is_refused_naming_them() -> None:
+    setup = Setup()
+
+    with pytest.raises(Validation, match="'e2e-invoices'") as raised:
+        _ = await setup.update(tags_remove=["e2e-finance"])
+
+    assert "also removes" in raised.value.message
+    assert "tags_remove" in (raised.value.hint or "")
+    assert setup.fake.patches == []
+
+
+async def test_removing_a_parent_with_all_its_children_is_allowed() -> None:
+    setup = Setup()
+
+    detail = await setup.update(tags_remove=["e2e-finance", "e2e-invoices"])
+
+    assert {t.name for t in detail.tags} == {"e2e-inbox"}
+
+
+async def test_a_parent_cannot_be_removed_while_a_child_is_added_in_the_same_call() -> None:
+    setup = Setup()
+    setup.document.tags = [1]
+
+    with pytest.raises(Validation, match="'e2e-invoices'"):
+        _ = await setup.update(tags_add=["e2e-invoices"], tags_remove=["e2e-finance"])
+
+
+async def test_tags_set_to_the_parent_alone_drops_the_children() -> None:
+    detail = await Setup().update(tags_set=["e2e-finance"])
+
+    assert [t.name for t in detail.tags] == ["e2e-finance"]
+
+
+async def test_a_title_is_checked_before_a_tag_is_created() -> None:
+    setup = Setup()
+
+    for title in ("x" * 129, "   "):
+        with pytest.raises(Validation):
+            _ = await setup.update(title=title, tags_add=["e2e-new"], create_missing_tags=True)
+
+    assert len(setup.state.tags) == 4
+
+
+async def test_an_unknown_owner_id_is_not_found_before_a_tag_is_created() -> None:
+    setup = Setup()
+
+    with pytest.raises(NotFound, match="No user has id 99"):
+        _ = await setup.update(
+            owner=99, confirm=True, tags_add=["e2e-new"], create_missing_tags=True
+        )
+
+    assert len(setup.state.tags) == 4
+
+
+async def test_an_owner_id_is_left_to_paperless_when_the_user_cannot_list_users() -> None:
+    setup = Setup(READER[0], can_change=True)
+    setup.state.users = [
+        replace(u, permissions=u.permissions - {"view_user"}) for u in setup.state.users
+    ]
+
+    with pytest.raises(Validation, match="owner"):
+        _ = await setup.update(owner=99, confirm=True)
+
+
+async def test_a_failure_after_tags_were_created_names_them() -> None:
+    setup = Setup()
+
+    with pytest.raises(Validation, match="archive serial number") as raised:
+        _ = await setup.update(
+            archive_serial_number=10, tags_add=["e2e-new", "e2e-other"], create_missing_tags=True
+        )
+
+    assert "'e2e-new'" in raised.value.message
+    assert "'e2e-other'" in raised.value.message
+    assert "e2e-new" in {t.name for t in setup.state.tags}
+
+
+@pytest.mark.decision("decision-12")
+async def test_changing_the_owner_needs_confirm_and_writes_nothing_without_it() -> None:
+    setup = Setup()
+
+    with pytest.raises(Validation, match="confirm") as raised:
+        _ = await setup.update(owner="admin", title="never")
+    setup.document.owner = 2
+    with pytest.raises(Validation, match="confirm"):
+        _ = await setup.update(clear=["owner"])
+
+    assert "owner" in raised.value.message
+    assert raised.value.hint
+    assert setup.fake.patches == []
+    assert setup.document.owner == 2
+
+
+@pytest.mark.decision("decision-12")
+async def test_an_owner_that_is_already_right_needs_no_confirm() -> None:
+    setup = Setup()
+    setup.document.owner = 2
+
+    detail = await setup.update(owner="admin", clear=[])
+
+    assert setup.fake.patches == []
+    assert detail.owner is not None
+
+
+@pytest.mark.decision("decision-12")
+async def test_the_owner_check_comes_before_a_tag_is_created() -> None:
+    setup = Setup()
+
+    with pytest.raises(Validation, match="confirm"):
+        _ = await setup.update(owner="admin", tags_add=["e2e-new"], create_missing_tags=True)
+
+    assert len(setup.state.tags) == 4
+
+
+async def test_a_linked_document_must_exist_and_be_visible() -> None:
+    setup = Setup()
+    setup.document.custom_fields[setup.field("e2e-documentlink")] = []
+
+    with pytest.raises(NotFound, match="No document 99") as raised:
+        _ = await setup.update(
+            custom_fields={"e2e-documentlink": [99]}, tags_add=["e2e-new"], create_missing_tags=True
+        )
+
+    assert "search_documents" in raised.value.describe()
+    assert len(setup.state.tags) == 4
+
+
+async def test_links_are_mirrored_on_the_linked_document_and_dropped_from_the_old_one() -> None:
+    setup = Setup()
+    link = setup.field("e2e-documentlink")
+    setup.state.documents.append(FakeDocument(id=3, title="third"))
+
+    _ = await setup.update(custom_fields={"e2e-documentlink": [3]})
+
+    assert setup.state.documents[2].custom_fields[link] == [1]
+    assert setup.state.documents[1].custom_fields[link] == []
+
+
+async def test_a_link_to_a_document_the_user_may_not_change_says_what_is_needed() -> None:
+    setup = Setup(can_change=False)
+    editor = FakeUser(
+        id=9,
+        username="editor",
+        permissions=frozenset(
+            {
+                "view_document",
+                "change_document",
+                "view_customfield",
+                "view_tag",
+                "view_correspondent",
+                "view_documenttype",
+                "view_storagepath",
+                "view_user",
+            }
+        ),
+    )
+    setup.state.users.append(editor)
+    setup.state.documents.append(FakeDocument(id=3, title="view only", owner=2, viewers={9}))
+    setup.state.documents.append(FakeDocument(id=4, title="mine", owner=9))
+    setup.fake = Recording(setup.state, user="editor")
+    setup.taxonomy = TaxonomyResolver(setup.fake, StaticTokenProvider("e"), ttl=60.0)
+    setup.editor = DocumentEditor(
+        setup.fake,
+        setup.fake,
+        setup.fake,
+        setup.taxonomy,
+        documents=DocumentService(setup.fake, setup.taxonomy, web_url=WEB),
+    )
+
+    with pytest.raises(PermissionDenied) as raised:
+        _ = await setup.update(4, custom_fields={"e2e-documentlink": [3]})
+
+    assert "change permission" in raised.value.describe()
+
+
+async def test_links_are_compared_as_sets() -> None:
+    setup = Setup()
+    link = setup.field("e2e-documentlink")
+    setup.state.documents.append(FakeDocument(id=3, title="third"))
+    setup.document.custom_fields[link] = [2, 3]
+
+    _ = await setup.update(custom_fields={"e2e-documentlink": [3, 2]})
+
+    assert setup.fake.patches == []
+
+
+async def test_a_title_is_stripped_before_it_is_compared_and_sent() -> None:
+    setup = Setup()
+
+    same = await setup.update(title="  e2e-public-invoice ")
+    changed = await setup.update(title="  New title\n")
+
+    assert same.title == "e2e-public-invoice"
+    assert changed.title == "New title"
+    assert len(setup.fake.patches) == 1
+
+
+async def test_an_unknown_tag_in_tags_remove_gets_the_plain_hint() -> None:
+    with pytest.raises(NotFound) as raised:
+        _ = await Setup().update(tags_remove=["e2e-financ"])
+
+    assert "create_missing_tags" not in raised.value.describe()
+    assert "e2e-finance" in raised.value.describe()
+
+
+async def test_an_owner_name_needs_the_user_list_and_the_hint_says_to_pass_the_id() -> None:
+    setup = Setup(READER[0], can_change=True)
+
+    with pytest.raises(PermissionDenied) as raised:
+        _ = await setup.update(owner="admin", confirm=True)
+
+    assert "user id" in (raised.value.hint or "")

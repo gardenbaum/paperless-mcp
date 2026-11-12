@@ -7,6 +7,7 @@ the tag hierarchy. Every message is the one Paperless answers, so contract tests
 import re
 from datetime import date
 from typing import TYPE_CHECKING, NoReturn, Protocol
+from urllib.parse import urlsplit
 
 from paperless_mcp.domain.errors import Validation
 
@@ -18,7 +19,8 @@ if TYPE_CHECKING:
     from paperless_mcp.domain.taxonomy import SelectOption
 
 MAX_STRING = 128
-MONEY = re.compile(r"([A-Z]{3})?-?\d+(\.\d{2})?")
+MONEY = re.compile(r"([A-Z]{3})?-?\d{1,10}(\.\d{1,2})?")
+INT_MIN, INT_MAX = -(2**31), 2**31 - 1
 URI_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
 DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -47,13 +49,21 @@ def reject(where: str, message: str) -> NoReturn:
 
 def _integer(value: JsonValue) -> int:
     if isinstance(value, bool):
-        return int(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip()):
-        return int(value)
-    message = "Enter a valid integer."
-    raise ValueError(message)
+        number = int(value)
+    elif isinstance(value, int):
+        number = value
+    elif isinstance(value, str) and re.fullmatch(r"-?\d+", value.strip()):
+        number = int(value)
+    else:
+        message = "Enter a valid integer."
+        raise ValueError(message)
+    if number > INT_MAX:
+        message = f"Ensure this value is less than or equal to {INT_MAX}."
+        raise ValueError(message)
+    if number < INT_MIN:
+        message = f"Ensure this value is greater than or equal to {INT_MIN}."
+        raise ValueError(message)
+    return number
 
 
 def _number(value: JsonValue) -> float:
@@ -84,6 +94,10 @@ def _url(value: JsonValue) -> str:
     url = _text(value, limit=None)
     if not URI_SCHEME.match(url):
         message = f"Unable to parse URI {url}, missing scheme"
+        raise ValueError(message)
+    parts = urlsplit(url)
+    if not (parts.netloc or parts.path):
+        message = f"Unable to parse URI {url}, missing net location or path"
         raise ValueError(message)
     return url
 

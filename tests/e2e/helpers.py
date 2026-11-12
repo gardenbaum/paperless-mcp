@@ -363,6 +363,9 @@ def seed(admin: httpx2.Client) -> Seeded:
             "content": PRIVATE_CONTENT,  # reconciles a stack seeded with the old text
             "archive_serial_number": PRIVATE_ASN,
             "tags": [private_tag],
+            # The mirror of the public document's link; reconciles back-links to documents
+            # that tests linked it to and that are deleted since.
+            "custom_fields": [{"field": fields["documentlink"], "value": [public]}],
             "set_permissions": {
                 "view": {"users": [], "groups": []},
                 "change": {"users": [], "groups": []},

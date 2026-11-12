@@ -33,6 +33,16 @@ def document(stack: Stack) -> Iterator[int]:
 
 
 @pytest.fixture
+def other_document(stack: Stack) -> Iterator[int]:
+    """A second document of its own, to link to (never a seeded one: links are mirrored)."""
+    title = f"plmcp16-{uuid.uuid4().hex}"
+    _, created = consume(stack.admin, title, pdf(title))
+    assert created is not None
+    yield created
+    _ = stack.admin.delete(f"/api/documents/{created}/")
+
+
+@pytest.fixture
 def scratch_tags(stack: Stack) -> Iterator[str]:
     """A tag name unique to the test; a tag of that name is deleted afterwards."""
     name = f"plmcp16-tag-{uuid.uuid4().hex}"
@@ -84,8 +94,13 @@ async def test_setting_one_custom_field_keeps_the_others_on_live_paperless(
 
 
 async def test_every_data_type_is_written_in_the_form_paperless_stores(
-    stack: Stack, document: int
+    stack: Stack, document: int, other_document: int
 ) -> None:
+    other_title = str(
+        obj(
+            parse(stack.admin.get(f"/api/documents/{other_document}/", params={"fields": "title"}))
+        )["title"]
+    )
     detail = await update(
         stack,
         stack.admin_token,
@@ -98,7 +113,7 @@ async def test_every_data_type_is_written_in_the_form_paperless_stores(
             "e2e-integer": 3,
             "e2e-float": 1.5,
             "e2e-monetary": "usd 12.5",
-            "e2e-documentlink": [stack.seeded.private_document],
+            "e2e-documentlink": [other_document],
             "e2e-longtext": "a\nb",
             "e2e-select": "beta",
         },
@@ -112,7 +127,7 @@ async def test_every_data_type_is_written_in_the_form_paperless_stores(
         "e2e-integer": 3,
         "e2e-float": 1.5,
         "e2e-monetary": "USD 12.50",
-        "e2e-documentlink": [{"id": stack.seeded.private_document, "name": "e2e-private-note"}],
+        "e2e-documentlink": [{"id": other_document, "name": other_title}],
         "e2e-longtext": "a\nb",
         "e2e-select": "beta",
     }
@@ -195,7 +210,7 @@ async def test_a_bad_value_changes_nothing_and_a_restricted_user_is_refused(
     assert bad.is_error
     assert "e2e-integer" in str(bad.content)
     assert denied.is_error
-    assert "may not perform this action" in str(denied.content)
+    assert "may not change this document" in str(denied.content)
     title = obj(parse(stack.admin.get(f"/api/documents/{document}/", params={"fields": "title"})))
     assert str(title["title"]).startswith("plmcp16-")
     public = obj(
@@ -214,3 +229,83 @@ async def test_read_only_mode_does_not_offer_the_tool(stack: Stack) -> None:
 
     assert "update_document" not in names
     assert "get_document" in names
+
+
+async def test_the_tag_hierarchy_is_closed_never_silently_dropped_and_idempotent(
+    stack: Stack, document: int
+) -> None:
+    first = await update(stack, stack.admin_token, document, tags_set=["e2e-invoices", "e2e-inbox"])
+    again = await update(stack, stack.admin_token, document, tags_set=["e2e-invoices", "e2e-inbox"])
+    parent_only = await update(stack, stack.admin_token, document, tags_set=["e2e-finance"])
+    child_again = await update(stack, stack.admin_token, document, tags_add=["e2e-invoices"])
+
+    assert tag_names(first) == {"e2e-finance", "e2e-invoices", "e2e-inbox"}
+    assert [t["name"] for t in cast("list[Json]", first["implicit_tags"])] == ["e2e-finance"]
+    assert again["modified"] == first["modified"]
+    assert again["implicit_tags"] == []
+    assert tag_names(parent_only) == {"e2e-finance"}
+    assert tag_names(child_again) == {"e2e-finance", "e2e-invoices"}
+
+
+async def test_a_parent_tag_whose_children_stay_cannot_be_removed(
+    stack: Stack, document: int
+) -> None:
+    _ = await update(stack, stack.admin_token, document, tags_set=["e2e-invoices"])
+    async with Client(server(stack, stack.admin_token)) as client:
+        refused = await client.call_tool(
+            "update_document",
+            {"document_id": document, "tags_remove": ["e2e-finance"]},
+            raise_on_error=False,
+        )
+    both = await update(
+        stack, stack.admin_token, document, tags_remove=["e2e-finance", "e2e-invoices"]
+    )
+
+    assert refused.is_error
+    assert "'e2e-invoices'" in str(refused.content)
+    assert tag_names(both) == set()
+
+
+async def test_links_are_mirrored_and_a_hidden_document_cannot_be_linked(
+    stack: Stack, document: int, other_document: int
+) -> None:
+    _ = await update(
+        stack, stack.admin_token, document, custom_fields={"e2e-documentlink": [other_document]}
+    )
+    mirrored = obj(
+        parse(
+            stack.admin.get(f"/api/documents/{other_document}/", params={"fields": "custom_fields"})
+        )
+    )
+    async with Client(server(stack, stack.reader_token)) as client:
+        hidden = await client.call_tool(
+            "update_document",
+            {
+                "document_id": stack.seeded.public_document,
+                "custom_fields": {"e2e-documentlink": [document]},
+            },
+            raise_on_error=False,
+        )
+
+    assert mirrored["custom_fields"] == [
+        {"field": stack.seeded.custom_fields["documentlink"], "value": [document]}
+    ]
+    assert hidden.is_error
+
+
+@pytest.mark.decision("decision-12")
+async def test_an_owner_change_needs_confirm_and_then_hands_the_document_over(
+    stack: Stack, document: int
+) -> None:
+    async with Client(server(stack, stack.admin_token)) as client:
+        refused = await client.call_tool(
+            "update_document", {"document_id": document, "clear": ["owner"]}, raise_on_error=False
+        )
+        done = await client.call_tool(
+            "update_document", {"document_id": document, "clear": ["owner"], "confirm": True}
+        )
+
+    assert refused.is_error
+    assert "confirm=true" in str(refused.content)
+    assert done.structured_content is not None
+    assert done.structured_content["owner"] is None

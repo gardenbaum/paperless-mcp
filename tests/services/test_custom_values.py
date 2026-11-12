@@ -43,6 +43,10 @@ def field(data_type: str, *options: tuple[str, str]) -> TaxonomyItem:
         ("boolean", False, False),
         ("integer", 7, 7),
         ("integer", -3, -3),
+        ("integer", 2_147_483_647, 2_147_483_647),
+        ("integer", -2_147_483_648, -2_147_483_648),
+        ("url", "a:b", "a:b"),
+        ("monetary", "9999999999.99", "9999999999.99"),
         ("float", 2.5, 2.5),
         ("float", 3, 3),
         ("monetary", "EUR12.50", "EUR12.50"),
@@ -107,6 +111,13 @@ def test_labels_that_differ_only_in_case_are_ambiguous_unless_one_is_exact() -> 
         ("boolean", "true", "true or false"),
         ("boolean", 1, "true or false"),
         ("integer", 1.5, "whole number"),
+        ("integer", 2_147_483_648, "whole number"),
+        ("integer", -2_147_483_649, "whole number"),
+        ("url", "http:", "URL"),
+        ("url", "http://", "URL"),
+        ("url", "a b:c", "URL"),
+        ("monetary", "EUR99999999999", "currency"),
+        ("monetary", 10**11, "currency"),
         ("integer", "7", "whole number"),
         ("integer", True, "whole number"),
         ("float", "2.5", "number"),
@@ -146,8 +157,10 @@ def test_no_value_is_rejected_with_a_pointer_to_removal() -> None:
 
 
 def test_a_field_of_an_unknown_type_is_rejected_rather_than_sent_blind() -> None:
-    with pytest.raises(Validation, match="data type"):
+    with pytest.raises(Validation, match="data type") as raised:
         _ = normalise(field("holographic"), "x")
+
+    assert raised.value.hint
 
 
 @given(

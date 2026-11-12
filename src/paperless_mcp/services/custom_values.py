@@ -12,6 +12,7 @@ import re
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlsplit
 
 from paperless_mcp.domain.errors import Ambiguous, Validation
 from paperless_mcp.services.taxonomy import fold
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 
 MAX_STRING = 128
 MONEY_DECIMALS = 2
+MONEY_INTEGER_DIGITS = 10  # Paperless stores at most 12 digits, two of them decimals
+INT_MIN, INT_MAX = -(2**31), 2**31 - 1  # Paperless stores 32-bit integers
 URI_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:\S*")
 DAY = re.compile(r"\d{4}-\d{2}-\d{2}")
 AMOUNT = re.compile(
@@ -80,6 +83,14 @@ def _money(field: TaxonomyItem, value: object) -> str:
     amount = Decimal(str(parts["amount"]))
     if not amount.is_finite():
         raise Validation(expected, hint=hint)
+    if (
+        len(amount.as_tuple().digits) + cast("int", amount.as_tuple().exponent)
+        > MONEY_INTEGER_DIGITS
+    ):
+        raise Validation(
+            expected,
+            hint=f"{hint} Amounts have at most {MONEY_INTEGER_DIGITS} digits before the point.",
+        )
     if cast("int", amount.as_tuple().exponent) < -MONEY_DECIMALS:
         message = f"The amount for {field.name!r} has more than two decimals."
         raise Validation(message, hint=hint)
@@ -121,7 +132,8 @@ def _string(field: TaxonomyItem, value: object) -> str:
 
 def _url(field: TaxonomyItem, value: object) -> str:
     url = value if isinstance(value, str) else ""
-    if not URI_SCHEME.fullmatch(url):
+    parts = urlsplit(url) if URI_SCHEME.fullmatch(url) else None
+    if parts is None or not (parts.netloc or parts.path):
         message = f"Custom field {field.name!r} takes a URL with a scheme."
         raise Validation(message, hint="Pass e.g. 'https://example.com'.")
     return url
@@ -135,9 +147,9 @@ def _boolean(field: TaxonomyItem, value: object) -> bool:
 
 
 def _integer(field: TaxonomyItem, value: object) -> int:
-    if not isinstance(value, int) or isinstance(value, bool):
-        message = f"Custom field {field.name!r} takes a whole number."
-        raise Validation(message, hint="Pass a JSON integer, e.g. 42.")
+    if not isinstance(value, int) or isinstance(value, bool) or not INT_MIN <= value <= INT_MAX:
+        message = f"Custom field {field.name!r} takes a whole number from {INT_MIN} to {INT_MAX}."
+        raise Validation(message, hint="Pass a JSON integer, e.g. 42; use a float for larger ones.")
     return value
 
 
@@ -177,5 +189,5 @@ def normalise(field: TaxonomyItem, value: object) -> JsonValue:
     if check is None:
         kind = field.data_type
         message = f"Custom field {field.name!r} has the data type {kind!r}, which is not supported."
-        raise Validation(message)
+        raise Validation(message, hint="Leave this field out; it cannot be set through this tool.")
     return check(field, value)

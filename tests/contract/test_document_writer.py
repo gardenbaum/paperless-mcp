@@ -173,10 +173,7 @@ async def test_values_of_every_data_type_are_stored_as_sent(backend: Backend) ->
     ports, document = backend.admin, backend.new_document()
     items = {item.name: item for item in await ports.taxonomy.list_taxonomy("custom_field")}
     [option] = [o for o in (items["e2e-select"].select_options or ()) if o.label == "beta"]
-    found = await ports.documents.search_documents(
-        DocumentQuery(title_contains="e2e-private"), page=1, page_size=1
-    )
-    linked: JsonValue = [found.hits[0].id]
+    linked: JsonValue = [backend.new_document()]
     sent: dict[str, JsonValue] = {
         "e2e-string": "hello",
         "e2e-url": "https://example.com/contract",
@@ -217,6 +214,9 @@ async def test_values_of_every_data_type_are_stored_as_sent(backend: Backend) ->
         ("e2e-documentlink", "1", "must be a list"),
         ("e2e-url", "not a url", "missing scheme"),
         ("e2e-string", "x" * 300, "at most 128"),
+        ("e2e-integer", 2_147_483_648, "less than or equal"),
+        ("e2e-url", "http://", "net location or path"),
+        ("e2e-monetary", "9" * 12, "two-decimal"),
     ],
 )
 async def test_a_value_of_the_wrong_kind_is_rejected_and_nothing_changes(
@@ -277,3 +277,52 @@ async def test_a_user_without_the_change_permission_is_denied(backend: Backend) 
             _ = await ports.document_writes.update_document(document, DocumentPatch(title="x"))
 
     assert await read(backend.admin, document) == before
+
+
+@pytest.mark.contract(CONTRACT)
+async def test_a_monetary_value_with_one_decimal_is_stored_as_sent(backend: Backend) -> None:
+    ports, document = backend.admin, backend.new_document()
+    field = (await ids(ports, "custom_field"))["e2e-monetary"]
+
+    after = await ports.document_writes.update_document(
+        document, DocumentPatch(custom_fields=(CustomFieldValue(field=field, value="EUR12.5"),))
+    )
+
+    assert values(after) == {field: "EUR12.5"}
+
+
+@pytest.mark.contract(CONTRACT)
+async def test_a_document_link_is_mirrored_on_the_linked_document_and_unlinked_with_it(
+    backend: Backend,
+) -> None:
+    """Paperless keeps document links symmetrical (usage.md, "Document Link")."""
+    ports = backend.admin
+    first, second = backend.new_document(), backend.new_document()
+    link = (await ids(ports, "custom_field"))["e2e-documentlink"]
+
+    _ = await ports.document_writes.update_document(
+        first, DocumentPatch(custom_fields=(CustomFieldValue(field=link, value=[second]),))
+    )
+    linked = values(await read(ports, second))
+    _ = await ports.document_writes.update_document(first, DocumentPatch(custom_fields=()))
+    unlinked = values(await read(ports, second))
+
+    assert linked == {link: [first]}
+    assert unlinked.get(link, []) == []
+
+
+@pytest.mark.contract(CONTRACT)
+async def test_a_document_reports_whether_the_user_may_change_it(backend: Backend) -> None:
+    document = backend.new_document()
+    public = (
+        (
+            await backend.admin.documents.search_documents(
+                DocumentQuery(title_contains="e2e-public"), page=1, page_size=1
+            )
+        )
+        .hits[0]
+        .id
+    )
+
+    assert (await read(backend.admin, document)).user_can_change is True
+    assert (await read(backend.reader, public)).user_can_change is False

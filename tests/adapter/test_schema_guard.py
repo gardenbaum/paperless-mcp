@@ -186,7 +186,6 @@ def test_a_document_patch_may_carry_boolean_and_id_list_custom_field_values() ->
                     {"field": 1, "value": True},
                     {"field": 2, "value": [3, 4]},
                     {"field": 3, "value": "EUR12.50"},
-                    {"field": 4, "value": None},
                 ],
             }
         )
@@ -200,6 +199,7 @@ def test_a_document_patch_may_carry_boolean_and_id_list_custom_field_values() ->
         {"tags": "one"},
         {"custom_fields": [{"field": "one", "value": True}]},
         {"custom_fields": [{"value": True}]},
+        {"custom_fields": [{"field": 1, "value": None}]},
         {"custom_fields": [{"field": 1, "value": {"nested": 1}}, {"field": 2}]},
     ],
 )

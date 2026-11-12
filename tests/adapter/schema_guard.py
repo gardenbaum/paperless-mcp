@@ -99,12 +99,11 @@ FILE_RESPONSES: Mapping[tuple[str, str], str] = {
     ("GET", "/api/documents/{id}/download/"): "the original or archive file as stored (PLMCP-12)",
 }
 # Requests whose custom field values the schema describes too narrowly (the value's oneOf omits
-# booleans, id lists and null): (method, path template) -> reason. Such values are replaced by a
+# booleans and id lists): (method, path template) -> reason. Such values are replaced by a
 # string before the body is validated; the rest of the body is checked as usual.
 NARROW_VALUE_REQUESTS: Mapping[tuple[str, str], str] = {
     ("PATCH", "/api/documents/{id}/"): (
-        "custom field values can be booleans, id lists and null, which the value's oneOf omits "
-        "(PLMCP-16)"
+        "custom field values can be booleans and id lists, which the value's oneOf omits (PLMCP-16)"
     ),
 }
 # drf-spectacular documents no error responses. Paperless (Django REST framework) answers 4xx with
@@ -240,7 +239,7 @@ def _narrowed(request: httpx2.Request) -> bytes | None:
         for item in cast("list[object]", fields):
             if isinstance(item, dict) and "value" in item:
                 value = cast("Json", item)["value"]
-                if value is None or isinstance(value, bool | list):
+                if isinstance(value, bool | list):
                     cast("Json", item)["value"] = "value"
     return json.dumps(body).encode()
 

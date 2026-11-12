@@ -141,6 +141,7 @@ class DocumentEdit(BaseModel):
     tags_remove: tuple[NameOrId, ...] = ()
     tags_set: tuple[NameOrId, ...] | None = None
     create_missing_tags: bool = False
+    confirm: bool = False
     custom_fields: dict[str, JsonValue] = Field(default_factory=dict[str, JsonValue])
     remove_custom_fields: tuple[NameOrId, ...] = ()
 
@@ -310,6 +311,7 @@ class DocumentRecord(BaseModel):
     page_count: int | None
     notes_count: int
     versions: tuple[DocumentVersion, ...]
+    user_can_change: bool
 
 
 class SuggestionNames(BaseModel):
@@ -372,6 +374,20 @@ class DocumentDetail(BaseModel):
     unavailable: Annotated[
         tuple[Include, ...],
         Field(description="Included sections the user may not read in Paperless."),
+    ] = ()
+
+
+class DocumentUpdate(DocumentDetail):
+    """The document after an update, and what the update added on its own."""
+
+    implicit_tags: Annotated[
+        tuple[Ref, ...],
+        Field(
+            description=(
+                "Parent tags added because a child tag was added or kept: Paperless tags are "
+                "hierarchical and a child needs its parent."
+            )
+        ),
     ] = ()
 
 

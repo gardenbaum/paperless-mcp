@@ -25,6 +25,7 @@ from paperless_mcp.domain.documents import (
     DocumentEdit,
     DocumentQuery,
     DocumentSearchResult,
+    DocumentUpdate,
     FileReport,
     FileVersion,
     Include,
@@ -374,7 +375,22 @@ async def update_document(  # noqa: PLR0913 -- one parameter per changeable fiel
         ),
     ] = None,
     create_missing_tags: Annotated[
-        bool, Field(description="Create tags in tags_add or tags_set that do not exist yet.")
+        bool,
+        Field(
+            description=(
+                "Create tags in tags_add or tags_set that do not exist yet; they are private to "
+                "you (their creator) until shared. Names of only digits are read as ids."
+            )
+        ),
+    ] = False,
+    confirm: Annotated[
+        bool,
+        Field(
+            description=(
+                "Required to change owner (also to no owner): the new owner takes the document "
+                "over and you may lose access, which you cannot undo yourself."
+            )
+        ),
     ] = False,
     custom_fields: Annotated[
         dict[str, JsonValue] | None,
@@ -391,14 +407,18 @@ async def update_document(  # noqa: PLR0913 -- one parameter per changeable fiel
         list[NameOrId] | None,
         Field(description="Custom field names or ids to take off the document."),
     ] = None,
-) -> DocumentDetail:
+) -> DocumentUpdate:
     """Change a document's title, correspondent, type, storage path, dates, owner, tags or custom fields.
 
     Only what you name changes; everything else stays, also the other custom fields and tags.
     Names match like in search_documents; an unknown or ambiguous name is an error that lists
-    candidates and nothing is changed. Tags are hierarchical in Paperless: adding a child tag
-    adds its parent, removing a parent removes its children. Asking for what already holds
-    changes nothing. Returns the document as get_document does.
+    candidates and nothing is changed. Tags are hierarchical in Paperless: a child tag always
+    comes with its parent (implicit_tags lists parents added for you), and removing a parent
+    while its children stay is refused. Document links are symmetrical: linking A to B also
+    links B to A and needs change permission on B. Asking for what already holds changes
+    nothing. It reads, then writes: a concurrent change of the same document's tags or custom
+    fields in between is overwritten. Tags created with create_missing_tags are private to
+    you; tag names that are only numbers cannot be addressed by name. Returns the document as get_document does, plus implicit_tags.
     """  # noqa: E501 -- see list_taxonomy; FastMCP sends the docstring as is
     edit = DocumentEdit(
         title=title,
@@ -413,6 +433,7 @@ async def update_document(  # noqa: PLR0913 -- one parameter per changeable fiel
         tags_remove=tuple(tags_remove or ()),
         tags_set=None if tags_set is None else tuple(tags_set),
         create_missing_tags=create_missing_tags,
+        confirm=confirm,
         custom_fields=custom_fields or {},
         remove_custom_fields=tuple(remove_custom_fields or ()),
     )

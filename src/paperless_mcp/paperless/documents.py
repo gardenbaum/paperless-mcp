@@ -47,7 +47,7 @@ FIELDS = "id,title,created,added,correspondent,document_type,storage_path,tags,c
 DETAIL_FIELDS = (
     "id,title,created,added,modified,archive_serial_number,owner,correspondent,document_type,"
     "storage_path,tags,custom_fields,original_file_name,mime_type,page_count,"
-    "notes,versions"
+    "notes,versions,user_can_change"
 )
 
 
@@ -110,6 +110,7 @@ class _Detail(BaseModel):
     page_count: int | None
     notes: list[_Note]
     versions: list[_Version]
+    user_can_change: bool
 
 
 class _Title(BaseModel):
@@ -267,6 +268,7 @@ def _record(row: _Detail) -> DocumentRecord:
             )
             for v in row.versions
         ),
+        user_can_change=row.user_can_change,
     )
 
 

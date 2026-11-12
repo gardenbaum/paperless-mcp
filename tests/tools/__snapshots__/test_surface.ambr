@@ -2407,9 +2407,13 @@
         
         Only what you name changes; everything else stays, also the other custom fields and tags.
         Names match like in search_documents; an unknown or ambiguous name is an error that lists
-        candidates and nothing is changed. Tags are hierarchical in Paperless: adding a child tag
-        adds its parent, removing a parent removes its children. Asking for what already holds
-        changes nothing. Returns the document as get_document does.
+        candidates and nothing is changed. Tags are hierarchical in Paperless: a child tag always
+        comes with its parent (implicit_tags lists parents added for you), and removing a parent
+        while its children stay is refused. Document links are symmetrical: linking A to B also
+        links B to A and needs change permission on B. Asking for what already holds changes
+        nothing. It reads, then writes: a concurrent change of the same document's tags or custom
+        fields in between is overwritten. Tags created with create_missing_tags are private to
+        you; tag names that are only numbers cannot be addressed by name. Returns the document as get_document does, plus implicit_tags.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -2449,6 +2453,11 @@
             'default': None,
             'description': 'Fields to empty: correspondent, document_type, storage_path, archive_serial_number or owner (no owner makes the document visible to every user with the document permission).',
           }),
+          'confirm': dict({
+            'default': False,
+            'description': 'Required to change owner (also to no owner): the new owner takes the document over and you may lose access, which you cannot undo yourself.',
+            'type': 'boolean',
+          }),
           'correspondent': dict({
             'anyOf': list([
               dict({
@@ -2470,7 +2479,7 @@
           }),
           'create_missing_tags': dict({
             'default': False,
-            'description': 'Create tags in tags_add or tags_set that do not exist yet.',
+            'description': 'Create tags in tags_add or tags_set that do not exist yet; they are private to you (their creator) until shared. Names of only digits are read as ids.',
             'type': 'boolean',
           }),
           'created': dict({
@@ -2669,7 +2678,7 @@
       }),
       'name': 'update_document',
       'outputSchema': dict({
-        'description': 'A document with names, readable custom fields and what ``include`` asked for.',
+        'description': 'The document after an update, and what the update added on its own.',
         'properties': dict({
           'added': dict({
             'format': 'date-time',
@@ -2927,6 +2936,35 @@
           }),
           'id': dict({
             'type': 'integer',
+          }),
+          'implicit_tags': dict({
+            'default': list([
+            ]),
+            'description': 'Parent tags added because a child tag was added or kept: Paperless tags are hierarchical and a child needs its parent.',
+            'items': dict({
+              'description': 'An object a document refers to; name is null if the user may not see it.',
+              'properties': dict({
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
           }),
           'mime_type': dict({
             'type': 'string',
@@ -5434,9 +5472,13 @@
         
         Only what you name changes; everything else stays, also the other custom fields and tags.
         Names match like in search_documents; an unknown or ambiguous name is an error that lists
-        candidates and nothing is changed. Tags are hierarchical in Paperless: adding a child tag
-        adds its parent, removing a parent removes its children. Asking for what already holds
-        changes nothing. Returns the document as get_document does.
+        candidates and nothing is changed. Tags are hierarchical in Paperless: a child tag always
+        comes with its parent (implicit_tags lists parents added for you), and removing a parent
+        while its children stay is refused. Document links are symmetrical: linking A to B also
+        links B to A and needs change permission on B. Asking for what already holds changes
+        nothing. It reads, then writes: a concurrent change of the same document's tags or custom
+        fields in between is overwritten. Tags created with create_missing_tags are private to
+        you; tag names that are only numbers cannot be addressed by name. Returns the document as get_document does, plus implicit_tags.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -5476,6 +5518,11 @@
             'default': None,
             'description': 'Fields to empty: correspondent, document_type, storage_path, archive_serial_number or owner (no owner makes the document visible to every user with the document permission).',
           }),
+          'confirm': dict({
+            'default': False,
+            'description': 'Required to change owner (also to no owner): the new owner takes the document over and you may lose access, which you cannot undo yourself.',
+            'type': 'boolean',
+          }),
           'correspondent': dict({
             'anyOf': list([
               dict({
@@ -5497,7 +5544,7 @@
           }),
           'create_missing_tags': dict({
             'default': False,
-            'description': 'Create tags in tags_add or tags_set that do not exist yet.',
+            'description': 'Create tags in tags_add or tags_set that do not exist yet; they are private to you (their creator) until shared. Names of only digits are read as ids.',
             'type': 'boolean',
           }),
           'created': dict({
@@ -5696,7 +5743,7 @@
       }),
       'name': 'update_document',
       'outputSchema': dict({
-        'description': 'A document with names, readable custom fields and what ``include`` asked for.',
+        'description': 'The document after an update, and what the update added on its own.',
         'properties': dict({
           'added': dict({
             'format': 'date-time',
@@ -5954,6 +6001,35 @@
           }),
           'id': dict({
             'type': 'integer',
+          }),
+          'implicit_tags': dict({
+            'default': list([
+            ]),
+            'description': 'Parent tags added because a child tag was added or kept: Paperless tags are hierarchical and a child needs its parent.',
+            'items': dict({
+              'description': 'An object a document refers to; name is null if the user may not see it.',
+              'properties': dict({
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
           }),
           'mime_type': dict({
             'type': 'string',

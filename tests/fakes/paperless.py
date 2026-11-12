@@ -117,6 +117,15 @@ class FakeUser:
         """Django's `has_perm`: superusers have every permission."""
         return self.is_superuser or permission in self.permissions
 
+    def may_change(self, document: Owned) -> bool:
+        """Whether the user may change `document`: `change_document` and ownership.
+
+        Known gap: object-level change grants are not modelled, so a user who does not own a
+        document and is not a superuser cannot change it here.
+        """
+        owns = self.is_superuser or document.owner in {None, self.id}
+        return owns and self.has("change_document")
+
 
 @dataclass(kw_only=True)
 class Owned:
@@ -396,6 +405,7 @@ def seeded() -> FakeState:
                 owner=admin.id,
                 archive_serial_number=PRIVATE_ASN,
                 tags=[3],
+                custom_fields={fields[7].id: [1]},  # the mirror of the public document's link
                 history=[_created(2, "e2e-private-note", PRIVATE_CONTENT)],
                 versions=[_root_version(2)],
             ),
@@ -669,7 +679,7 @@ class FakePaperless:
 
     async def get_document(self, document_id: int) -> DocumentRecord:
         """`DocumentReader.get_document` (DocumentViewSet.retrieve, `fields=` without content)."""
-        return _record(self._seen(document_id))
+        return _record(self._seen(document_id), self.user)
 
     @write
     async def update_document(self, document_id: int, patch: DocumentPatch) -> DocumentRecord:
@@ -686,13 +696,15 @@ class FakePaperless:
             message = "The Paperless user may not perform this action."
             raise PermissionDenied(message)
         document = self._seen(document_id)
-        if document.owner not in {None, self.user.id} and not self.user.is_superuser:
+        if not self.user.may_change(document):
             message = "The Paperless user may not perform this action."
             raise PermissionDenied(message)
         changes = self._changes(document, patch)
+        if "custom_fields" in changes:
+            self._mirror_links(document, cast("dict[int, JsonValue]", changes["custom_fields"]))
         document.__dict__.update(changes)
         document.modified = datetime.now(UTC)
-        return _record(document)
+        return _record(document, self.user)
 
     def _changes(self, document: FakeDocument, patch: DocumentPatch) -> dict[str, object]:
         """The attributes `patch` sets, validated like the serializer; nothing is applied."""
@@ -735,6 +747,33 @@ class FakePaperless:
             if any(taken):
                 message = "document with this archive serial number already exists."
                 reject("archive_serial_number", message)
+
+    def _mirror_links(self, document: FakeDocument, new: dict[int, JsonValue]) -> None:
+        """Keep document links symmetrical like Paperless: link and unlink the other side.
+
+        Linking needs change permission on every document linked to (403 otherwise, also for a
+        document the user cannot see); the other side keeps an empty list when unlinked.
+        """
+        link_fields = [f.id for f in self.state.custom_fields if f.data_type == "documentlink"]
+
+        def targets(fields: dict[int, JsonValue], number: int) -> set[int]:
+            return set(cast("list[int]", fields.get(number) or []))
+
+        by_id = {d.id: d for d in self.state.documents}
+        added = {n: targets(new, n) - targets(document.custom_fields, n) for n in link_fields}
+        if any(not self.user.may_change(by_id[t]) for ids in added.values() for t in ids):
+            message = "Insufficient permissions."
+            raise PermissionDenied(message)
+        for number in link_fields:
+            for target in added[number]:
+                other = by_id[target].custom_fields
+                other[number] = [*cast("list[int]", other.get(number) or []), document.id]
+            for target in targets(document.custom_fields, number) - targets(new, number):
+                if target in by_id:
+                    other = by_id[target].custom_fields
+                    other[number] = [
+                        n for n in cast("list[int]", other.get(number)) if n != document.id
+                    ]
 
     def _custom_fields(self, patch: DocumentPatch) -> dict[int, JsonValue]:
         """The new custom field values; a field named twice keeps its last value."""
@@ -937,7 +976,7 @@ def _ordered(
     return sorted(documents, key=key, reverse=ordering.startswith("-"))
 
 
-def _record(document: FakeDocument) -> DocumentRecord:
+def _record(document: FakeDocument, user: FakeUser) -> DocumentRecord:
     return DocumentRecord(
         id=document.id,
         title=document.title,
@@ -959,6 +998,7 @@ def _record(document: FakeDocument) -> DocumentRecord:
         page_count=document.page_count,
         notes_count=len(document.notes),
         versions=tuple(document.versions),
+        user_can_change=user.may_change(document),
     )
 
 

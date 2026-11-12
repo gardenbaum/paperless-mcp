@@ -106,7 +106,7 @@ async def test_unknown_tags_are_created_when_asked() -> None:
 async def test_a_user_without_the_change_permission_gets_a_permission_error() -> None:
     fake = FakePaperless(seeded(), user="e2e-reader", allow_writes=True)
 
-    assert "may not perform this action" in await failure(fake, title="x")
+    assert "may not change this document" in await failure(fake, title="x")
 
 
 async def test_the_tool_is_offered_by_default_and_hidden_in_read_only_mode() -> None:
@@ -129,3 +129,31 @@ async def test_the_annotations_say_it_writes_without_destroying_and_can_repeat()
     assert tool.annotations.destructive_hint is False
     assert tool.annotations.idempotent_hint is True
     assert tool.annotations.open_world_hint is False
+
+
+@pytest.mark.decision("decision-12")
+async def test_changing_the_owner_needs_confirm_true() -> None:
+    state = seeded()
+    refused = await failure(writer(state), owner="admin")
+    output = await update(writer(state), owner="admin", confirm=True)
+
+    assert "confirm=true" in refused
+    assert cast("Json", output["owner"])["name"] == "admin"
+
+
+async def test_a_child_tag_brings_its_parent_and_the_result_names_it() -> None:
+    state = seeded()
+    state.documents[0].tags = []
+
+    output = await update(writer(state), tags_add=["e2e-invoices"])
+
+    assert [t["name"] for t in cast("list[Json]", output["implicit_tags"])] == ["e2e-finance"]
+
+
+async def test_the_description_tells_the_surprises() -> None:
+    async with Client(serve(writer())) as client:
+        [tool] = [t for t in await client.list_tools() if t.name == "update_document"]
+    text = tool.description or ""
+
+    for phrase in ("symmetrical", "private to", "numbers", "concurrent"):
+        assert phrase in text
