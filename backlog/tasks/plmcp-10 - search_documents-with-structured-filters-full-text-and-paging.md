@@ -1,11 +1,11 @@
 ---
 id: PLMCP-10
 title: search_documents with structured filters, full text and paging
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T16:56:00Z'
+updated_date: '2026-11-12T16:57:00Z'
 labels: []
 milestone: m-1
 dependencies:
@@ -35,7 +35,7 @@ The main entry point for finding documents. It must accept names, dates and cust
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #2 just check passes locally and all required CI checks are green on the PR
 - [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
@@ -66,5 +66,5 @@ Review fixes: FakePaperless.search_documents now enforces the global view_docume
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-search_documents (core toolset) finds documents by full text (Tantivy syntax passed through), more-like id, title, correspondent/document type/storage path/tags all/any/none and owner by name or id, created/added date ranges, inbox and Paperless's custom_field_query (relative dates included), with ordering and paging (default 25, max 100). One GET per call with fields=, so OCR content is never fetched; rows carry names, readable custom-field values (select labels, 'EUR 12.50'), highlights (also from notes) and web_url (PAPERLESS_PUBLIC_URL or PAPERLESS_URL). Names resolve via TaxonomyResolver (decision-5); contradicting filters, unknown/ambiguous names, rejected queries, hidden more-like ids and pages past the end are errors with hints. New DocumentReader port with adapter, FakePaperless implementation and contract tests on fake and live 3.4.2; e2e through the assembled server. Deliberate changes: TaxonomyItem.select_options now holds (id, label) pairs (list_taxonomy schema, snapshot); two schema-guard deviations for GET /api/documents/ (200 with fields=, 403 text/html). Risks: the more-like contract test depends on the live search index; the fake supports only a subset of custom_field_query. DoD #1 left unchecked: the adapter tests followed the adapter draft.
+search_documents (core toolset) finds documents by full text (Tantivy syntax passed through), more-like id, title, correspondent/document type/storage path/tags all/any/none and owner by name or id, created/added date ranges, inbox and Paperless's custom_field_query (relative dates included), with ordering and paging (default 25, max 100). One GET per call with fields=, so OCR content is never fetched; rows carry names, readable custom-field values (select labels, 'EUR 12.50'), highlights (also from notes) and web_url (PAPERLESS_PUBLIC_URL or PAPERLESS_URL). Names resolve via TaxonomyResolver (decision-5); contradicting filters, unknown/ambiguous names, rejected queries, hidden more-like ids and pages past the end are errors with hints. New DocumentReader port with adapter, FakePaperless implementation and contract tests on fake and live 3.4.2; e2e through the assembled server. Deliberate changes: TaxonomyItem.select_options now holds (id, label) pairs (list_taxonomy schema, snapshot); two schema-guard deviations for GET /api/documents/ (200 with fields=, 403 text/html). Risks: the more-like contract test depends on the live search index; the fake supports only a subset of custom_field_query. DoD #1 left unchecked: the adapter tests followed the adapter draft. Codex review on PR #14 (supersedes #13, whose CI runs hung after a GitHub incident): the fake now enforces the global view_document permission (new seeded user e2e-blind) and orders archive_serial_number numerically, both with contract tests on fake and live 3.4.2. DoD #4 is checked by the merge itself.
 <!-- SECTION:FINAL_SUMMARY:END -->
