@@ -35,6 +35,13 @@ type Params = Mapping[str, str | int]
 type Files = Mapping[str, tuple[str, bytes, str]]
 type Sleep = Callable[[float], Awaitable[None]]
 type Clock = Callable[[], datetime]
+type Jitter = Callable[[float], float]
+
+
+def random_wait(cap: float) -> float:
+    """A random wait between zero and ``cap`` seconds."""
+    return random.uniform(0.0, cap)  # noqa: S311 -- jitter, not cryptography
+
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +134,7 @@ class PaperlessClient:
         upload_timeout: float,
         sleep: Sleep = asyncio.sleep,
         now: Clock = utc_now,
+        jitter: Jitter = random_wait,
     ) -> None:
         """Create the client.
 
@@ -137,6 +145,7 @@ class PaperlessClient:
             upload_timeout: Timeout in seconds for requests that send files.
             sleep: Waits between retries; injectable so tests do not wait.
             now: Current time, for ``Retry-After`` dates; injectable for tests.
+            jitter: Picks the wait below a cap when no ``Retry-After`` says; injectable for tests.
         """
         self._http: httpx2.AsyncClient = http
         self._credentials: CredentialProvider = credentials
@@ -144,6 +153,7 @@ class PaperlessClient:
         self._upload_timeout: float = upload_timeout
         self._sleep: Sleep = sleep
         self._now: Clock = now
+        self._jitter: Jitter = jitter
 
     async def request(  # noqa: PLR0913 -- mirrors httpx2's request(); the parts are keyword-only
         self,
@@ -284,7 +294,7 @@ class PaperlessClient:
         delay = retry_after(response.headers.get("Retry-After", ""), self._now())
         if delay is None:
             cap = self._retry.backoff * 2.0 ** (attempt - 1)
-            delay = random.uniform(0.0, cap)  # noqa: S311 -- jitter, not cryptography
+            delay = self._jitter(cap)
         return delay if waited + delay <= self._retry.budget else None
 
     async def _send(self, request: httpx2.Request, *, stream: bool) -> httpx2.Response:

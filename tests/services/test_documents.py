@@ -462,19 +462,26 @@ def test_a_document_link_drops_only_trailing_slashes_of_the_base(
     assert document_link(web_url, 7) == expected
 
 
+BOTH = ["e2e-private-note", "e2e-public-invoice"]
+
+
 @pytest.mark.parametrize(
-    "query",
+    ("query", "expected"),
     [
-        DocumentQuery(created_to=date(2026, 1, 1)),
-        DocumentQuery(created_from=date(2026, 1, 1)),
-        DocumentQuery(created_from=date(2026, 1, 1), created_to=date(2026, 1, 1)),
-        DocumentQuery(added_from=date(2026, 1, 1), added_to=date(2026, 1, 1)),
+        (DocumentQuery(created_to=date(2026, 11, 11)), BOTH),
+        (DocumentQuery(created_from=date(2026, 11, 11)), BOTH),
+        (DocumentQuery(created_from=date(2026, 11, 11), created_to=date(2026, 11, 11)), BOTH),
+        (DocumentQuery(added_from=date(2026, 11, 11), added_to=date(2026, 11, 11)), BOTH),
+        (DocumentQuery(created_to=date(2026, 11, 10)), []),
+        (DocumentQuery(created_from=date(2026, 11, 12)), []),
     ],
 )
-async def test_open_and_single_day_date_ranges_are_not_contradictions(query: DocumentQuery) -> None:
+async def test_open_and_single_day_date_ranges_are_not_contradictions(
+    query: DocumentQuery, expected: list[str]
+) -> None:
     found = await admin().search(NameFilters(), query, page=1, page_size=25)
 
-    assert found.page == 1
+    assert sorted(document.title for document in found.documents) == expected
 
 
 async def test_contradictions_are_explained_word_for_word() -> None:
@@ -517,8 +524,7 @@ async def test_an_owner_name_without_the_user_list_gets_the_exact_advice() -> No
         _ = await titles(search, NameFilters(owner="admin"))
 
     assert raised.value.hint == "Pass the owner's user id instead of the username."
-    assert raised.value.message  # the resolver's own message is kept
-    assert raised.value.message != "None"
+    assert raised.value.message == "The Paperless user may not perform this action."
 
 
 async def test_a_select_value_without_a_matching_option_stays_as_it_is() -> None:

@@ -2,7 +2,6 @@
 
 import email.utils
 import logging
-import random
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast, override
 
@@ -12,7 +11,14 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
-from adapter.conftest import BASE_URL, NOW, TOKEN, ClientFactory, RecordingSleep, tag
+from adapter.conftest import (
+    NOW,
+    TOKEN,
+    ClientFactory,
+    RecordingSleep,
+    streaming,
+    tag,
+)
 from paperless_mcp.domain.errors import (
     AuthenticationFailed,
     Conflict,
@@ -28,7 +34,6 @@ from paperless_mcp.domain.errors import (
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import (
     Method,
-    PaperlessClient,
     RetryPolicy,
     retry_after,
     utc_now,
@@ -37,7 +42,6 @@ from paperless_mcp.paperless.client import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from adapter.schema_guard import Handler
 
 pytestmark = pytest.mark.anyio
 
@@ -431,16 +435,6 @@ class Chunks(httpx2.AsyncByteStream):
         self.closed = True
 
 
-def streaming(handler: Handler) -> tuple[PaperlessClient, RecordingSleep]:
-    """A client on a plain MockTransport (the schema guard reads whole bodies)."""
-    sleep = RecordingSleep()
-    http = httpx2.AsyncClient(base_url=BASE_URL, transport=httpx2.MockTransport(handler))
-    client = PaperlessClient(
-        http, StaticTokenProvider(TOKEN), retry=RetryPolicy(), upload_timeout=1.0, sleep=sleep
-    )
-    return client, sleep
-
-
 async def test_a_download_within_the_limit_is_returned_whole_with_its_headers() -> None:
     body = Chunks(b"abc", b"def")
     client, _ = streaming(
@@ -640,14 +634,23 @@ async def test_backoff_doubles_with_every_attempt_below_a_jittered_cap(
 ) -> None:
     script = Script(answer(503), answer(503), answer(503), answer(200, TAG_PAGE))
     policy = RetryPolicy(attempts=4, budget=1000.0, backoff=2.0)
-    random.seed(20261112)
-    draws = [random.random() for _ in range(3)]  # noqa: S311 -- replays the client's jitter, not cryptography
-    random.seed(20261112)
+
+    # The injected jitter takes the cap itself: caps of 2, 4 and 8 seconds.
+    _ = await make_client(script, retry=policy, jitter=lambda cap: cap).request("GET", "/api/tags/")
+
+    assert sleep.delays == [2.0, 4.0, 8.0]
+
+
+async def test_the_default_jitter_is_a_random_wait_between_zero_and_the_cap(
+    make_client: ClientFactory, sleep: RecordingSleep
+) -> None:
+    script = Script(*(answer(503) for _ in range(12)), answer(200, TAG_PAGE))
+    policy = RetryPolicy(attempts=13, budget=1e9, backoff=1.0)
 
     _ = await make_client(script, retry=policy).request("GET", "/api/tags/")
 
-    # uniform(0, cap) is cap * random(): caps of 2, 4 and 8 seconds.
-    assert sleep.delays == pytest.approx([draws[0] * 2.0, draws[1] * 4.0, draws[2] * 8.0])
+    assert all(0.0 <= delay <= 2.0**n for n, delay in enumerate(sleep.delays))
+    assert len(set(sleep.delays)) > 1
 
 
 async def test_retries_and_attempts_are_logged_with_method_path_and_delay(

@@ -1,8 +1,8 @@
 name: Mutation testing
 
 # Weekly and on demand (design 9.2, 9.5). The score goes to the job summary and an artifact; the
-# run fails below the 80 % gate (MUTATION_GATE in scripts/scheduled_jobs.py, PLMCP-21), after the
-# summary is published.
+# run fails below the 80 % gate (MUTATION_GATE in scripts/scheduled_jobs.py, PLMCP-21) and while
+# an entry of mutation-equivalents.toml is stale, after the summary is published.
 on:
   schedule:
     - cron: "23 3 * * 0"
@@ -43,7 +43,7 @@ jobs:
 
       # Runs when the gate failed, too: that is when the numbers matter most.
       - name: Publish the mutation score
-        if: ${{ !cancelled() }}
+        if: always()
         run: |
           if [ -f mutants/summary.md ]; then cat mutants/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
 

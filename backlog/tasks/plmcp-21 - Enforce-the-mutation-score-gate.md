@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T19:34:00Z'
+updated_date: '2026-11-12T19:47:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -57,4 +57,6 @@ Gate (AC1): MUTATION_GATE = 80.0 is the single constant, in scripts/scheduled_jo
 Equivalents (AC2): mutation-equivalents.toml, one [[equivalent]] (mutant id, reason) per mutant, read by the score step together with 'mutmut results'. Only a mutant that still survives is left out; an entry that no longer survives (killed, or renumbered when its function changes) is reported as stale in the summary and not counted, so a renumbering cannot silently hide a new survivor, and does not fail the run either. mutmut has no per-mutant skip (only do_not_mutate by file/function glob and 'pragma: no mutate', and inline pragmas are banned), hence the file. The 41, by reason: zip() strict= on equal-length inputs (6: DocumentService._ids x3, .get x3); typing.cast ignores its first argument (15: _linked_titles x3, _fields x3, errors._messages x6, errors._details x3); HTTP header names are case-insensitive in httpx2.Headers (13: documents._file x4, client._build x2, client._retry_delay Retry-After x2, instance.get_overview x4, plus the unparsable 'XXXX' default of Retry-After x1); httpx2.Request upper-cases the method (3: client.download, client.get, instance.get_overview 'get'); stream=None is falsy like False (1: client.request); pagination.collect initial count never read since cap >= 1 guarantees one assignment (2); disposition._plain len >= 1 (1: a lone quote gives the empty name either way).
 
 Not verifiable locally: the workflow on GitHub (actionlint is not installed here; the YAML parses). Flakiness: score and survivor set were identical in the second and third full runs apart from the intended kills; mutant ids are numbered per function, so editing a function renumbers its equivalents and the summary lists them as stale until updated.
+
+Review round 1: (I1) equivalents are fingerprinted with the function_hash from mutants/mutmut-stats.json; an id that survives under a different function source is stale and not excluded (--hashes; proven live: editing PaperlessClient made the 3 _retry_delay entries stale and the run exited 4 until re-reviewed). (I2) stale entries print on stderr and in the summary and exit 4 (3 wins over 4); recipe and workflow fail with it. (I3) decision-13 'Mutation-score gate rules' (accepted, supplements decision-8, which is untouched); gate tests carry its marker. M4 PaperlessClient has a jitter seam (random_wait default); global random.seed removed. M5 real message asserted, date-range test asserts titles. M6 'user: null' note test reworded as defensive (schema says never null); streaming moved to tests/adapter/conftest.py. M7 'Other (not checked, type check)' row so the table sums to Total; formula names them. M8 --gate dropped. M9 publish step if: always(); missing or invalid mutmut data gives a clear error (exit 1). Final full run: 2081 mutants, 2038 killed, 2 timeout, 41 survived (all equivalent) = 98.0 % raw, 100.0 % with equivalents.
 <!-- SECTION:NOTES:END -->

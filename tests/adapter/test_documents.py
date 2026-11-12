@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import httpx2
 import pytest
 
-from adapter.test_client import streaming
+from adapter.conftest import streaming
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
     DocumentFile,
@@ -740,8 +740,8 @@ async def test_a_disabled_audit_log_is_explained_word_for_word(make_client: Clie
 
 
 async def test_a_note_whose_author_was_deleted_has_no_user() -> None:
-    # Paperless sets the author to null when the user is deleted, though its schema says the
-    # field is never null: the plain transport does not hold the response to the schema.
+    # Defensive: the schema says an author is never null, but the adapter must not crash on one
+    # (a note whose user was deleted); the plain transport does not hold the response to the schema.
     orphan = {"id": 2, "note": "left behind", "created": "2026-11-12T17:49:42Z", "user": None}
     client, _ = streaming(lambda _: httpx2.Response(200, json=[orphan]))
 

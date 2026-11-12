@@ -3,14 +3,15 @@
 import io
 import json
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import scheduled_jobs
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from pathlib import Path
+
 
 LS_REMOTE = """\
 aaa\trefs/tags/v2.20.14
@@ -241,19 +242,23 @@ STATS = {
 }
 
 
+@pytest.mark.decision("decision-13")
 def test_mutation_score_counts_killed_and_timeout_over_all_but_skipped_mutants() -> None:
     assert scheduled_jobs.mutation_score(STATS) == 80.0
 
 
+@pytest.mark.decision("decision-13")
 def test_mutation_score_is_none_without_tested_mutants() -> None:
     assert scheduled_jobs.mutation_score({"total": 3, "skipped": 3}) is None
     assert scheduled_jobs.mutation_score({}) is None
 
 
+@pytest.mark.decision("decision-13")
 def test_the_gate_is_eighty_percent() -> None:
     assert scheduled_jobs.MUTATION_GATE == 80.0
 
 
+@pytest.mark.decision("decision-13")
 def test_mutation_summary_shows_the_score_the_counts_and_the_gate() -> None:
     summary = scheduled_jobs.render_mutation_summary(scheduled_jobs.judge(STATS))
 
@@ -263,6 +268,7 @@ def test_mutation_summary_shows_the_score_the_counts_and_the_gate() -> None:
     assert "report-only" not in summary
 
 
+@pytest.mark.decision("decision-13")
 def test_mutation_summary_without_tested_mutants_fails_the_gate() -> None:
     verdict = scheduled_jobs.judge({"total": 0})
 
@@ -272,6 +278,7 @@ def test_mutation_summary_without_tested_mutants_fails_the_gate() -> None:
     )
 
 
+@pytest.mark.decision("decision-13")
 def test_a_score_just_below_the_gate_fails_and_exactly_at_it_passes() -> None:
     at_gate = {"total": 100, "killed": 80, "survived": 20}
     below = {"total": 1000, "killed": 799, "survived": 201}
@@ -282,6 +289,7 @@ def test_a_score_just_below_the_gate_fails_and_exactly_at_it_passes() -> None:
     assert scheduled_jobs.judge({**below, "killed": 700, "timeout": 100}).passed
 
 
+@pytest.mark.decision("decision-13")
 def test_the_gate_is_a_parameter_with_the_constant_as_default() -> None:
     stats = {"total": 100, "killed": 90, "survived": 10}
 
@@ -290,6 +298,7 @@ def test_the_gate_is_a_parameter_with_the_constant_as_default() -> None:
     assert scheduled_jobs.judge(stats).gate == scheduled_jobs.MUTATION_GATE
 
 
+@pytest.mark.decision("decision-13")
 @pytest.mark.parametrize(
     "status", ["suspicious", "no_tests", "segfault", "check_was_interrupted_by_user"]
 )
@@ -312,14 +321,22 @@ RESULTS = """\
 EQUIVALENTS_TOML = """\
 [[equivalent]]
 mutant = "paperless_mcp.services.a.x_f__mutmut_1"
+function_hash = "aaa"
 reason = "the argument is ignored at run time"
 
 [[equivalent]]
 mutant = "paperless_mcp.services.a.x_f__mutmut_9"
+function_hash = "aaa"
 reason = "was renumbered away"
 """
+EQUIVALENT = scheduled_jobs.Equivalent
 
 
+def eq(function_hash: str = "h") -> scheduled_jobs.Equivalent:
+    return scheduled_jobs.Equivalent(reason="r", function_hash=function_hash)
+
+
+@pytest.mark.decision("decision-13")
 def test_results_are_read_as_mutant_and_status() -> None:
     assert scheduled_jobs.parse_results(RESULTS) == {
         "paperless_mcp.services.a.x_f__mutmut_1": "survived",
@@ -330,37 +347,66 @@ def test_results_are_read_as_mutant_and_status() -> None:
     assert scheduled_jobs.parse_results("") == {}
 
 
-def test_equivalents_are_read_with_their_reasons() -> None:
+@pytest.mark.decision("decision-13")
+def test_equivalents_are_read_with_their_reasons_and_function_hashes() -> None:
     assert scheduled_jobs.parse_equivalents(EQUIVALENTS_TOML) == {
-        "paperless_mcp.services.a.x_f__mutmut_1": "the argument is ignored at run time",
-        "paperless_mcp.services.a.x_f__mutmut_9": "was renumbered away",
+        "paperless_mcp.services.a.x_f__mutmut_1": EQUIVALENT(
+            "the argument is ignored at run time", "aaa"
+        ),
+        "paperless_mcp.services.a.x_f__mutmut_9": EQUIVALENT("was renumbered away", "aaa"),
     }
     assert scheduled_jobs.parse_equivalents("") == {}
 
 
+@pytest.mark.decision("decision-13")
+def test_function_hashes_are_read_from_mutmuts_stats_file() -> None:
+    text = json.dumps({"function_hashes": {"a.x_f": "h1"}, "other": 1})
+
+    assert scheduled_jobs.parse_hashes(text) == {"a.x_f": "h1"}
+    with pytest.raises(scheduled_jobs.JobError, match="function_hashes"):
+        _ = scheduled_jobs.parse_hashes("{}")
+    with pytest.raises(scheduled_jobs.JobError, match="function_hashes"):
+        _ = scheduled_jobs.parse_hashes("not json")
+
+
+@pytest.mark.decision("decision-13")
 @pytest.mark.parametrize(
     "text",
     [
-        '[[equivalent]]\nmutant = "m"\n',
-        '[[equivalent]]\nmutant = "m"\nreason = "  "\n',
-        '[[equivalent]]\nreason = "r"\n',
-        '[[equivalent]]\nmutant = "m"\nreason = "r"\n[[equivalent]]\nmutant = "m"\nreason = "s"\n',
+        '[[equivalent]]\nmutant = "m"\nfunction_hash = "h"\n',
+        '[[equivalent]]\nmutant = "m"\nfunction_hash = "h"\nreason = "  "\n',
+        '[[equivalent]]\nmutant = "m"\nreason = "r"\n',
+        '[[equivalent]]\nmutant = "m"\nfunction_hash = " "\nreason = "r"\n',
+        '[[equivalent]]\nfunction_hash = "h"\nreason = "r"\n',
+        ('[[equivalent]]\nmutant = "m"\nfunction_hash = "h"\nreason = "r"\n' * 2),
         "not = [valid",
     ],
-    ids=["no reason", "blank reason", "no mutant", "duplicate", "bad toml"],
+    ids=[
+        "no reason",
+        "blank reason",
+        "no hash",
+        "blank hash",
+        "no mutant",
+        "duplicate",
+        "bad toml",
+    ],
 )
-def test_an_equivalent_without_a_reason_or_a_duplicate_is_refused(text: str) -> None:
+def test_an_incomplete_or_duplicate_equivalent_is_refused(text: str) -> None:
     with pytest.raises(scheduled_jobs.JobError):
         _ = scheduled_jobs.parse_equivalents(text)
 
 
+@pytest.mark.decision("decision-13")
 def test_reviewed_equivalent_survivors_leave_the_denominator_like_skipped_mutants() -> None:
     stats = {"total": 100, "killed": 76, "survived": 24}
-    results = {f"m{n}": "survived" for n in range(24)}
-    equivalents = {f"m{n}": "reason" for n in range(4)}
+    results = {f"a.x_f__mutmut_{n}": "survived" for n in range(24)}
+    equivalents = {f"a.x_f__mutmut_{n}": eq() for n in range(4)}
+    hashes = {"a.x_f": "h"}
 
     without = scheduled_jobs.judge(stats, results=results)
-    with_equivalents = scheduled_jobs.judge(stats, results=results, equivalents=equivalents)
+    with_equivalents = scheduled_jobs.judge(
+        stats, results=results, equivalents=equivalents, hashes=hashes
+    )
 
     assert (without.score, without.passed) == (76.0, False)
     assert with_equivalents.score == pytest.approx(76 / 96 * 100)
@@ -368,31 +414,65 @@ def test_reviewed_equivalent_survivors_leave_the_denominator_like_skipped_mutant
     assert with_equivalents.stale == ()
 
 
-def test_only_survivors_can_be_equivalent_and_the_rest_is_reported_as_stale() -> None:
+@pytest.mark.decision("decision-13")
+def test_only_survivors_can_be_equivalent_and_the_rest_is_stale() -> None:
     stats = {"total": 10, "killed": 6, "timeout": 1, "survived": 1, "suspicious": 2}
-    results = {"m1": "survived", "m2": "timeout", "m3": "suspicious"}
-    equivalents = {"m1": "r", "m2": "r", "m3": "r", "gone": "r"}
+    results = {"a.x_f__mutmut_1": "survived", "a.x_f__mutmut_2": "timeout"}
+    results["a.x_f__mutmut_3"] = "suspicious"
+    equivalents = {name: eq() for name in (*results, "a.x_f__mutmut_9")}
 
-    verdict = scheduled_jobs.judge(stats, results=results, equivalents=equivalents)
+    verdict = scheduled_jobs.judge(
+        stats, results=results, equivalents=equivalents, hashes={"a.x_f": "h"}
+    )
 
     assert verdict.equivalent == 1
-    assert verdict.stale == ("gone", "m2", "m3")
+    assert verdict.stale == ("a.x_f__mutmut_2", "a.x_f__mutmut_3", "a.x_f__mutmut_9")
     assert verdict.score == pytest.approx(7 / 9 * 100)
 
 
-def test_the_summary_names_the_formula_the_equivalents_and_the_stale_entries() -> None:
+@pytest.mark.decision("decision-13")
+def test_a_survivor_whose_function_changed_is_stale_and_counts_as_a_survivor() -> None:
+    # The same id can name a different mutant after an edit: the function hash tells.
     stats = {"total": 10, "killed": 9, "survived": 1}
+    results = {"a.x_f__mutmut_1": "survived"}
+    equivalents = {"a.x_f__mutmut_1": eq("old-hash")}
+
+    changed = scheduled_jobs.judge(
+        stats, results=results, equivalents=equivalents, hashes={"a.x_f": "new-hash"}
+    )
+    unchanged = scheduled_jobs.judge(
+        stats, results=results, equivalents=equivalents, hashes={"a.x_f": "old-hash"}
+    )
+    unknown = scheduled_jobs.judge(stats, results=results, equivalents=equivalents, hashes={})
+
+    assert (changed.equivalent, changed.stale, changed.score) == (0, ("a.x_f__mutmut_1",), 90.0)
+    assert (unchanged.equivalent, unchanged.stale) == (1, ())
+    assert (unknown.equivalent, unknown.stale) == (0, ("a.x_f__mutmut_1",))
+
+
+@pytest.mark.decision("decision-13")
+def test_the_summary_adds_up_to_the_total_and_names_formula_equivalents_and_stale_entries() -> None:
+    stats = {"total": 12, "killed": 9, "survived": 2, "suspicious": 0}  # 1 is not accounted for
     verdict = scheduled_jobs.judge(
-        stats, results={"m1": "survived"}, equivalents={"m1": "r", "gone": "r"}
+        stats,
+        results={"a.x_f__mutmut_1": "survived", "a.x_f__mutmut_2": "survived"},
+        equivalents={"a.x_f__mutmut_1": eq(), "gone": eq()},
+        hashes={"a.x_f": "h"},
     )
 
     summary = scheduled_jobs.render_mutation_summary(verdict)
 
+    assert "| Survived | 1 |" in summary
     assert "| Survived, reviewed as equivalent (not scored) | 1 |" in summary
+    assert "| Other (not checked, type check) | 1 |" in summary
+    assert "not-checked" in summary.split("| Result")[0]
     assert "(killed + timeout) / (total - skipped - equivalent)" in summary
     assert "Stale entries in mutation-equivalents.toml" in summary
     assert "- `gone`" in summary
     assert "Stale" not in scheduled_jobs.render_mutation_summary(scheduled_jobs.judge(STATS))
+    rows = [line for line in summary.splitlines() if line.startswith("| ") and "---" not in line]
+    counted = [int(line.strip("| *").rsplit("|", 1)[-1].strip(" *")) for line in rows[1:-1]]
+    assert sum(counted) == stats["total"]
 
 
 def run_main(
@@ -460,6 +540,7 @@ def test_main_open_issue_passes_title_label_and_report_to_gh(tmp_path: Path) -> 
     assert gh.calls[-1][-1] == "the report"
 
 
+@pytest.mark.decision("decision-13")
 def test_main_mutation_score_prints_the_summary_and_passes_at_the_gate(tmp_path: Path) -> None:
     stats = tmp_path / "stats.json"
     _ = stats.write_text(json.dumps(STATS))
@@ -470,6 +551,7 @@ def test_main_mutation_score_prints_the_summary_and_passes_at_the_gate(tmp_path:
     assert "Mutation score: 80.0 % (gate 80 %: passed)" in out
 
 
+@pytest.mark.decision("decision-13")
 def test_main_mutation_score_prints_the_summary_and_exits_nonzero_below_the_gate(
     tmp_path: Path,
 ) -> None:
@@ -479,36 +561,115 @@ def test_main_mutation_score_prints_the_summary_and_exits_nonzero_below_the_gate
     code, out, err, _ = run_main_err(["mutation-score", str(stats)])
 
     assert code == scheduled_jobs.GATE_FAILED_EXIT_CODE
-    assert scheduled_jobs.GATE_FAILED_EXIT_CODE not in {0, 1, scheduled_jobs.DRIFT_EXIT_CODE}
+    assert {scheduled_jobs.GATE_FAILED_EXIT_CODE, scheduled_jobs.STALE_EXIT_CODE} & {
+        0,
+        1,
+        scheduled_jobs.DRIFT_EXIT_CODE,
+    } == set()
     assert "Mutation score: 70.0 % (gate 80 %: FAILED)" in out
     assert "below the gate" in err
 
 
-def test_main_mutation_score_takes_the_gate_results_and_equivalents(tmp_path: Path) -> None:
+def mutation_files(tmp_path: Path, equivalents: str, hashes: dict[str, str]) -> list[str]:
     stats = tmp_path / "stats.json"
     _ = stats.write_text(json.dumps({"total": 10, "killed": 7, "survived": 3}))
     results = tmp_path / "survivors.txt"
-    _ = results.write_text("    m1: survived\n    m2: survived\n    m3: survived\n")
-    equivalents = tmp_path / "equivalents.toml"
-    _ = equivalents.write_text(
-        '[[equivalent]]\nmutant = "m1"\nreason = "r"\n[[equivalent]]\nmutant = "m2"\nreason = "r"\n'
-    )
+    lines = (f"    m.x_f__mutmut_{n}: survived\n" for n in (1, 2, 3))
+    _ = results.write_text("".join(lines))
+    toml = tmp_path / "equivalents.toml"
+    _ = toml.write_text(equivalents)
+    detail = tmp_path / "mutmut-stats.json"
+    _ = detail.write_text(json.dumps({"function_hashes": hashes}))
+    return [
+        "mutation-score",
+        str(stats),
+        "--results",
+        str(results),
+        "--equivalents",
+        str(toml),
+        "--hashes",
+        str(detail),
+    ]
 
-    code, out, _, _ = run_main_err(
-        [
-            "mutation-score",
-            str(stats),
-            "--results",
-            str(results),
-            "--equivalents",
-            str(equivalents),
-            "--gate",
-            "85",
-        ]
-    )
+
+TWO_EQUIVALENTS = (
+    '[[equivalent]]\nmutant = "m.x_f__mutmut_1"\nfunction_hash = "h"\nreason = "r"\n'
+    '[[equivalent]]\nmutant = "m.x_f__mutmut_2"\nfunction_hash = "h"\nreason = "r"\n'
+)
+
+
+@pytest.mark.decision("decision-13")
+def test_main_mutation_score_leaves_confirmed_equivalents_out(tmp_path: Path) -> None:
+    argv = mutation_files(tmp_path, TWO_EQUIVALENTS, {"m.x_f": "h"})
+
+    code, out, _, _ = run_main_err(argv)
 
     assert code == 0  # 7 of 8 is 87.5 %
-    assert "Mutation score: 87.5 % (gate 85 %: passed)" in out
+    assert "Mutation score: 87.5 % (gate 80 %: passed)" in out
+
+
+@pytest.mark.decision("decision-13")
+def test_main_stale_equivalents_exit_with_their_own_code_and_are_named_on_stderr(
+    tmp_path: Path,
+) -> None:
+    argv = mutation_files(tmp_path, TWO_EQUIVALENTS, {"m.x_f": "edited"})
+    _ = Path(argv[1]).write_text(json.dumps({"total": 10, "killed": 9, "survived": 1}))
+
+    code, out, err, _ = run_main_err(argv)
+
+    assert code == scheduled_jobs.STALE_EXIT_CODE == 4
+    assert "Stale entries" in out
+    assert "m.x_f__mutmut_1" in err
+    assert "m.x_f__mutmut_2" in err
+
+
+@pytest.mark.decision("decision-13")
+def test_main_a_failed_gate_wins_over_stale_entries(tmp_path: Path) -> None:
+    argv = mutation_files(tmp_path, TWO_EQUIVALENTS, {"m.x_f": "edited"})
+    stats = cast("dict[str, int]", json.loads(Path(argv[1]).read_text()))
+    _ = Path(argv[1]).write_text(json.dumps({**stats, "killed": 1, "survived": 9}))
+
+    code, _, err, _ = run_main_err(argv)
+
+    assert code == scheduled_jobs.GATE_FAILED_EXIT_CODE
+    assert "below the gate" in err
+    assert "m.x_f__mutmut_1" in err
+
+
+@pytest.mark.decision("decision-13")
+def test_main_equivalents_need_the_hashes_file(tmp_path: Path) -> None:
+    argv = mutation_files(tmp_path, TWO_EQUIVALENTS, {})
+    code, _, err, _ = run_main_err(argv[: argv.index("--hashes")])
+
+    assert code == 1
+    assert "--hashes" in err
+
+
+@pytest.mark.parametrize("missing", ["stats", "results", "hashes"])
+@pytest.mark.decision("decision-13")
+def test_main_missing_mutation_data_is_a_clear_error_not_a_traceback(
+    tmp_path: Path, missing: str
+) -> None:
+    argv = mutation_files(tmp_path, TWO_EQUIVALENTS, {"m.x_f": "h"})
+    target = {"stats": 1, "results": argv.index("--results") + 1}.get(
+        missing, argv.index("--hashes") + 1
+    )
+    Path(argv[target]).unlink()
+
+    code, out, err, _ = run_main_err(argv)
+
+    assert (code, out) == (1, "")
+    assert "run mutmut first" in err
+    assert "Traceback" not in err
+
+
+@pytest.mark.decision("decision-13")
+def test_main_has_no_gate_option(tmp_path: Path) -> None:
+    stats = tmp_path / "stats.json"
+    _ = stats.write_text(json.dumps(STATS))
+
+    with pytest.raises(SystemExit):
+        _ = run_main_err(["mutation-score", str(stats), "--gate", "1"])
 
 
 def test_a_report_with_exactly_the_limit_lists_everything_without_a_more_line(
@@ -587,3 +748,14 @@ def test_main_close_issue_closes_the_open_one() -> None:
 
     assert (code, out) == (0, "closed issue #4\n")
     assert gh.calls[-1][:4] == ("gh", "issue", "close", "4")
+
+
+@pytest.mark.decision("decision-13")
+def test_main_stats_that_are_not_mutmuts_are_a_clear_error(tmp_path: Path) -> None:
+    stats = tmp_path / "stats.json"
+    _ = stats.write_text("{broken")
+
+    code, out, err, _ = run_main_err(["mutation-score", str(stats)])
+
+    assert (code, out) == (1, "")
+    assert "not mutmut's CI/CD stats" in err

@@ -221,8 +221,8 @@ audit:
 
 # Mutation testing of services/ and paperless/ with mutmut (weekly job; design 9.2): non-E2E
 # tests only, takes about five minutes. Fails (exit 3) below the 80 % gate (MUTATION_GATE in
-# scripts/scheduled_jobs.py) after printing the summary; mutation-equivalents.toml lists the
-# reviewed survivors no test can kill. Extra arguments select mutants, e.g.
+# scripts/scheduled_jobs.py) after printing the summary, and (exit 4) while an entry of
+# mutation-equivalents.toml (the reviewed survivors no test can kill) is stale. Extra arguments select mutants, e.g.
 # `just mutation 'paperless_mcp.services.instance*'`, which also scores earlier results of
 # mutants/, so a selection can fail the gate. Delete mutants/ to start from scratch. Writes
 # mutants/summary.md (the score as Markdown) and mutants/survivors.txt.
@@ -237,7 +237,7 @@ mutation *selection:
     uv run mutmut export-cicd-stats
     uv run mutmut results > mutants/survivors.txt
     # pipefail makes the recipe fail with the script's exit code, after tee wrote the summary.
-    uv run python scripts/scheduled_jobs.py mutation-score mutants/mutmut-cicd-stats.json --results mutants/survivors.txt --equivalents mutation-equivalents.toml | tee mutants/summary.md
+    uv run python scripts/scheduled_jobs.py mutation-score mutants/mutmut-cicd-stats.json --results mutants/survivors.txt --equivalents mutation-equivalents.toml --hashes mutants/mutmut-stats.json | tee mutants/summary.md
 
 # Compare the vendored Paperless schema and docs with the latest stable 3.x release (weekly job;
 # design 9.5). Needs docker and the network; changes nothing in the repository. DRIFT_REPORT=path
