@@ -17,24 +17,28 @@ implement it in FakePaperless and the adapter, and write its contract tests with
 every port is wired and every method has such a test.
 """
 
+import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Protocol, cast
 
 import httpx2
 import pytest
-from e2e.helpers import EXPECTED_VERSION
+from e2e.helpers import EXPECTED_VERSION, consume, pdf
 from fakes.accounts import ADMIN, BLIND, READER
-from fakes.paperless import VERSION, FakePaperless, seeded
+from fakes.paperless import VERSION, FakePaperless, FakeState, FakeTask, seeded
 
 from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
     DocumentReader,
     InstanceReader,
+    TaskReader,
     TaxonomyReader,
 )
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
 from paperless_mcp.paperless.documents import PaperlessDocumentReader
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
+from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader
 
 if TYPE_CHECKING:
@@ -50,11 +54,12 @@ class Ports:
     instance: InstanceReader
     taxonomy: TaxonomyReader
     documents: DocumentReader
+    tasks: TaskReader
 
 
 def fake_ports(fake: FakePaperless) -> Ports:
     """The fake implements every port itself."""
-    return Ports(instance=fake, taxonomy=fake, documents=fake)
+    return Ports(instance=fake, taxonomy=fake, documents=fake, tasks=fake)
 
 
 def live_ports(client: PaperlessClient) -> Ports:
@@ -63,7 +68,14 @@ def live_ports(client: PaperlessClient) -> Ports:
         instance=PaperlessInstanceReader(client),
         taxonomy=PaperlessTaxonomyReader(client),
         documents=PaperlessDocumentReader(client),
+        tasks=PaperlessTaskReader(client),
     )
+
+
+class Consume(Protocol):
+    """Runs a consumption task to its end and returns its id."""
+
+    def __call__(self, *, succeed: bool) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -76,9 +88,31 @@ class Backend:
     admin: Ports
     reader: Ports
     blind: Ports
+    # Starts a consumption task and waits for its end; `succeed=False` uploads a broken PDF.
+    # The live one uploads for real and deletes the documents again when the test ends.
+    consume: Consume
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
     # (`just e2e-latest` runs the suite against a newer release than the pinned one).
     expected_version: str
+
+
+def fake_consume(state: FakeState) -> Consume:
+    def consume_fake(*, succeed: bool) -> str:
+        now = datetime.now(UTC)
+        task = FakeTask(
+            id=len(state.tasks) + 1,
+            task_id=str(uuid.uuid4()),
+            task_type="consume_file",
+            status="success" if succeed else "failure",
+            created=now,
+            finished=now,
+            document_ids=(len(state.documents) + 1,) if succeed else (),
+            message=None if succeed else "broken.pdf: Error occurred while consuming document",
+        )
+        state.tasks.append(task)
+        return task.task_id
+
+    return consume_fake
 
 
 def fake_backend() -> Backend:
@@ -87,6 +121,7 @@ def fake_backend() -> Backend:
         admin=fake_ports(FakePaperless(state, user=ADMIN[0])),
         reader=fake_ports(FakePaperless(state, user=READER[0])),
         blind=fake_ports(FakePaperless(state, user=BLIND[0])),
+        consume=fake_consume(state),
         expected_version=VERSION,
     )
 
@@ -98,17 +133,32 @@ async def backend(request: pytest.FixtureRequest) -> AsyncIterator[Backend]:
         yield fake_backend()
         return
     stack = cast("Stack", request.getfixturevalue("stack"))
-    async with httpx2.AsyncClient(base_url=stack.base_url, timeout=30.0) as http:
+    created: list[int] = []
 
-        def ports(token: str) -> Ports:
-            credentials = StaticTokenProvider(token)
-            return live_ports(
-                PaperlessClient(http, credentials, retry=RetryPolicy(), upload_timeout=60.0)
+    def consume_live(*, succeed: bool) -> str:
+        title = f"contract-task-{uuid.uuid4().hex}"
+        content = pdf(title) if succeed else b"%PDF-1.4 broken"
+        task_id, document = consume(stack.admin, title, content)
+        if document is not None:
+            created.append(document)
+        return task_id
+
+    try:
+        async with httpx2.AsyncClient(base_url=stack.base_url, timeout=30.0) as http:
+
+            def ports(token: str) -> Ports:
+                credentials = StaticTokenProvider(token)
+                return live_ports(
+                    PaperlessClient(http, credentials, retry=RetryPolicy(), upload_timeout=60.0)
+                )
+
+            yield Backend(
+                admin=ports(stack.admin_token),
+                reader=ports(stack.reader_token),
+                blind=ports(stack.blind_token),
+                consume=consume_live,
+                expected_version=EXPECTED_VERSION,
             )
-
-        yield Backend(
-            admin=ports(stack.admin_token),
-            reader=ports(stack.reader_token),
-            blind=ports(stack.blind_token),
-            expected_version=EXPECTED_VERSION,
-        )
+    finally:
+        for document in created:
+            _ = stack.admin.delete(f"/api/documents/{document}/")

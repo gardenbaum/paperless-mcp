@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from paperless_mcp.domain.documents import DocumentPage, DocumentQuery
     from paperless_mcp.domain.instance import InstanceOverview
+    from paperless_mcp.domain.tasks import TaskStatus
     from paperless_mcp.domain.taxonomy import TaxonomyItem, TaxonomyKind
 
 
@@ -54,5 +55,18 @@ class DocumentReader(Protocol):
         Raises:
             Validation: Paperless rejected the query (e.g. a bad ``custom_field_query``).
             NotFound: ``page`` is beyond the last page.
+        """
+        ...
+
+
+class TaskReader(Protocol):
+    """Background tasks (uploads, PDF operations) the current user may see."""
+
+    async def get_task(self, task_id: str) -> TaskStatus:
+        """The task Paperless knows under the Celery id ``task_id``.
+
+        Raises:
+            NotFound: No task with that id exists that the user may see.
+            PermissionDenied: The user lacks the permission to view tasks.
         """
         ...

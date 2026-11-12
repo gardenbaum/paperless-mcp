@@ -10,6 +10,7 @@ import http.server
 import json
 import socket
 import threading
+import time
 from typing import TYPE_CHECKING, ClassVar, override
 
 from fakes.accounts import ADMIN
@@ -19,13 +20,18 @@ from paperless_mcp.server import Ports, create_server
 from paperless_mcp.settings import PaperlessSettings, ServerSettings
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Awaitable, Callable, Generator
 
     from fastmcp import FastMCP
 
     from paperless_mcp.domain.errors import PaperlessMcpError
     from paperless_mcp.domain.instance import InstanceOverview
-    from paperless_mcp.domain.ports import DocumentReader, InstanceReader, TaxonomyReader
+    from paperless_mcp.domain.ports import (
+        DocumentReader,
+        InstanceReader,
+        TaskReader,
+        TaxonomyReader,
+    )
 
 URL = "http://paperless.test"
 TOKEN = "harness-token-0123456789"
@@ -39,25 +45,33 @@ def server_settings(startup_timeout: float = 2.0) -> ServerSettings:
     return ServerSettings.model_validate({"startup_timeout": startup_timeout})
 
 
-def serve(
+def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     reader: InstanceReader,
     *,
     taxonomy: TaxonomyReader | None = None,
     documents: DocumentReader | None = None,
+    tasks: TaskReader | None = None,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    clock: Callable[[], float] = time.monotonic,
     startup_timeout: float = 2.0,
 ) -> FastMCP:
     """The assembled server, with `reader` in place of the Paperless adapter.
 
-    `taxonomy` and `documents` default to `reader` if that is a fake, else to the seeded
-    admin's fake.
+    `taxonomy`, `documents` and `tasks` default to `reader` if that is a fake, else to the seeded
+    admin's fake. `sleep` and `clock` replace the real ones the task wait uses.
     """
     fake = reader if isinstance(reader, FakePaperless) else admin()
     return create_server(
         paperless_settings(),
         server_settings(startup_timeout),
         ports=lambda _client: Ports(
-            instance=reader, taxonomy=taxonomy or fake, documents=documents or fake
+            instance=reader,
+            taxonomy=taxonomy or fake,
+            documents=documents or fake,
+            tasks=tasks or fake,
         ),
+        sleep=sleep,
+        clock=clock,
     )
 
 

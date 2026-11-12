@@ -50,8 +50,10 @@ from paperless_mcp.domain.instance import (
     InstanceStatistics,
     SystemStatus,
 )
+from paperless_mcp.domain.tasks import TaskState, TaskStatus
 from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyItem
 from paperless_mcp.paperless.documents import beyond_last_page, unseen_document
+from paperless_mcp.paperless.tasks import not_found
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -175,6 +177,29 @@ class FakeDocument(Owned):
 
 
 @dataclass(kw_only=True)
+class FakeTask:
+    """A background task, as `/api/tasks/` reports it.
+
+    Not owner-filtered: whether Paperless hides another owner's task from a user who may view
+    tasks is not verified on 3.4.2 (the seed has no such user).
+
+    Attributes:
+        task_id: The Celery UUID clients look tasks up by.
+        message: The error message of a failed task (its traceback is not modelled).
+        document_ids: The task's related documents.
+    """
+
+    id: int
+    task_id: str
+    task_type: str = "consume_file"
+    status: TaskState = "pending"
+    created: datetime = datetime(2026, 11, 11, 19, 47, tzinfo=UTC)
+    finished: datetime | None = None
+    message: str | None = None
+    document_ids: tuple[int, ...] = ()
+
+
+@dataclass(kw_only=True)
 class FakeState:
     """The data of one fake Paperless instance, shared by every `FakePaperless` on it."""
 
@@ -187,6 +212,7 @@ class FakeState:
     custom_fields: list[FakeCustomField] = field(default_factory=list[FakeCustomField])
     saved_views: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
     groups: list[FakeGroup] = field(default_factory=list[FakeGroup])
+    tasks: list[FakeTask] = field(default_factory=list[FakeTask])
     system_status: SystemStatus = HEALTHY
     ai_enabled: bool = False
 
@@ -488,6 +514,29 @@ class FakePaperless:
             next_page=page + 1 if start + page_size < len(found) else None,
             hits=hits,
         )
+
+    async def get_task(self, task_id: str) -> TaskStatus:
+        """`TaskReader.get_task` (TaskViewSet filtered by `task_id`).
+
+        Raises:
+            NotFound: No visible task has that id (Paperless answers an empty list).
+            PermissionDenied: The user lacks the global `view_paperlesstask` permission.
+        """
+        if not self.user.has("view_paperlesstask"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        for task in self.state.tasks:
+            if task.task_id == task_id:
+                return TaskStatus(
+                    task_id=task.task_id,
+                    task_type=task.task_type,
+                    state=task.status,
+                    message=task.message,
+                    document_ids=task.document_ids,
+                    created=task.created,
+                    finished=task.finished,
+                )
+        raise not_found(task_id)
 
 
 type _Match = Callable[[FakeDocument], bool]

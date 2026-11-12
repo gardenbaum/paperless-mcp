@@ -211,6 +211,28 @@ def ensure_document(api: httpx2.Client, title: str, text: str) -> int:
     pytest.fail(f"Consuming {title!r} timed out after {CONSUME_TIMEOUT:.0f}s. Logs: `{LOGS_HINT}`")
 
 
+def consume(api: httpx2.Client, title: str, content: bytes) -> tuple[str, int | None]:
+    """Upload `content` as `title`, wait until its task ends, and return the task id.
+
+    Also returns the id of the document the task created, None if it failed. The caller deletes
+    that document again (`api.delete`), also when its test fails.
+    """
+    uploaded = api.post(
+        "/api/documents/post_document/",
+        data={"title": title},
+        files={"document": (f"{title}.pdf", content, "application/pdf")},
+    ).raise_for_status()
+    task_id = str(parse(uploaded))
+    deadline = time.monotonic() + CONSUME_TIMEOUT
+    while time.monotonic() < deadline:
+        tasks = results(api.get("/api/tasks/", params={"task_id": task_id}).raise_for_status())
+        if tasks and tasks[0]["status"] in {"success", "failure", "revoked"}:
+            related = seq(tasks[0]["related_document_ids"])
+            return task_id, num(related[0]) if related else None
+        time.sleep(1)
+    pytest.fail(f"Consuming {title!r} timed out after {CONSUME_TIMEOUT:.0f}s. Logs: `{LOGS_HINT}`")
+
+
 # The seed's manifest per instance statistic: (objects every user sees, objects only the admin
 # sees). `fakes.paperless.seeded` matches it exactly; on the persistent live stack other tests may
 # add objects, so the contract suite only relies on these as lower bounds.
