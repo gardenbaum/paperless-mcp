@@ -11,7 +11,7 @@ import math
 import re
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, TypeIs
 from urllib.parse import urlsplit
 
 from paperless_mcp.domain.errors import Ambiguous, Validation
@@ -83,29 +83,30 @@ def _money(field: TaxonomyItem, value: object) -> str:
     amount = Decimal(str(parts["amount"]))
     if not amount.is_finite():
         raise Validation(expected, hint=hint)
-    if (
-        len(amount.as_tuple().digits) + cast("int", amount.as_tuple().exponent)
-        > MONEY_INTEGER_DIGITS
-    ):
+    exponent = int(amount.as_tuple().exponent)
+    if len(amount.as_tuple().digits) + exponent > MONEY_INTEGER_DIGITS:
         raise Validation(
             expected,
             hint=f"{hint} Amounts have at most {MONEY_INTEGER_DIGITS} digits before the point.",
         )
-    if cast("int", amount.as_tuple().exponent) < -MONEY_DECIMALS:
+    if exponent < -MONEY_DECIMALS:
         message = f"The amount for {field.name!r} has more than two decimals."
         raise Validation(message, hint=hint)
     currency = (parts["before"] or parts["after"] or "").upper()
     return f"{currency}{amount:.2f}"
 
 
+def _is_list(value: object) -> TypeIs[list[object]]:
+    return isinstance(value, list)
+
+
 def _links(field: TaxonomyItem, value: object) -> list[JsonValue]:
     problem = f"Custom field {field.name!r} takes a list of document ids."
     hint = "Pass positive ids from search_documents, e.g. [12, 40]."
-    if not isinstance(value, list):
+    if not _is_list(value):
         raise Validation(problem, hint=hint)
-    items = cast("list[object]", value)
-    ids = [n for n in items if isinstance(n, int) and not isinstance(n, bool) and n > 0]
-    if len(ids) != len(items):
+    ids = [n for n in value if isinstance(n, int) and not isinstance(n, bool) and n > 0]
+    if len(ids) != len(value):
         raise Validation(problem, hint=hint)
     return list(dict.fromkeys(ids))
 

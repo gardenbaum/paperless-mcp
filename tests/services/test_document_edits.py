@@ -6,14 +6,32 @@ from typing import TYPE_CHECKING, final, override
 
 import pytest
 from fakes.accounts import ADMIN, READER
-from fakes.paperless import FakeDocument, FakePaperless, FakeState, FakeUser, seeded
+from fakes.paperless import (
+    FakeCustomField,
+    FakeDocument,
+    FakePaperless,
+    FakeState,
+    FakeUser,
+    seeded,
+)
 from hypothesis import given
 from hypothesis import strategies as st
 
 from paperless_mcp.domain.documents import CustomFieldValue, DocumentEdit, DocumentPatch
-from paperless_mcp.domain.errors import Ambiguous, NotFound, PermissionDenied, Validation
+from paperless_mcp.domain.errors import (
+    Ambiguous,
+    NotFound,
+    PaperlessMcpError,
+    PermissionDenied,
+    Validation,
+)
 from paperless_mcp.paperless.auth import StaticTokenProvider
-from paperless_mcp.services.document_edits import DocumentEditor, merged_fields, merged_tags
+from paperless_mcp.services.document_edits import (
+    DocumentEditor,
+    merged_fields,
+    merged_tags,
+    same_value,
+)
 from paperless_mcp.services.documents import DocumentService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
 
@@ -21,6 +39,7 @@ if TYPE_CHECKING:
     from pydantic import JsonValue
 
     from paperless_mcp.domain.documents import DocumentDetail, DocumentRecord, DocumentUpdate
+    from paperless_mcp.domain.taxonomy import TaxonomyKind
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
@@ -28,7 +47,6 @@ WEB = "https://paperless.example"
 PUBLIC = 1
 
 
-@final
 class Recording(FakePaperless):
     """A fake that remembers the patches it was given."""
 
@@ -748,3 +766,117 @@ async def test_an_owner_name_needs_the_user_list_and_the_hint_says_to_pass_the_i
         _ = await setup.update(owner="admin", confirm=True)
 
     assert "user id" in (raised.value.hint or "")
+
+
+def test_values_are_the_same_only_when_equal_in_kind() -> None:
+    assert same_value([1, 2], [2, 1])
+    assert not same_value([1], [1, 2])
+    assert not same_value([1], 1)
+    assert not same_value(1, [1])
+    assert not same_value(True, 1)  # noqa: FBT003 -- values under test
+    assert same_value("a", "a")
+
+
+async def test_tags_created_before_a_failure_are_in_the_cache_afterwards() -> None:
+    setup = Setup()
+    assert "n1" not in {t.name for t in await setup.taxonomy.items("tag")}  # warm the cache
+
+    with pytest.raises(Validation):
+        _ = await setup.update(archive_serial_number=10, tags_add=["n1"], create_missing_tags=True)
+
+    assert "n1" in {t.name for t in await setup.taxonomy.items("tag")}
+
+
+@pytest.mark.parametrize(
+    ("kind", "edit"),
+    [
+        ("correspondent", {"clear": ["correspondent"]}),
+        ("document_type", {"clear": ["document_type"]}),
+        ("storage_path", {"clear": ["storage_path"]}),
+    ],
+)
+async def test_each_reference_kind_that_changed_is_forgotten(
+    kind: TaxonomyKind, edit: dict[str, object]
+) -> None:
+    setup = Setup()
+    warm = {i.id: i.document_count for i in await setup.taxonomy.items(kind)}
+    assert warm[1] == 1
+
+    _ = await setup.update(**edit)
+
+    assert {i.id: i.document_count for i in await setup.taxonomy.items(kind)}[1] == 0
+
+
+async def test_links_the_document_already_has_are_not_checked_again() -> None:
+    setup = as_editor()
+    link = setup.field("e2e-documentlink")
+    setup.state.documents[3].custom_fields = {link: [2]}  # document 2 is hidden from the editor
+
+    detail = await setup.update(4, custom_fields={"e2e-documentlink": [2]})
+
+    assert setup.fake.patches == []
+    assert detail.id == 4
+
+
+async def test_new_links_of_every_link_field_are_checked() -> None:
+    setup = Setup()
+    setup.state.custom_fields.append(
+        FakeCustomField(id=99, name="second-link", data_type="documentlink")
+    )
+
+    with pytest.raises(NotFound, match="No document 77"):
+        _ = await setup.update(custom_fields={"e2e-documentlink": [77], "second-link": []})
+
+
+@final
+class Failing(Recording):
+    """A fake whose update fails with `error`."""
+
+    def __init__(self, state: FakeState, error: PaperlessMcpError) -> None:
+        super().__init__(state, user=ADMIN[0])
+        self.error: PaperlessMcpError = error
+
+    @override
+    async def update_document(self, document_id: int, patch: DocumentPatch) -> DocumentRecord:
+        raise self.error
+
+
+def failing_with(error: PaperlessMcpError) -> Setup:
+    setup = Setup()
+    setup.fake = Failing(setup.state, error)
+    setup.editor = DocumentEditor(
+        setup.fake,
+        setup.fake,
+        setup.fake,
+        setup.taxonomy,
+        documents=DocumentService(setup.fake, setup.taxonomy, web_url=WEB),
+    )
+    return setup
+
+
+async def test_an_error_after_tags_were_created_keeps_its_kind_and_hint() -> None:
+    setup = failing_with(NotFound("Gone.", hint="Look elsewhere."))
+
+    with pytest.raises(NotFound) as raised:
+        _ = await setup.update(tags_add=["n1"], create_missing_tags=True)
+
+    assert raised.value.message == "Gone. Tags created before this failed: 'n1'."
+    assert raised.value.hint == "Look elsewhere."
+
+
+async def test_a_refusal_without_a_link_is_not_blamed_on_links() -> None:
+    setup = failing_with(PermissionDenied("Nope.", hint="Ask."))
+
+    with pytest.raises(PermissionDenied) as raised:
+        _ = await setup.update(title="New")
+
+    assert (raised.value.message, raised.value.hint) == ("Nope.", "Ask.")
+
+
+async def test_a_link_does_not_turn_another_error_into_a_permission_error() -> None:
+    setup = failing_with(Validation("Bad.", hint="Fix."))
+
+    with pytest.raises(Validation) as raised:
+        _ = await setup.update(custom_fields={"e2e-documentlink": [1]}, title="New")
+
+    assert (raised.value.message, raised.value.hint) == ("Bad.", "Fix.")

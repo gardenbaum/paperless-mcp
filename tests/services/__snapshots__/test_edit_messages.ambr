@@ -1,0 +1,53 @@
+# serializer version: 1
+# name: test_the_errors_of_an_update
+  dict({
+    'blank title': 'The title cannot be blank. Hint: Pass a title, or leave it out to keep the current one.',
+    'clear and set correspondent': 'correspondent is both set and cleared. Hint: Pass a value or list it in clear, not both.',
+    'clear and set document type': 'document_type is both set and cleared. Hint: Pass a value or list it in clear, not both.',
+    'clear and set owner': 'owner is both set and cleared. Hint: Pass a value or list it in clear, not both.',
+    'clear and set serial number': 'archive_serial_number is both set and cleared. Hint: Pass a value or list it in clear, not both.',
+    'clear and set storage path': 'storage_path is both set and cleared. Hint: Pass a value or list it in clear, not both.',
+    'clear and set two': 'correspondent, document_type is both set and cleared. Hint: Pass a value or list it in clear, not both.',
+    'failure after tag creation': "Paperless rejected the request: archive_serial_number: document with this archive serial number already exists. Tags created before this failed: 'n1', 'n2'.",
+    'field set and removed': 'A custom field is both set and removed. Hint: Set it or remove it, not both.',
+    'field set twice': "Custom field 'e2e-string' is given twice. Hint: Name each field once, by name or by id.",
+    'link without permission': 'Insufficient permissions. A document link needs change permission on the linked document. Hint: Linking documents also changes the linked ones: you need change permission there.',
+    'long title': 'The title is longer than 128 characters. Hint: Shorten the title.',
+    'no change permission': "The Paperless user may not change this document. Hint: Ask the document's owner for change permission.",
+    'nothing': 'Nothing to change: no field was given. Hint: Pass at least one field to change, e.g. title or tags_add.',
+    'owner name unlistable': "The Paperless user may not perform this action. Hint: Pass the owner's user id instead of the username.",
+    'owner without confirm': 'Changing the owner needs confirm=true: the new owner (or, with no owner, every user who may view documents) takes over the document and you may lose access to it. Hint: Pass confirm=true to change the owner.',
+    'parent removal': "Removing 'e2e-finance' also removes its child tags 'e2e-invoices'. Hint: List them in tags_remove too, or keep 'e2e-finance'.",
+    'parent removal with two children': "Removing 'e2e-finance' also removes its child tags 'e2e-invoices', 'e2e-receipts'. Hint: List them in tags_remove too, or keep 'e2e-finance'.",
+    'tag added and removed': 'A tag is both added and removed. Hint: Name each tag once, in tags_add or in tags_remove.',
+    'tag added and removed by id': 'A tag is both added and removed. Hint: Name each tag once, in tags_add or in tags_remove.',
+    'tags_set with add': 'tags_set replaces all tags and cannot be combined with tags_add or tags_remove. Hint: Use tags_set alone, or tags_add and tags_remove.',
+    'title of 128': 'accepted',
+    'unknown owner id': "No user has id 99. Hint: Call list_taxonomy(kind='user') to see the ids.",
+    'unknown tag': "No tag is named 'e2e-new'. Hint: Did you mean 'e2e-finance', 'e2e-invoices', 'e2e-inbox'? Or call list_taxonomy(kind='tag') to see all names. Or set create_missing_tags=true to create it.",
+    'unknown tag to remove': "No tag is named 'e2e-financ'. Hint: Did you mean 'e2e-finance', 'e2e-invoices', 'e2e-inbox'? Or call list_taxonomy(kind='tag') to see all names.",
+    'unseen link': 'No document 99 exists that this user may see. Hint: Take the id from a search_documents row.',
+  })
+# ---
+# name: test_the_errors_of_every_data_type
+  dict({
+    "boolean 'yes'": "Custom field 'my-boolean' takes true or false. Hint: Pass a JSON boolean, not text.",
+    "date '03.02.2026'": "Custom field 'my-date' takes a date as YYYY-MM-DD. Hint: Pass e.g. '2026-02-03'.",
+    "documentlink '1'": "Custom field 'my-documentlink' takes a list of document ids. Hint: Pass positive ids from search_documents, e.g. [12, 40].",
+    "float '1.5'": "Custom field 'my-float' takes a number. Hint: Pass a JSON number, e.g. 2.5.",
+    "holographic 'x'": "Custom field 'my-holographic' has the data type 'holographic', which is not supported. Hint: Leave this field out; it cannot be set through this tool.",
+    'integer 1.5': "Custom field 'my-integer' takes a whole number from -2147483648 to 2147483647. Hint: Pass a JSON integer, e.g. 42; use a float for larger ones.",
+    'integer 2147483648': "Custom field 'my-integer' takes a whole number from -2147483648 to 2147483647. Hint: Pass a JSON integer, e.g. 42; use a float for larger ones.",
+    'longtext 5': "Custom field 'my-longtext' takes text. Hint: Pass a string.",
+    "monetary 'EUR12.505'": "The amount for 'my-monetary' has more than two decimals. Hint: Pass 'EUR12.50', 'EUR 12.50' or 12.5; amounts have at most two decimals.",
+    "monetary 'EUR12345678901'": "Custom field 'my-monetary' takes an amount with an optional currency. Hint: Pass 'EUR12.50', 'EUR 12.50' or 12.5; amounts have at most two decimals. Amounts have at most 10 digits before the point.",
+    "monetary 'twelve'": "Custom field 'my-monetary' takes an amount with an optional currency. Hint: Pass 'EUR12.50', 'EUR 12.50' or 12.5; amounts have at most two decimals.",
+    "select 'Gamma'": "'my-select' has no option 'Gamma'. Hint: Options: 'Open', 'OPEN', 'Closed'.",
+    "select 'open'": "Several options of 'my-select' match 'open': 'Open', 'OPEN'. Hint: Pass the label exactly as listed.",
+    'select 5': "Custom field 'my-select' takes the label of one of its options. Hint: Options: 'Open', 'OPEN', 'Closed'.",
+    'select None': "Custom field 'my-select' needs a value. Hint: To take the field off the document use remove_custom_fields.",
+    "string 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'": "Custom field 'my-string' takes at most 128 characters. Hint: Use a longtext field for longer text.",
+    'string 5': "Custom field 'my-string' takes text. Hint: Pass a string.",
+    "url 'nope'": "Custom field 'my-url' takes a URL with a scheme. Hint: Pass e.g. 'https://example.com'.",
+  })
+# ---

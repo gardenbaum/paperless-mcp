@@ -16,7 +16,7 @@ other fields, so using it would not make a whole update atomic either.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from paperless_mcp.domain.documents import CustomFieldValue, DocumentPatch, DocumentUpdate
 from paperless_mcp.domain.errors import NotFound, PaperlessMcpError, PermissionDenied, Validation
@@ -48,7 +48,7 @@ COUNTED: tuple[TaxonomyKind, ...] = (
 MAX_TITLE = 128
 
 
-def _same(first: JsonValue, second: JsonValue) -> bool:
+def same_value(first: JsonValue, second: JsonValue) -> bool:
     """Equal values; ``True`` is not ``1``, and lists (document links) are compared as sets."""
     if isinstance(first, list) and isinstance(second, list):
         return sorted(map(repr, first)) == sorted(map(repr, second))
@@ -149,6 +149,11 @@ def _refuse_orphans(
         raise Validation(message, hint=hint)
 
 
+def _linked(value: JsonValue | None) -> set[int]:
+    """The document ids in a document link value; nothing for any other value."""
+    return {n for n in value if isinstance(n, int)} if isinstance(value, list) else set()
+
+
 def _confirm_owner(edit: DocumentEdit, current: DocumentRecord, scalars: dict[str, object]) -> None:
     """An owner change (also to no owner) needs ``confirm``: the caller cannot undo it."""
     if "owner" in scalars and scalars["owner"] != current.owner and not edit.confirm:
@@ -242,15 +247,18 @@ class DocumentEditor:
     async def _result(self, record: DocumentRecord, implicit: list[int]) -> DocumentUpdate:
         detail = await self._documents.detail(record)
         implicit_tags = tuple(t for t in detail.tags if t.id in implicit)
-        return DocumentUpdate.model_validate(
-            {**cast("dict[str, object]", dict(detail)), "implicit_tags": implicit_tags}
-        )
+        update = DocumentUpdate.model_validate(detail, from_attributes=True)
+        return update.model_copy(update={"implicit_tags": implicit_tags})
 
     async def _scalars(self, edit: DocumentEdit) -> dict[str, object]:
         """The plain fields the edit sets, references as ids; ``None`` clears."""
         found: dict[str, object] = {}
-        for kind in ("correspondent", "document_type", "storage_path"):
-            value = cast("NameOrId | None", getattr(edit, kind))
+        references: dict[TaxonomyKind, NameOrId | None] = {
+            "correspondent": edit.correspondent,
+            "document_type": edit.document_type,
+            "storage_path": edit.storage_path,
+        }
+        for kind, value in references.items():
             if value is not None:
                 found[kind] = (await self._taxonomy.resolve(kind, value)).id
         if edit.owner is not None:
@@ -292,9 +300,7 @@ class DocumentEditor:
                 raise Validation(message, hint="Name each field once, by name or by id.")
             sets[item.id] = normalise(item, value)
             if item.data_type == "documentlink":
-                old = have.get(item.id)
-                known = set(cast("list[int]", old)) if isinstance(old, list) else set[int]()
-                links |= set(cast("list[int]", sets[item.id])) - known
+                links |= _linked(sets[item.id]) - _linked(have.get(item.id))
         removed = {
             (await self._taxonomy.resolve("custom_field", f)).id for f in edit.remove_custom_fields
         }
@@ -320,7 +326,7 @@ class DocumentEditor:
     ) -> dict[str, object]:
         """The merged custom field list, if it differs from the current one."""
         have = {item.field: item.value for item in current.custom_fields}
-        differing = {n: v for n, v in sets.items() if n not in have or not _same(have[n], v)}
+        differing = {n: v for n, v in sets.items() if n not in have or not same_value(have[n], v)}
         dropped = removed & have.keys()
         if not differing and not dropped:
             return {}
