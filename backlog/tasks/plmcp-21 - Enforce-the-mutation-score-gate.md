@@ -1,11 +1,11 @@
 ---
 id: PLMCP-21
 title: Enforce the mutation-score gate
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T19:47:00Z'
+updated_date: '2026-11-12T19:49:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -24,15 +24,15 @@ From M2 on, the mutation score is a gate, not a report (design §9.2).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A mutation score of at least 80 % on services/ and paperless/ is enforced by the weekly and on-demand runs
-- [ ] #2 Every surviving mutant is either killed by a new test, turned into a Backlog task, or documented as equivalent
+- [x] #1 A mutation score of at least 80 % on services/ and paperless/ is enforced by the weekly and on-demand runs
+- [x] #2 Every surviving mutant is either killed by a new test, turned into a Backlog task, or documented as equivalent
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Tests written first (red, then green) at every test level the change touches
-- [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #1 Tests written first (red, then green) at every test level the change touches
+- [x] #2 just check passes locally and all required CI checks are green on the PR
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -60,3 +60,9 @@ Not verifiable locally: the workflow on GitHub (actionlint is not installed here
 
 Review round 1: (I1) equivalents are fingerprinted with the function_hash from mutants/mutmut-stats.json; an id that survives under a different function source is stale and not excluded (--hashes; proven live: editing PaperlessClient made the 3 _retry_delay entries stale and the run exited 4 until re-reviewed). (I2) stale entries print on stderr and in the summary and exit 4 (3 wins over 4); recipe and workflow fail with it. (I3) decision-13 'Mutation-score gate rules' (accepted, supplements decision-8, which is untouched); gate tests carry its marker. M4 PaperlessClient has a jitter seam (random_wait default); global random.seed removed. M5 real message asserted, date-range test asserts titles. M6 'user: null' note test reworded as defensive (schema says never null); streaming moved to tests/adapter/conftest.py. M7 'Other (not checked, type check)' row so the table sums to Total; formula names them. M8 --gate dropped. M9 publish step if: always(); missing or invalid mutmut data gives a clear error (exit 1). Final full run: 2081 mutants, 2038 killed, 2 timeout, 41 survived (all equivalent) = 98.0 % raw, 100.0 % with equivalents.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The mutation score on services/ and paperless/ is now a gate: the weekly workflow and just mutation fail (exit 3) below MUTATION_GATE = 80 % while still publishing the summary. Formula and rules are recorded in new decision-13 (supplements decision-8): (killed + timeout) / (total - skipped - confirmed equivalents); suspicious, no-tests, segfault, interrupted and not-checked mutants count against. Reviewed equivalents live in mutation-equivalents.toml, each with a reason and the function hash from mutmut-stats.json; an entry whose function changed is stale, is not excluded and fails the run (exit 4) until re-reviewed. All 179 survivors handled: 138 killed by new adapter and service tests, 41 documented as equivalent (zip lengths, typing.cast, header-name and method case, never-read initial values), none needed a follow-up task. Score 98.0 % raw, 100 % with equivalents (2081 mutants). PaperlessClient gained a jitter seam for a deterministic backoff test. Verified: just check 737 passed, 100 % diff coverage; full just mutation run. Independent review: 3 Important and 6 Minor fixed. DoD #4 is checked by the merge itself.
+<!-- SECTION:FINAL_SUMMARY:END -->
