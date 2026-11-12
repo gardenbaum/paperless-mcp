@@ -21,6 +21,7 @@ from pydantic import Field, JsonValue
 from paperless_mcp.domain.documents import (
     Clearable,
     ContentSlice,
+    DocumentDeleted,
     DocumentDetail,
     DocumentEdit,
     DocumentQuery,
@@ -31,12 +32,15 @@ from paperless_mcp.domain.documents import (
     Include,
     NameFilters,
     NameOrId,
+    NoteAdded,
+    NoteDeleted,
     Ordering,
 )
 from paperless_mcp.domain.instance import InstanceOverview
 from paperless_mcp.domain.tasks import TaskReport
 from paperless_mcp.domain.taxonomy import TaxonomyKind, TaxonomyListing
 from paperless_mcp.services.documents import DEFAULT_SLICE, HISTORY_LIMIT
+from paperless_mcp.services.notes import MAX_NOTE_CHARS
 from paperless_mcp.services.tasks import MAX_WAIT_SECONDS
 from paperless_mcp.tools._shared import ANNOTATIONS, boundary, resource_boundary, services
 
@@ -55,6 +59,15 @@ type Offset = Annotated[int, Field(ge=0, description="Character offset to start 
 type SliceSize = Annotated[
     int,
     Field(ge=1, le=MAX_SLICE, description=f"Characters to return, at most {MAX_SLICE}."),
+]
+type Confirm = Annotated[
+    bool,
+    Field(
+        description=(
+            "Must be true to go ahead. Without it nothing changes and the answer says what would "
+            "happen; check that, then call again with confirm=true."
+        )
+    ),
 ]
 type Day = Annotated[date | None, Field(description="Date (YYYY-MM-DD), inclusive.")]
 
@@ -438,6 +451,59 @@ async def update_document(  # noqa: PLR0913 -- one parameter per changeable fiel
         remove_custom_fields=tuple(remove_custom_fields or ()),
     )
     return await services(ctx).edits.update(document_id, edit)
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["add_note"])
+@boundary
+async def add_note(
+    ctx: Context,
+    document_id: DocumentId,
+    note: Annotated[str, Field(description=f"Text of the note, 1 to {MAX_NOTE_CHARS} characters.")],
+) -> NoteAdded:
+    """Add a note to a document, as the current Paperless user.
+
+    Notes are free-text remarks shown with the document and found by search. Each call adds
+    another note, so do not repeat it. Needs permission to add notes, and to change the
+    document. Read notes with get_document and include notes; delete one with delete_note.
+    """
+    return await services(ctx).notes.add(document_id, note)
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["delete_note"])
+@boundary
+async def delete_note(
+    ctx: Context,
+    document_id: DocumentId,
+    note_id: Annotated[
+        int, Field(description="Id of the note, from get_document with include notes.")
+    ],
+    *,
+    confirm: Confirm = False,
+) -> NoteDeleted:
+    """Delete a note from a document for good; notes have no trash.
+
+    Two steps: call without confirm first. Nothing is deleted and the error says which note and
+    document it would be (author, length and the start of the text), with confirm=true to pass.
+    Find note ids with get_document and include notes. Needs permission to view and delete notes,
+    and to change the document.
+    """
+    return await services(ctx).notes.delete(document_id, note_id, confirm=confirm)
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["delete_document"])
+@boundary
+async def delete_document(
+    ctx: Context, document_id: DocumentId, *, confirm: Confirm = False
+) -> DocumentDeleted:
+    """Delete a document by moving it to the Paperless trash, from where it can be restored.
+
+    Two steps: call without confirm first. Nothing is deleted and the error names the document
+    that would go, with confirm=true to pass. The trash keeps the document until it is emptied
+    (by the administrator's retention setting or by hand); restore it in the Paperless web UI
+    or with the trash toolset if enabled. Only the owner (any user for an unowned document)
+    may delete, and the user needs the delete permission.
+    """
+    return await services(ctx).removal.delete(document_id, confirm=confirm)
 
 
 @provider.resource(

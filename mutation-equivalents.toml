@@ -277,3 +277,28 @@ reason = "A length of the whole delimiter is never reached: partition() already 
 mutant = "paperless_mcp.paperless.ai.xǁPaperlessAiReaderǁget_ai_suggestions__mutmut_6"
 function_hash = "0b79ab9c6026"
 reason = "retry=None is falsy like retry=False, so the request is not retried either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁadd_note__mutmut_11"
+function_hash = "f321dd014742"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_note__mutmut_5"
+function_hash = "f3d927e26557"
+reason = "request() only tests retry for truth (`if retry`), so None and False both switch retries off."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_note__mutmut_11"
+function_hash = "f3d927e26557"
+reason = "httpx2 upper-cases the method when it builds the request, so 'delete' sends exactly what 'DELETE' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_document__mutmut_4"
+function_hash = "5d60b85a9db1"
+reason = "request() only tests retry for truth (`if retry`), so None and False both switch retries off."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_document__mutmut_9"
+function_hash = "5d60b85a9db1"
+reason = "httpx2 upper-cases the method when it builds the request, so 'delete' sends exactly what 'DELETE' sends."

@@ -143,6 +143,8 @@ class Backend:
     new_document: Callable[[], int]
     # Shares an uploaded document view-only with the restricted user (see `Share`).
     share_read_only: Share
+    # Whether the document with this id is in the trash (deleted, not yet emptied from it).
+    in_trash: Callable[[int], bool]
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
     # (`just e2e-latest` runs the suite against a newer release than the pinned one).
     expected_version: str
@@ -208,6 +210,13 @@ def fake_share(state: FakeState) -> Share:
     return share_fake
 
 
+def fake_in_trash(state: FakeState) -> Callable[[int], bool]:
+    def in_trash(document_id: int) -> bool:
+        return document_id in {d.id for d in state.trash}
+
+    return in_trash
+
+
 def fake_backend(*, ai_enabled: bool = False) -> Backend:
     """The fake's backend; the E2E stack of `just e2e` has AI off, so that is the default."""
     state = seeded()
@@ -220,8 +229,29 @@ def fake_backend(*, ai_enabled: bool = False) -> Backend:
         upload=fake_upload(state),
         new_document=fake_new_document(state),
         share_read_only=fake_share(state),
+        in_trash=fake_in_trash(state),
         expected_version=VERSION,
     )
+
+
+def live_in_trash(stack: Stack, document_id: int) -> bool:
+    """Whether the live trash holds the document, over all its pages."""
+    page = 1
+    while True:
+        listed = stack.admin.get("/api/trash/", params={"page": page, "page_size": 100})
+        if document_id in {row["id"] for row in results(listed)}:
+            return True
+        if not cast("dict[str, object]", listed.json())["next"]:
+            return False
+        page += 1
+
+
+def delete_and_empty_trash(stack: Stack, documents: list[int]) -> None:
+    """Delete the documents, then remove their trash entries: a delete only moves them there."""
+    for document in documents:
+        _ = stack.admin.delete(f"/api/documents/{document}/")
+    if documents:
+        _ = stack.admin.post("/api/trash/", json={"action": "empty", "documents": documents})
 
 
 @contextlib.asynccontextmanager
@@ -279,11 +309,11 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
                 upload=upload_live,
                 new_document=new_live_document,
                 share_read_only=share_live,
+                in_trash=lambda document_id: live_in_trash(stack, document_id),
                 expected_version=EXPECTED_VERSION,
             )
     finally:
-        for document in created:
-            _ = stack.admin.delete(f"/api/documents/{document}/")
+        delete_and_empty_trash(stack, created)
         # Tags the contract tests created (they all start with SCRATCH_TAG).
         found = stack.admin.get("/api/tags/", params={"name__istartswith": SCRATCH_TAG})
         for row in results(found):

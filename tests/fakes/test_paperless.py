@@ -173,3 +173,90 @@ async def test_a_disabled_audit_log_is_a_feature_error_before_anything_else() ->
         _ = await FakePaperless(state, user="admin").list_document_history(999_999)
 
     assert raised.value.hint
+
+
+NOTER = FakeUser(
+    id=12,
+    username="noter",
+    permissions=frozenset({"view_document", "view_note", "add_note", "delete_note"}),
+)
+ERASER = FakeUser(id=13, username="eraser", permissions=frozenset({"delete_document"}))
+
+
+async def test_notes_need_a_visible_document_the_user_may_change() -> None:
+    # Live 3.4.2, probed with a temporary user: on a document owned by someone else, a view-only
+    # user reads the notes but is refused (403) when adding or deleting one, a hidden document
+    # is 403 for every note action, and an unowned or own document is fine.
+    state = state_with(NOTER)
+    state.documents.extend(
+        [
+            FakeDocument(id=50, title="view-only", owner=1, viewers={NOTER.id}),
+            FakeDocument(id=51, title="hidden", owner=1),
+            FakeDocument(id=52, title="unowned"),
+            FakeDocument(id=53, title="own", owner=NOTER.id),
+            FakeDocument(id=54, title="shared", owner=1, viewers={NOTER.id}, editors={NOTER.id}),
+        ]
+    )
+    admin = FakePaperless(state, user="admin", allow_writes=True)
+    fake = FakePaperless(state, user=NOTER.username, allow_writes=True)
+    left_by_admin = await admin.add_note(50, "adm")
+
+    assert await fake.list_document_notes(50)
+    with pytest.raises(PermissionDenied):
+        _ = await fake.add_note(50, "x")
+    with pytest.raises(PermissionDenied):
+        await fake.delete_note(50, left_by_admin.id)
+    with pytest.raises(PermissionDenied):
+        _ = await fake.add_note(51, "x")
+    for allowed in (52, 53, 54):
+        assert (await fake.add_note(allowed, "ok")).user == "noter"
+
+
+async def test_deleting_a_document_needs_ownership_and_no_view_permission() -> None:
+    # Live 3.4.2, probed with temporary users: with delete_document alone a user deletes an
+    # unowned document (204); a view-only or change-granted document is 403, a hidden one 404.
+    state = state_with(ERASER)
+    state.documents.extend(
+        [
+            FakeDocument(id=60, title="unowned"),
+            FakeDocument(id=61, title="view-only", owner=1, viewers={ERASER.id}),
+            FakeDocument(id=62, title="shared", owner=1, viewers={ERASER.id}, editors={ERASER.id}),
+            FakeDocument(id=63, title="hidden", owner=1),
+        ]
+    )
+    fake = FakePaperless(state, user=ERASER.username, allow_writes=True)
+
+    for refused in (61, 62):
+        with pytest.raises(PermissionDenied):
+            await fake.delete_document(refused)
+    with pytest.raises(NotFound):
+        await fake.delete_document(63)
+    await fake.delete_document(60)
+
+    assert [d.id for d in state.trash] == [60]
+    assert 60 not in {d.id for d in state.documents}
+
+
+async def test_note_ids_are_never_reused() -> None:
+    state = seeded()
+    fake = FakePaperless(state, user="admin", allow_writes=True)
+    first = await fake.add_note(1, "one")
+    await fake.delete_note(1, first.id)
+
+    second = await fake.add_note(1, "two")
+
+    assert second.id > first.id
+
+
+async def test_notes_and_deletion_write_nothing_without_the_opt_in() -> None:
+    state = seeded()
+    fake = FakePaperless(state, user="admin")
+
+    with pytest.raises(WriteNotAllowedError):
+        _ = await fake.add_note(1, "x")
+    with pytest.raises(WriteNotAllowedError):
+        await fake.delete_note(1, 1)
+    with pytest.raises(WriteNotAllowedError):
+        await fake.delete_document(1)
+
+    assert (len(state.documents), len(state.trash), len(state.documents[0].notes)) == (2, 0, 1)

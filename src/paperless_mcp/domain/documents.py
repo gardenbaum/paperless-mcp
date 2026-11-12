@@ -399,6 +399,39 @@ class DocumentUpdate(DocumentDetail):
     ] = ()
 
 
+class NoteAdded(BaseModel):
+    """The note that was added to a document."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    document_id: int
+    note: Note
+    web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+
+
+class NoteDeleted(BaseModel):
+    """A note that was deleted for good."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    document_id: int
+    note_id: int
+    web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+
+
+class DocumentDeleted(BaseModel):
+    """A document that was moved to the Paperless trash."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    document_id: int
+    title: Annotated[str, Field(description="The title the document had.")]
+    in_trash: Annotated[
+        bool, Field(description="True: the document is in the trash and can be restored.")
+    ]
+    message: Annotated[str, Field(description="What happened and how to get the document back.")]
+
+
 class ContentSlice(BaseModel):
     """A slice of the OCR text of a document."""
 

@@ -64,7 +64,7 @@ from paperless_mcp.domain.instance import (
 )
 from paperless_mcp.domain.tasks import TaskState, TaskStatus
 from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyItem
-from paperless_mcp.paperless.documents import beyond_last_page, unseen_document
+from paperless_mcp.paperless.documents import beyond_last_page, unseen_document, unseen_note
 from paperless_mcp.paperless.errors import ai_disabled
 from paperless_mcp.paperless.tasks import not_found
 
@@ -304,6 +304,10 @@ class FakeState:
     saved_views: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
     groups: list[FakeGroup] = field(default_factory=list[FakeGroup])
     tasks: list[FakeTask] = field(default_factory=list[FakeTask])
+    # Deleted documents, newest last; reads no longer see them, the Paperless trash does.
+    trash: list[FakeDocument] = field(default_factory=list[FakeDocument])
+    # The id of the last note created: note ids are global and never reused.
+    last_note_id: int = 1
     system_status: SystemStatus = HEALTHY
     ai_enabled: bool = False
     audit_log_enabled: bool = True
@@ -840,6 +844,63 @@ class FakePaperless:
         tag.owner = self.user.id
         self.state.tags.append(tag)
         return TaxonomyItem(id=tag.id, name=tag.name, document_count=0, colour=tag.colour)
+
+    @write
+    async def add_note(self, document_id: int, text: str) -> Note:
+        """`DocumentWriter.add_note` (the `notes` action, POST).
+
+        Order in Paperless 3.4.2: the global `view_document` and `add_note` permissions (403),
+        the document (404), the object view (403 for a hidden document) and the object change
+        permission (403: a viewer may not add notes). Empty and blank text is accepted.
+        """
+        document = self._sub(document_id, "add_note")
+        if not document.changeable_by(self.user):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        state = self.state
+        newest = max((n.id for d in state.documents for n in d.notes), default=0)
+        state.last_note_id = max(state.last_note_id, newest) + 1
+        note = Note(
+            id=state.last_note_id, note=text, created=datetime.now(UTC), user=self.user.username
+        )
+        document.notes.append(note)
+        return note
+
+    @write
+    async def delete_note(self, document_id: int, note_id: int) -> None:
+        """`DocumentWriter.delete_note` (the `notes` action, DELETE ?id=).
+
+        Same order as `add_note` with `delete_note` as the global permission; then the note
+        must be one of this document (404).
+        """
+        document = self._sub(document_id, "delete_note")
+        if not document.changeable_by(self.user):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        if note_id not in {n.id for n in document.notes}:
+            raise unseen_note(document_id, note_id)
+        document.notes = [n for n in document.notes if n.id != note_id]
+
+    @write
+    async def delete_document(self, document_id: int) -> None:
+        """`DocumentWriter.delete_document` (DocumentViewSet.destroy: soft delete to the trash).
+
+        Order in Paperless 3.4.2: the global `delete_document` permission (403, `view_document`
+        is not needed), the document among those the user may see (404), then the object: only
+        an owner, a superuser or anyone for an unowned document may delete it (403: a view or
+        change grant is not enough).
+        """
+        if not self.user.has("delete_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        document = self._document(document_id)
+        if not document.visible_to(self.user):
+            raise unseen_document(document_id)
+        if not self.user.may_change_object(document):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        self.state.documents.remove(document)
+        self.state.trash.append(document)
 
     async def get_document_content(self, document_id: int) -> str:
         """`DocumentReader.get_document_content` (retrieve with `fields=content`)."""

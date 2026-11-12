@@ -302,6 +302,107 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Add note',
+      }),
+      'description': '''
+        Add a note to a document, as the current Paperless user.
+        
+        Notes are free-text remarks shown with the document and found by search. Each call adds
+        another note, so do not repeat it. Needs permission to add notes, and to change the
+        document. Read notes with get_document and include notes; delete one with delete_note.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'note': dict({
+            'description': 'Text of the note, 1 to 10000 characters.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'note',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'add_note',
+      'outputSchema': dict({
+        'description': 'The note that was added to a document.',
+        'properties': dict({
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'note': dict({
+            'description': 'A note on a document.',
+            'properties': dict({
+              'created': dict({
+                'anyOf': list([
+                  dict({
+                    'format': 'date-time',
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+              }),
+              'id': dict({
+                'type': 'integer',
+              }),
+              'note': dict({
+                'type': 'string',
+              }),
+              'user': dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+                'description': 'Username of the author, if known.',
+              }),
+            }),
+            'required': list([
+              'id',
+              'note',
+              'created',
+              'user',
+            ]),
+            'type': 'object',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'note',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Add note',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'ai',
           ]),
         }),
@@ -394,6 +495,148 @@
         'type': 'object',
       }),
       'title': 'Ask Paperless AI',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Delete document',
+      }),
+      'description': '''
+        Delete a document by moving it to the Paperless trash, from where it can be restored.
+        
+        Two steps: call without confirm first. Nothing is deleted and the error names the document
+        that would go, with confirm=true to pass. The trash keeps the document until it is emptied
+        (by the administrator's retention setting or by hand); restore it in the Paperless web UI
+        or with the trash toolset if enabled. Only the owner (any user for an unowned document)
+        may delete, and the user needs the delete permission.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the answer says what would happen; check that, then call again with confirm=true.',
+            'type': 'boolean',
+          }),
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'delete_document',
+      'outputSchema': dict({
+        'description': 'A document that was moved to the Paperless trash.',
+        'properties': dict({
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'in_trash': dict({
+            'description': 'True: the document is in the trash and can be restored.',
+            'type': 'boolean',
+          }),
+          'message': dict({
+            'description': 'What happened and how to get the document back.',
+            'type': 'string',
+          }),
+          'title': dict({
+            'description': 'The title the document had.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'title',
+          'in_trash',
+          'message',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Delete document',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Delete note',
+      }),
+      'description': '''
+        Delete a note from a document for good; notes have no trash.
+        
+        Two steps: call without confirm first. Nothing is deleted and the error says which note and
+        document it would be (author, length and the start of the text), with confirm=true to pass.
+        Find note ids with get_document and include notes. Needs permission to view and delete notes,
+        and to change the document.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the answer says what would happen; check that, then call again with confirm=true.',
+            'type': 'boolean',
+          }),
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'note_id': dict({
+            'description': 'Id of the note, from get_document with include notes.',
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'note_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'delete_note',
+      'outputSchema': dict({
+        'description': 'A note that was deleted for good.',
+        'properties': dict({
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'note_id': dict({
+            'type': 'integer',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'note_id',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Delete note',
     }),
     dict({
       '_meta': dict({
@@ -3676,6 +3919,107 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Add note',
+      }),
+      'description': '''
+        Add a note to a document, as the current Paperless user.
+        
+        Notes are free-text remarks shown with the document and found by search. Each call adds
+        another note, so do not repeat it. Needs permission to add notes, and to change the
+        document. Read notes with get_document and include notes; delete one with delete_note.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'note': dict({
+            'description': 'Text of the note, 1 to 10000 characters.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'note',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'add_note',
+      'outputSchema': dict({
+        'description': 'The note that was added to a document.',
+        'properties': dict({
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'note': dict({
+            'description': 'A note on a document.',
+            'properties': dict({
+              'created': dict({
+                'anyOf': list([
+                  dict({
+                    'format': 'date-time',
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+              }),
+              'id': dict({
+                'type': 'integer',
+              }),
+              'note': dict({
+                'type': 'string',
+              }),
+              'user': dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+                'description': 'Username of the author, if known.',
+              }),
+            }),
+            'required': list([
+              'id',
+              'note',
+              'created',
+              'user',
+            ]),
+            'type': 'object',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'note',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Add note',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'ai',
           ]),
         }),
@@ -3768,6 +4112,148 @@
         'type': 'object',
       }),
       'title': 'Ask Paperless AI',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Delete document',
+      }),
+      'description': '''
+        Delete a document by moving it to the Paperless trash, from where it can be restored.
+        
+        Two steps: call without confirm first. Nothing is deleted and the error names the document
+        that would go, with confirm=true to pass. The trash keeps the document until it is emptied
+        (by the administrator's retention setting or by hand); restore it in the Paperless web UI
+        or with the trash toolset if enabled. Only the owner (any user for an unowned document)
+        may delete, and the user needs the delete permission.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the answer says what would happen; check that, then call again with confirm=true.',
+            'type': 'boolean',
+          }),
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'delete_document',
+      'outputSchema': dict({
+        'description': 'A document that was moved to the Paperless trash.',
+        'properties': dict({
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'in_trash': dict({
+            'description': 'True: the document is in the trash and can be restored.',
+            'type': 'boolean',
+          }),
+          'message': dict({
+            'description': 'What happened and how to get the document back.',
+            'type': 'string',
+          }),
+          'title': dict({
+            'description': 'The title the document had.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'title',
+          'in_trash',
+          'message',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Delete document',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Delete note',
+      }),
+      'description': '''
+        Delete a note from a document for good; notes have no trash.
+        
+        Two steps: call without confirm first. Nothing is deleted and the error says which note and
+        document it would be (author, length and the start of the text), with confirm=true to pass.
+        Find note ids with get_document and include notes. Needs permission to view and delete notes,
+        and to change the document.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the answer says what would happen; check that, then call again with confirm=true.',
+            'type': 'boolean',
+          }),
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'note_id': dict({
+            'description': 'Id of the note, from get_document with include notes.',
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'note_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'delete_note',
+      'outputSchema': dict({
+        'description': 'A note that was deleted for good.',
+        'properties': dict({
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'note_id': dict({
+            'type': 'integer',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'note_id',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Delete note',
     }),
     dict({
       '_meta': dict({

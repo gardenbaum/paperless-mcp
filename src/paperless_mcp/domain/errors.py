@@ -36,6 +36,42 @@ class Validation(PaperlessMcpError):
     """Paperless rejected the input."""
 
 
+# What every refusal for a missing confirmation tells the caller to do.
+CONFIRM_HINT = "Call the tool again with the same arguments and confirm=true."
+
+
+class ConfirmationRequired(Validation):
+    """A destructive action was asked for without ``confirm=true``; nothing was changed.
+
+    The one mechanism of the confirmation flow (decision-6): services raise it after reading
+    what the action would touch, so the message can say what would happen. It is an error, not
+    a result, so a client cannot mistake it for a success; elicitation is not used.
+    """
+
+    @classmethod
+    def for_effect(cls, effect: str) -> ConfirmationRequired:
+        """The standard refusal: nothing was changed, and confirming would ``effect``.
+
+        ``effect`` is a verb phrase such as ``move document 5 to the trash``; it names what is
+        touched but never document content.
+        """
+        return cls(f"Nothing was changed. Confirming would {effect}.")
+
+    def __init__(self, message: str, *, hint: str = CONFIRM_HINT) -> None:
+        """Create the refusal from a client-safe message; ``hint`` defaults to ``CONFIRM_HINT``."""
+        super().__init__(message, hint=hint)
+
+
+def quoted(text: str, limit: int = 60) -> str:
+    """``text`` on one line, cut to ``limit`` characters with an ellipsis, in single quotes.
+
+    For naming a document or a note in a message without sending its whole content.
+    """
+    line = " ".join(text.split())
+    shown = line if len(line) <= limit else line[: limit - 1] + "…"
+    return f"'{shown}'"
+
+
 class AuthenticationFailed(PaperlessMcpError):
     """Paperless rejected the credential (wrong, expired or revoked token)."""
 

@@ -189,6 +189,39 @@ class DocumentWriter(Protocol):
         """
         ...
 
+    async def add_note(self, document_id: int, text: str) -> Note:
+        """Add a note authored by the user and return it.
+
+        Paperless answers with all notes of the document; the new one is the one with the
+        highest id. It accepts empty and whitespace-only text, so callers check that.
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user lacks the note permission, may not see the document, or
+                may not change it (a view grant is not enough for a note).
+            Validation: Paperless could not save the note.
+        """
+        ...
+
+    async def delete_note(self, document_id: int, note_id: int) -> None:
+        """Delete one note of a document for good; notes have no trash.
+
+        Raises:
+            NotFound: No such document, or no such note on it.
+            PermissionDenied: The user lacks the note permission or may not change the document.
+        """
+        ...
+
+    async def delete_document(self, document_id: int) -> None:
+        """Move a document to the Paperless trash; it can be restored from there.
+
+        Raises:
+            NotFound: No such document, or the user may not see it.
+            PermissionDenied: The user may not delete documents, or this one (an owner, or any
+                user for an unowned document; a change grant is not enough).
+        """
+        ...
+
 
 class TaxonomyWriter(Protocol):
     """Changes to tags, correspondents and the like."""
