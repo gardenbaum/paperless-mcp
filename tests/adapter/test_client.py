@@ -500,3 +500,51 @@ async def test_a_download_retries_transient_statuses_and_closes_each_response() 
     assert found.content == b"ok"
     assert first.closed
     assert len(sleep.delays) == 1
+
+
+class Failing(httpx2.AsyncByteStream):
+    """A body that yields some bytes and then fails like a stalled or dropped connection."""
+
+    def __init__(self, error: type[httpx2.TransportError], *chunks: bytes) -> None:
+        self.error: type[httpx2.TransportError] = error
+        self.chunks: tuple[bytes, ...] = chunks
+        self.closed: bool = False
+
+    @override
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self.chunks:
+            yield chunk
+        message = "simulated"
+        raise self.error(message)
+
+    @override
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(httpx2.ReadTimeout, UpstreamTimeout), (httpx2.ReadError, UpstreamUnreachable)],
+)
+async def test_a_body_that_fails_midway_is_a_client_safe_error_and_is_closed(
+    error: type[httpx2.TransportError], expected: type[UpstreamUnavailable]
+) -> None:
+    body = Failing(error, b"abc")
+    client, sleep = streaming(lambda _: httpx2.Response(200, stream=body))
+
+    with pytest.raises(expected) as raised:
+        _ = await client.download("/api/documents/1/download/", max_bytes=100)
+
+    assert raised.value.hint
+    assert body.closed
+    assert sleep.delays == []  # a body that failed midway is not retried
+
+
+async def test_an_error_response_whose_body_fails_is_still_the_transport_error() -> None:
+    body = Failing(httpx2.ReadTimeout)
+    client, _ = streaming(lambda _: httpx2.Response(500, stream=body))
+
+    with pytest.raises(UpstreamTimeout):
+        _ = await client.download("/api/documents/1/download/", max_bytes=100)
+
+    assert body.closed

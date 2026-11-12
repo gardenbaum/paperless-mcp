@@ -177,7 +177,8 @@ class PaperlessClient:
         Raises:
             PaperlessMcpError: The matching subclass for an error status or a failed transport.
         """
-        response = await self._exchange(self._build("GET", path, params=params), stream=True)
+        outgoing = self._build("GET", path, params=params)
+        response = await self._exchange(outgoing, stream=True)
         try:
             if response.is_error:
                 _ = await response.aread()
@@ -190,6 +191,11 @@ class PaperlessClient:
                 if total > max_bytes:
                     return Download(b"", response.headers, truncated=True)
             return Download(b"".join(received), response.headers, truncated=False)
+        except httpx2.TransportError as error:
+            # Not retried: the status was fine and the connection broke while the body came in;
+            # the caller can ask again, and a retry would read the file from the start.
+            logger.warning("GET %s failed: %s", outgoing.url.path, type(error).__name__)
+            raise error_for_transport(error) from error
         finally:
             await response.aclose()
 
