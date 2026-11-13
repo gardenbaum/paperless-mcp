@@ -91,7 +91,7 @@ async def test_tags_are_added_with_their_parents_and_removed_with_their_children
     parent = await make(ports, "tag")
     child = await make(ports, "tag", parent=parent)
     other = await make(ports, "tag")
-    first, second = backend.new_document(), backend.new_document()
+    first, second = backend.new_documents(2)
     before = {d: set((await read(ports, d)).tags) for d in (first, second)}
 
     await ports.bulk_writes.bulk_edit_documents((first, second), TagsChange(add=(child, other)))
@@ -114,7 +114,8 @@ async def test_tags_are_added_with_their_parents_and_removed_with_their_children
 @pytest.mark.contract(DOCUMENTS)
 async def test_a_tag_in_both_lists_ends_up_added(backend: Backend) -> None:
     # Paperless removes first, then adds.
-    ports, document = backend.admin, backend.new_document()
+    ports = backend.admin
+    (document,) = backend.new_documents(1)
     tag = await make(ports, "tag")
 
     await ports.bulk_writes.bulk_edit_documents((document,), TagsChange(add=(tag,), remove=(tag,)))
@@ -123,27 +124,30 @@ async def test_a_tag_in_both_lists_ends_up_added(backend: Backend) -> None:
 
 
 @pytest.mark.contract(DOCUMENTS)
-@pytest.mark.parametrize("field", REFERENCES)
 async def test_a_reference_is_set_on_the_selected_documents_only_and_can_be_cleared(
-    backend: Backend, field: str
+    backend: Backend,
 ) -> None:
+    # One set of documents serves the three fields: uploading documents is the slow part live.
     ports = backend.admin
-    target = await make(ports, field)  # pyright: ignore[reportArgumentType] -- one of the kinds
-    first, second, untouched = (backend.new_document() for _ in range(3))
+    first, second, untouched = backend.new_documents(3)
     change = ReferenceChange.model_validate
+    for field in REFERENCES:
+        target = await make(ports, field)
 
-    await ports.bulk_writes.bulk_edit_documents(
-        (first, second), change({"field": field, "value": target})
-    )
+        await ports.bulk_writes.bulk_edit_documents(
+            (first, second), change({"field": field, "value": target})
+        )
 
-    assert getattr(await read(ports, first), field) == target
-    assert getattr(await read(ports, second), field) == target
-    assert getattr(await read(ports, untouched), field) is None
+        assert getattr(await read(ports, first), field) == target
+        assert getattr(await read(ports, second), field) == target
+        assert getattr(await read(ports, untouched), field) is None
 
-    await ports.bulk_writes.bulk_edit_documents((first,), change({"field": field, "value": None}))
+        await ports.bulk_writes.bulk_edit_documents(
+            (first,), change({"field": field, "value": None})
+        )
 
-    assert getattr(await read(ports, first), field) is None
-    assert getattr(await read(ports, second), field) == target
+        assert getattr(await read(ports, first), field) is None
+        assert getattr(await read(ports, second), field) == target
 
 
 @pytest.mark.contract(DOCUMENTS)
@@ -153,7 +157,7 @@ async def test_custom_fields_are_set_and_removed_one_by_one_and_the_others_stay(
     ports = backend.admin
     text = await make(ports, "custom_field", data_type="string")
     number = await make(ports, "custom_field", data_type="integer")
-    first, second = backend.new_document(), backend.new_document()
+    first, second = backend.new_documents(2)
     writer = ports.bulk_writes
 
     await writer.bulk_edit_documents((first, second), FieldsChange(values={text: "a"}))
@@ -176,7 +180,8 @@ async def test_custom_fields_are_set_and_removed_one_by_one_and_the_others_stay(
 
 @pytest.mark.contract(DOCUMENTS)
 async def test_a_select_value_is_the_option_id(backend: Backend) -> None:
-    ports, document = backend.admin, backend.new_document()
+    ports = backend.admin
+    (document,) = backend.new_documents(1)
     options = (OptionInput(label="red"), OptionInput(label="blue"))
     created = await ports.taxonomy_writes.create_taxonomy_item(
         "custom_field",
@@ -196,7 +201,7 @@ async def test_a_select_value_is_the_option_id(backend: Backend) -> None:
 async def test_document_links_are_mirrored_like_in_an_update(backend: Backend) -> None:
     ports = backend.admin
     link = await make(ports, "custom_field", data_type="documentlink")
-    first, second = backend.new_document(), backend.new_document()
+    first, second = backend.new_documents(2)
 
     await ports.bulk_writes.bulk_edit_documents((first,), FieldsChange(values={link: [second]}))
 
@@ -208,7 +213,7 @@ async def test_document_links_are_mirrored_like_in_an_update(backend: Backend) -
 async def test_a_document_that_the_link_names_itself_is_skipped(backend: Backend) -> None:
     ports = backend.admin
     link = await make(ports, "custom_field", data_type="documentlink")
-    first, second = backend.new_document(), backend.new_document()
+    first, second = backend.new_documents(2)
 
     await ports.bulk_writes.bulk_edit_documents(
         (first, second), FieldsChange(values={link: [first]})
@@ -224,7 +229,7 @@ async def test_a_link_needs_change_permission_on_the_linked_document_too(
 ) -> None:
     # 3.4.2 checks the linked documents like the edited ones (the serializer of the value).
     link = await make(backend.admin, "custom_field", data_type="documentlink")
-    mine, viewed, changeable = (backend.new_document() for _ in range(3))
+    mine, viewed, changeable = backend.new_documents(3)
     allowed = frozenset({"view_document", "change_document"})
     user = backend.restricted(allowed, change=[mine, changeable], view=[viewed])
 
@@ -245,7 +250,7 @@ async def test_a_moved_link_keeps_the_old_reverse_link_but_a_removed_field_takes
     # (the field is rewritten before the old value is compared); removing the field cleans up.
     ports = backend.admin
     link = await make(ports, "custom_field", data_type="documentlink")
-    first, old, new = backend.new_document(), backend.new_document(), backend.new_document()
+    first, old, new = backend.new_documents(3)
     writer = ports.bulk_writes
     await writer.bulk_edit_documents((first,), FieldsChange(values={link: [old]}))
 
@@ -261,7 +266,7 @@ async def test_a_moved_link_keeps_the_old_reverse_link_but_a_removed_field_takes
 
 @pytest.mark.contract(DOCUMENTS)
 async def test_a_hit_says_whether_the_user_may_change_the_document(backend: Backend) -> None:
-    mine, viewed = backend.new_document(), backend.new_document()
+    mine, viewed = backend.new_documents(2)
     allowed = frozenset({"view_document", "change_document"})
     user = backend.restricted(allowed, change=[mine], view=[viewed])
 
@@ -278,7 +283,7 @@ async def test_a_wrong_value_or_an_unknown_field_is_rejected_and_nothing_changes
 ) -> None:
     ports = backend.admin
     number = await make(ports, "custom_field", data_type="integer")
-    first, second = backend.new_document(), backend.new_document()
+    first, second = backend.new_documents(2)
 
     with pytest.raises(Validation, match=r"(?i)valid integer"):
         await ports.bulk_writes.bulk_edit_documents(
@@ -298,39 +303,33 @@ async def test_a_wrong_value_or_an_unknown_field_is_rejected_and_nothing_changes
 
 
 @pytest.mark.contract(DOCUMENTS)
-@pytest.mark.parametrize(
-    "change",
-    [
+async def test_a_missing_object_is_rejected_and_nothing_changes(backend: Backend) -> None:
+    ports = backend.admin
+    (document,) = backend.new_documents(1)
+    before = await read(ports, document)
+    changes: list[TagsChange | ReferenceChange] = [
         TagsChange(add=(MISSING,)),
         ReferenceChange(field="correspondent", value=MISSING),
         ReferenceChange(field="document_type", value=MISSING),
         ReferenceChange(field="storage_path", value=MISSING),
-    ],
-    ids=["tag", "correspondent", "document-type", "storage-path"],
-)
-async def test_a_missing_object_is_rejected_and_nothing_changes(
-    backend: Backend, change: TagsChange | ReferenceChange
-) -> None:
-    ports, document = backend.admin, backend.new_document()
-    before = await read(ports, document)
+    ]
 
-    with pytest.raises(Validation, match=r"(?i)(does not exist|don't exist)"):
-        await ports.bulk_writes.bulk_edit_documents((document,), change)
+    for change in changes:
+        with pytest.raises(Validation, match=r"(?i)(does not exist|don't exist)"):
+            await ports.bulk_writes.bulk_edit_documents((document,), change)
 
     assert await read(ports, document) == before
 
 
 @pytest.mark.contract(DOCUMENTS)
-@pytest.mark.parametrize("bad", ["unknown", "twice"])
-async def test_an_unknown_or_repeated_document_rejects_the_whole_batch(
-    backend: Backend, bad: str
-) -> None:
-    ports, document = backend.admin, backend.new_document()
+async def test_an_unknown_or_repeated_document_rejects_the_whole_batch(backend: Backend) -> None:
+    ports = backend.admin
+    (document,) = backend.new_documents(1)
     tag = await make(ports, "tag")
-    selection = (document, MISSING) if bad == "unknown" else (document, document)
 
-    with pytest.raises(Validation, match=r"(?i)don't exist or were specified twice"):
-        await ports.bulk_writes.bulk_edit_documents(selection, TagsChange(add=(tag,)))
+    for selection in ((document, MISSING), (document, document)):
+        with pytest.raises(Validation, match=r"(?i)don't exist or were specified twice"):
+            await ports.bulk_writes.bulk_edit_documents(selection, TagsChange(add=(tag,)))
 
     assert tag not in (await read(ports, document)).tags
 
@@ -346,7 +345,7 @@ async def test_deleted_documents_go_to_the_trash_and_cannot_be_changed_there(
     backend: Backend,
 ) -> None:
     ports = backend.admin
-    first, second, kept = (backend.new_document() for _ in range(3))
+    first, second, kept = backend.new_documents(3)
 
     await ports.bulk_writes.bulk_edit_documents((first, second), TrashDocuments())
 
@@ -360,7 +359,8 @@ async def test_deleted_documents_go_to_the_trash_and_cannot_be_changed_there(
 
 @pytest.mark.contract(DOCUMENTS)
 async def test_reprocessing_is_accepted_and_the_documents_stay(backend: Backend) -> None:
-    ports, document = backend.admin, backend.new_document()
+    ports = backend.admin
+    (document,) = backend.new_documents(1)
 
     await ports.bulk_writes.bulk_edit_documents((document,), ReprocessChange())
 
@@ -369,7 +369,7 @@ async def test_reprocessing_is_accepted_and_the_documents_stay(backend: Backend)
 
 @pytest.mark.contract(DOCUMENTS)
 async def test_a_user_without_the_change_permission_is_denied(backend: Backend) -> None:
-    document = backend.new_document()
+    (document,) = backend.new_documents(1)
     tag = await make(backend.admin, "tag")
 
     with pytest.raises(PermissionDenied):
@@ -384,7 +384,7 @@ async def test_a_user_without_the_change_permission_is_denied(backend: Backend) 
 async def test_one_document_the_user_may_not_change_refuses_the_whole_batch(
     backend: Backend,
 ) -> None:
-    mine, only_viewed = backend.new_document(), backend.new_document()
+    mine, only_viewed = backend.new_documents(2)
     tag = await make(backend.admin, "tag")
     allowed = frozenset({"view_document", "change_document"})
     user = backend.restricted(allowed, change=[mine], view=[only_viewed])
@@ -399,7 +399,7 @@ async def test_one_document_the_user_may_not_change_refuses_the_whole_batch(
 
 @pytest.mark.contract(DOCUMENTS)
 async def test_deleting_needs_ownership_not_only_change_permission(backend: Backend) -> None:
-    document = backend.new_document()
+    (document,) = backend.new_documents(1)
     tag = await make(backend.admin, "tag")
     allowed = frozenset({"view_document", "change_document", "delete_document"})
     user = backend.restricted(allowed, change=[document])
@@ -438,7 +438,7 @@ async def test_deleted_tags_take_their_children_and_documents_lose_references(
     parent = await make(ports, "tag")
     child = await make(ports, "tag", parent=parent)
     correspondent = await make(ports, "correspondent")
-    document = backend.new_document()
+    (document,) = backend.new_documents(1)
     await ports.bulk_writes.bulk_edit_documents((document,), TagsChange(add=(child,)))
     await ports.bulk_writes.bulk_edit_documents(
         (document,), ReferenceChange(field="correspondent", value=correspondent)

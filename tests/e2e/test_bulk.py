@@ -12,7 +12,7 @@ from contract.conftest import delete_and_empty_trash, live_in_trash
 from fastmcp import Client
 from harness import paperless_settings, server_settings
 
-from e2e.helpers import consume, num, obj, parse, pdf, results, seq
+from e2e.helpers import consume_text, num, obj, parse, results, seq
 from paperless_mcp.server import create_server
 
 if TYPE_CHECKING:
@@ -28,15 +28,26 @@ PREFIX = "plmcp22-"
 PATHS = ("tags", "correspondents", "document_types", "storage_paths", "custom_fields")
 
 
-@pytest.fixture
+def new_documents(stack: Stack, count: int) -> list[int]:
+    """New plain text documents of the admin (no OCR, so consumption takes about a second)."""
+    return [consume_text(stack.admin, f"{PREFIX}{n}-{uuid.uuid4().hex}") for n in range(count)]
+
+
+@pytest.fixture(scope="module")
 def documents(stack: Stack) -> Iterator[list[int]]:
-    """Two new documents of the admin; deleted and removed from the trash again."""
-    created: list[int] = []
-    for number in (1, 2):
-        title = f"{PREFIX}{number}-{uuid.uuid4().hex}"
-        _, document = consume(stack.admin, title, pdf(title))
-        assert document is not None
-        created.append(document)
+    """Two documents shared by the tests that leave them as they found them (module scope).
+
+    Deleted and removed from the trash again at the end.
+    """
+    created = new_documents(stack, 2)
+    yield created
+    delete_and_empty_trash(stack, created)
+
+
+@pytest.fixture
+def trashable(stack: Stack) -> Iterator[list[int]]:
+    """Two documents of their own for the test that moves them to the trash."""
+    created = new_documents(stack, 2)
     yield created
     delete_and_empty_trash(stack, created)
 
@@ -214,13 +225,13 @@ async def test_references_and_custom_fields_change_without_touching_the_rest(
 
 
 async def test_documents_go_to_the_trash_and_reprocessing_is_queued(
-    stack: Stack, documents: list[int]
+    stack: Stack, trashable: list[int]
 ) -> None:
     again = await run(
         stack,
         stack.admin_token,
         "bulk_edit_documents",
-        document_ids=documents[:1],
+        document_ids=trashable[:1],
         operation={"op": "reprocess"},
         confirm=True,
     )
@@ -230,24 +241,24 @@ async def test_documents_go_to_the_trash_and_reprocessing_is_queued(
         stack,
         stack.admin_token,
         "bulk_edit_documents",
-        document_ids=documents,
+        document_ids=trashable,
         operation={"op": "delete"},
     )
     assert "trash" in unconfirmed
-    assert not any(live_in_trash(stack, d) for d in documents)
+    assert not any(live_in_trash(stack, d) for d in trashable)
 
     done = await run(
         stack,
         stack.admin_token,
         "bulk_edit_documents",
-        document_ids=documents,
+        document_ids=trashable,
         operation={"op": "delete"},
         confirm=True,
     )
 
     assert done["affected_count"] == 2
-    assert all(live_in_trash(stack, d) for d in documents)
-    assert all(stack.admin.get(f"/api/documents/{d}/").status_code == 404 for d in documents)
+    assert all(live_in_trash(stack, d) for d in trashable)
+    assert all(stack.admin.get(f"/api/documents/{d}/").status_code == 404 for d in trashable)
 
 
 async def test_a_missing_document_and_a_restricted_user_change_nothing(

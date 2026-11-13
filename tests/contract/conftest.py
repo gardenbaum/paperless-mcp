@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import httpx2
 import pytest
-from e2e.helpers import EXPECTED_VERSION, consume, pdf, results
+from e2e.helpers import EXPECTED_VERSION, consume, consume_text, pdf, results
 from fakes.accounts import ADMIN, BLIND, READER
 from fakes.paperless import (
     VERSION,
@@ -186,6 +186,8 @@ class Backend:
     # A new document of the admin to write to, after its consumption; the live one is deleted when
     # the test ends. Its tags and custom fields are whatever consumption gave it.
     new_document: Callable[[], int]
+    # New plain text documents of the admin (live: no OCR, about six times faster than a PDF).
+    new_documents: Callable[[int], list[int]]
     # Shares an uploaded document view-only with the restricted user (see `Share`).
     share_read_only: Share
     # A user with only the given permissions and grants (see `Restricted`).
@@ -311,6 +313,10 @@ def fake_grants(state: FakeState) -> GrantsOf:
     return grants
 
 
+def fake_new_documents(new_document: Callable[[], int]) -> Callable[[int], list[int]]:
+    return lambda count: [new_document() for _ in range(count)]
+
+
 def fake_backend(*, ai_enabled: bool = False) -> Backend:
     """The fake's backend; the E2E stack of `just e2e` has AI off, so that is the default."""
     state = seeded()
@@ -322,6 +328,7 @@ def fake_backend(*, ai_enabled: bool = False) -> Backend:
         consume=fake_consume(state),
         upload=fake_upload(state),
         new_document=fake_new_document(state),
+        new_documents=fake_new_documents(fake_new_document(state)),
         share_read_only=fake_share(state),
         restricted=fake_restricted(state),
         grants=fake_grants(state),
@@ -456,6 +463,13 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
         created.append(document)
         return document
 
+    def new_live_documents(count: int) -> list[int]:
+        documents: list[int] = []
+        for _ in range(count):
+            documents.append(consume_text(stack.admin, f"contract-write-{uuid.uuid4().hex}"))
+            created.append(documents[-1])
+        return documents
+
     def user_id(api: httpx2.Client) -> int:
         user = cast("dict[str, dict[str, object]]", api.get("/api/ui_settings/").json())["user"]
         return int(cast("int", user["id"]))
@@ -484,6 +498,7 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
                 consume=consume_live,
                 upload=upload_live,
                 new_document=new_live_document,
+                new_documents=new_live_documents,
                 share_read_only=share_live,
                 restricted=live_restricted(stack, ports, users),
                 grants=live_grants(stack),
