@@ -1,8 +1,8 @@
 """Toolset selection, read-only mode and capabilities on the assembled server.
 
-The synthetic catalogue adds an ai tool of its own and the bulk toolset that a later task brings,
-so that every rule is proven for toolsets of any size. The shipped ai toolset is covered in
-test_ai.py.
+The synthetic catalogue adds an ai tool of its own and a pdf toolset that a later task brings,
+so that every rule is proven for toolsets of any size. The shipped ai and bulk toolsets are covered
+in test_ai.py and test_bulk.py.
 """
 
 from dataclasses import replace
@@ -37,17 +37,17 @@ async def ask_something() -> str:
     return "answer"
 
 
-@extra.tool(tags={"bulk"}, annotations=WRITE)
+@extra.tool(tags={"pdf"}, annotations=WRITE)
 @boundary
-async def bulk_change() -> str:
-    """Change many things."""
+async def pdf_change() -> str:
+    """Change a PDF."""
     return "changed"
 
 
-@extra.tool(tags={"bulk"}, annotations=READ)
+@extra.tool(tags={"pdf"}, annotations=READ)
 @boundary
-async def bulk_preview() -> str:
-    """Preview a bulk change."""
+async def pdf_preview() -> str:
+    """Preview a PDF change."""
     return "preview"
 
 
@@ -57,21 +57,22 @@ SYNTHETIC = replace(
     annotations={
         **ANNOTATIONS,
         "ask_something": READ,
-        "bulk_change": WRITE,
-        "bulk_preview": READ,
+        "pdf_change": WRITE,
+        "pdf_preview": READ,
     },
     tool_toolsets={
         **TOOL_TOOLSETS,
         "ask_something": "ai",
-        "bulk_change": "bulk",
-        "bulk_preview": "bulk",
+        "pdf_change": "pdf",
+        "pdf_preview": "pdf",
     },
-    toolsets=CATALOGUE.toolsets | {"ai", "bulk"},
+    toolsets=CATALOGUE.toolsets | {"ai", "pdf"},
     requires={"ai": "ai"},
 )
 CORE = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "core"}
 SHIPPED_AI = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "ai"}
 SHIPPED_VERSIONS = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "versions"}
+SHIPPED_BULK = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "bulk"}
 
 
 async def names(server: FastMCP) -> set[str]:
@@ -88,29 +89,29 @@ async def test_the_default_profile_offers_only_the_core_toolset() -> None:
 
 
 async def test_named_toolsets_are_offered_and_others_are_not() -> None:
-    server = serve(admin(), catalogue=SYNTHETIC, toolsets=["bulk"])
+    server = serve(admin(), catalogue=SYNTHETIC, toolsets=["pdf"])
 
-    assert await names(server) == {"bulk_change", "bulk_preview"}
+    assert await names(server) == {"pdf_change", "pdf_preview"}
 
 
 async def test_several_toolsets_combine() -> None:
-    server = serve(admin(), catalogue=SYNTHETIC, toolsets=["core", "bulk"])
+    server = serve(admin(), catalogue=SYNTHETIC, toolsets=["core", "pdf"])
 
-    assert await names(server) == CORE | {"bulk_change", "bulk_preview"}
+    assert await names(server) == CORE | {"pdf_change", "pdf_preview"}
 
 
 async def test_all_offers_every_toolset_the_server_may_offer() -> None:
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"])
 
-    assert await names(server) == CORE | SHIPPED_AI | SHIPPED_VERSIONS | {
+    assert await names(server) == CORE | SHIPPED_AI | SHIPPED_BULK | SHIPPED_VERSIONS | {
         "ask_something",
-        "bulk_change",
-        "bulk_preview",
+        "pdf_change",
+        "pdf_preview",
     }
 
 
 async def test_a_toolset_not_selected_takes_its_resources_with_it() -> None:
-    async with Client(serve(admin(), catalogue=SYNTHETIC, toolsets=["bulk"])) as client:
+    async with Client(serve(admin(), catalogue=SYNTHETIC, toolsets=["pdf"])) as client:
         templates = await client.list_resource_templates()
 
     assert templates == []
@@ -135,7 +136,7 @@ async def test_read_only_mode_offers_only_tools_with_the_read_only_hint() -> Non
         (CORE - writing)
         | SHIPPED_AI
         | {"list_document_versions"}
-        | {"ask_something", "bulk_preview"}
+        | {"ask_something", "pdf_preview"}
     )
     assert await names(server) == expected
 
@@ -161,8 +162,8 @@ async def test_disabling_every_tool_of_the_toolsets_stops_the_server_from_being_
         _ = serve(
             admin(),
             catalogue=SYNTHETIC,
-            toolsets=["bulk"],
-            disabled_tools=["bulk_change", "bulk_preview"],
+            toolsets=["pdf"],
+            disabled_tools=["pdf_change", "pdf_preview"],
         )
 
     assert "No tools are left" in caught.value.message
@@ -170,10 +171,10 @@ async def test_disabling_every_tool_of_the_toolsets_stops_the_server_from_being_
 
 
 async def test_read_only_mode_over_writing_tools_only_stops_the_server_from_being_built() -> None:
-    writing_only = replace(SYNTHETIC, annotations={**SYNTHETIC.annotations, "bulk_preview": WRITE})
+    writing_only = replace(SYNTHETIC, annotations={**SYNTHETIC.annotations, "pdf_preview": WRITE})
 
     with pytest.raises(InvalidConfiguration, match="No tools are left"):
-        _ = serve(admin(), catalogue=writing_only, toolsets=["bulk"], read_only=True)
+        _ = serve(admin(), catalogue=writing_only, toolsets=["pdf"], read_only=True)
 
 
 async def test_the_zero_tool_check_does_not_wait_for_paperless() -> None:

@@ -107,6 +107,27 @@ async def test_a_search_asks_for_one_page_of_named_fields_and_maps_the_rows(
     )
 
 
+@pytest.mark.parametrize("flag", [True, False])
+async def test_a_hit_carries_whether_the_user_may_change_the_document(
+    make_client: ClientFactory, *, flag: bool
+) -> None:
+    server = Documents({**ROW, "user_can_change": flag})
+    reader = PaperlessDocumentReader(make_client(server))
+
+    found = await reader.search_documents(DocumentQuery(), page=1, page_size=1)
+
+    assert "user_can_change" in FIELDS.split(",")
+    assert found.hits[0].user_can_change is flag
+
+
+async def test_a_row_without_the_flag_leaves_it_unknown(make_client: ClientFactory) -> None:
+    reader = PaperlessDocumentReader(make_client(Documents(ROW)))
+
+    found = await reader.search_documents(DocumentQuery(), page=1, page_size=1)
+
+    assert found.hits[0].user_can_change is None
+
+
 async def test_every_filter_becomes_its_paperless_parameter(make_client: ClientFactory) -> None:
     server = Documents()
     query = DocumentQuery(
@@ -126,6 +147,7 @@ async def test_every_filter_becomes_its_paperless_parameter(make_client: ClientF
         inbox=False,
         custom_field_query=["due", "range", ["today", "in 30 days"]],
         ordering="-created",
+        ids=(8, 9),
     )
 
     _ = await PaperlessDocumentReader(make_client(server)).search_documents(
@@ -150,6 +172,7 @@ async def test_every_filter_becomes_its_paperless_parameter(make_client: ClientF
         "is_in_inbox": "false",
         "custom_field_query": '["due", "range", ["today", "in 30 days"]]',
         "ordering": "-created",
+        "id__in": "8,9",
         "page_size": "25",
     }
 

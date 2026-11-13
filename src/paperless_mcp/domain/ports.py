@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
 
     from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer
+    from paperless_mcp.domain.bulk import BulkKind, DocumentChange, PermissionsChange
     from paperless_mcp.domain.documents import (
         DocumentFile,
         DocumentPage,
@@ -364,6 +365,53 @@ class TaxonomyWriter(Protocol):
         Raises:
             NotFound: No such object, or the user may not see it.
             PermissionDenied: The user may not delete objects of ``kind``, or this one.
+        """
+        ...
+
+
+class BulkWriter(Protocol):
+    """Changes to many documents or taxonomy objects in one request.
+
+    Paperless checks every selected object first and then changes all of them, or answers an
+    error and changes none. Ids that do not exist, appear twice or are an empty list are
+    rejected as a whole (callers deduplicate and check before they ask).
+    """
+
+    async def bulk_edit_documents(
+        self, document_ids: Sequence[int], change: DocumentChange
+    ) -> None:
+        """Apply ``change`` to every document of ``document_ids``.
+
+        Tags are removed (with their child tags) and then added (with their parent tags); custom
+        fields are set one by one and the others stay. A deletion moves to the trash;
+        reprocessing is queued and runs in the background.
+
+        Raises:
+            PermissionDenied: The user may not change one of the documents (nothing is changed),
+                or may not delete it: that needs ownership.
+            Validation: An id or a referenced object does not exist, or a value is wrong; the
+                message names the reason and nothing is changed.
+        """
+        ...
+
+    async def delete_taxonomy_items(self, kind: BulkKind, item_ids: Sequence[int]) -> None:
+        """Delete the objects for good; documents lose what refers to them, tags take children.
+
+        Raises:
+            PermissionDenied: The user may not delete one of them (an owner, or any user for an
+                unowned object, and the global permission).
+            Validation: An id does not exist; nothing is changed.
+        """
+        ...
+
+    async def set_taxonomy_permissions(
+        self, kind: BulkKind, item_ids: Sequence[int], change: PermissionsChange
+    ) -> None:
+        """Set the owner and/or the grants of the objects.
+
+        Raises:
+            PermissionDenied: The user may not change one of them (owner or unowned).
+            Validation: An id, user or group does not exist; nothing is changed.
         """
         ...
 

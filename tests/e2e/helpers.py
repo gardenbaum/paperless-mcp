@@ -410,3 +410,15 @@ def seed(admin: httpx2.Client) -> Seeded:
         public_document=public,
         private_document=private,
     )
+
+
+def consume_text(api: httpx2.Client, title: str) -> int:
+    """Upload a plain text document titled `title` and return its id once it is consumed.
+
+    A text file skips OCR: about 1 s on the E2E stack where a PDF takes about 6 s (and several
+    PDFs at once are slower than one after the other). For tests that need a document, not a file.
+    """
+    body = f"{title} plain text for a test".encode()
+    _, document = consume(api, title, body, filename=f"{title}.txt", mime_type="text/plain")
+    assert document is not None, f"Consuming {title!r} failed"
+    return document

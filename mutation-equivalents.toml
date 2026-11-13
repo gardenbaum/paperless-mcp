@@ -472,3 +472,13 @@ reason = "httpx2 upper-cases the method when it builds the request, so 'delete' 
 mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁmerge_as_versions__mutmut_20"
 function_hash = "bafdc9f7327b"
 reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.bulk.xǁPaperlessBulkWriterǁbulk_edit_documents__mutmut_21"
+function_hash = "e01711da5b0e"
+reason = "httpx2 upper-cases the method when it builds the request, so \"post\" goes out as POST; the client reads only the built request's method."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.bulk.xǁPaperlessBulkWriterǁ_objects__mutmut_11"
+function_hash = "3421113ae662"
+reason = "httpx2 upper-cases the method when it builds the request, so \"post\" goes out as POST; the client reads only the built request's method."
