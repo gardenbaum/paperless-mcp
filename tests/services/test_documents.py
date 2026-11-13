@@ -53,6 +53,26 @@ async def test_names_resolve_to_ids_ignoring_case() -> None:
     ) == ["e2e-public-invoice"]
 
 
+async def test_ids_the_query_already_holds_stay_when_no_name_is_given() -> None:
+    search = admin()
+
+    found = await search.search(
+        NameFilters(owner="admin"),
+        DocumentQuery(tags_all=(3,), correspondent_none=(1,)),
+        page=1,
+        page_size=25,
+    )
+
+    assert [d.title for d in found.documents] == ["e2e-private-note"]
+    everyone = await search.search(
+        NameFilters(),
+        DocumentQuery(tags_all=(1,), correspondent=1, owner=None),
+        page=1,
+        page_size=25,
+    )
+    assert [d.title for d in everyone.documents] == ["e2e-public-invoice"]
+
+
 @pytest.mark.decision("decision-5")
 async def test_an_unknown_name_is_not_found_with_suggestions() -> None:
     with pytest.raises(NotFound) as raised:

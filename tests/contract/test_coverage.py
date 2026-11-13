@@ -28,6 +28,8 @@ from paperless_mcp.domain.ports import (
     TaskReader,
     TaxonomyReader,
     TaxonomyWriter,
+    ViewReader,
+    ViewWriter,
 )
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
@@ -172,6 +174,8 @@ def test_ports_are_found_by_introspection() -> None:
         "taxonomy_writes": TaxonomyWriter,
         "bulk_writes": BulkWriter,
         "ai": AiReader,
+        "views": ViewReader,
+        "view_writes": ViewWriter,
     }
 
 

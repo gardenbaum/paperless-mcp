@@ -11,7 +11,7 @@ Deliberate deviations from the schema are listed below, each with its reason.
 
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime
 from email.parser import BytesParser
 from email.policy import default
@@ -45,6 +45,16 @@ UNDECLARED_QUERY_PARAMETERS: Mapping[tuple[str, str], Mapping[str, str]] = {
         "fields": (
             "the update serializer honours it like the retrieve one; without it the answer "
             "carries the whole OCR text (PLMCP-16)"
+        ),
+    },
+}
+# Query parameters the schema declares with the wrong type: (method, path template) ->
+# {parameter: reason}. Their value is not type-checked (the name must still be declared).
+MISTYPED_QUERY_PARAMETERS: Mapping[tuple[str, str], Mapping[str, str]] = {
+    ("GET", "/api/documents/"): {
+        "shared_by__id": (
+            "declared boolean, but SharedByUser filters the documents the user with this id "
+            "owns and shared; the web UI sends the user id (PLMCP-25)"
         ),
     },
 }
@@ -120,6 +130,22 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
     ),
     ("GET", "/api/document_types/{id}/", 200): (
         "3.4.2 answers a document type without the `permissions` the schema requires (PLMCP-19)"
+    ),
+    ("GET", "/api/saved_views/", 200): (
+        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
+        "list asks for `full_perms` (PLMCP-25)"
+    ),
+    ("GET", "/api/saved_views/{id}/", 200): (
+        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
+        "list asks for `full_perms` (PLMCP-25)"
+    ),
+    ("POST", "/api/saved_views/", 201): (
+        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
+        "list asks for `full_perms` (PLMCP-25)"
+    ),
+    ("PATCH", "/api/saved_views/{id}/", 200): (
+        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
+        "list asks for `full_perms` (PLMCP-25)"
     ),
     ("GET", "/api/documents/{id}/history/", 200): (
         "3.4.2 answers a bare list, not the paginated envelope of the schema, and a null actor "
@@ -211,11 +237,14 @@ class SchemaViolationError(AssertionError):
 class _Request:
     """An httpx2 request in the shape of openapi-core's `Request` protocol."""
 
-    def __init__(self, request: httpx2.Request, body: bytes | None = None) -> None:
+    def __init__(
+        self, request: httpx2.Request, body: bytes | None = None, omit: Collection[str] = ()
+    ) -> None:
         self._request: httpx2.Request = request
         self._body: bytes | None = body or request.content or None
+        query = parse_qs(request.url.query.decode(), keep_blank_values=True)
         self.parameters: RequestParameters = RequestParameters(
-            query=ImmutableMultiDict(parse_qs(request.url.query.decode(), keep_blank_values=True)),
+            query=ImmutableMultiDict({k: v for k, v in query.items() if k not in omit}),
             header=Headers(dict(request.headers)),
         )
 
@@ -394,7 +423,10 @@ def check_request(request: httpx2.Request) -> None:
             message = f"{where}: {'; '.join(problems)}"
             raise SchemaViolationError(message)
         return
-    errors = list(_OPENAPI.iter_request_errors(_Request(request, _narrowed(request))))
+    mistyped = MISTYPED_QUERY_PARAMETERS.get((request.method, template), {}).keys()
+    errors = list(
+        _OPENAPI.iter_request_errors(_Request(request, _narrowed(request), omit=mistyped))
+    )
     if errors:
         raise _fail(request, "request does not match the schema", errors)
     if undeclared := _undeclared_query_parameters(request):

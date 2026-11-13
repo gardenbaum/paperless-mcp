@@ -46,6 +46,24 @@ def test_listed_exceptions_pass() -> None:
     check_request(get("/api/documents/", more_like_id="1"))
 
 
+def test_a_listed_mistyped_parameter_takes_the_value_paperless_really_reads() -> None:
+    check_request(get("/api/documents/", shared_by__id="2"))
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [
+        pytest.param(get("/api/documents/", archive_serial_number="two"), id="other parameter"),
+        pytest.param(get("/api/tags/", shared_by__id="2"), id="other endpoint"),
+    ],
+)
+def test_a_mistyped_parameter_exemption_covers_only_that_parameter(
+    request_: httpx2.Request,
+) -> None:
+    with pytest.raises(SchemaViolationError):
+        check_request(request_)
+
+
 @pytest.mark.parametrize(
     "response",
     [

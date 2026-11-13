@@ -42,6 +42,8 @@ from fakes.accounts import (
 from fakes.custom_field_query import compile_query
 from fakes.document_values import coerce, reject, tag_closure
 from fakes.taxonomy_rules import check_colour, check_match, check_name, check_path, with_ids
+from fakes.view_filters import ONLY_ONE_SEARCH, combines, searches, view_filters
+from fakes.view_rules import check_page_size, check_rules
 from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer, ChatSource
 from paperless_mcp.domain.bulk import (
     FieldsChange,
@@ -74,6 +76,7 @@ from paperless_mcp.domain.instance import (
 )
 from paperless_mcp.domain.tasks import TaskState, TaskStatus
 from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyDetail, TaxonomyItem
+from paperless_mcp.domain.views import FilterRule, SavedView
 from paperless_mcp.paperless.bulk import documents_refused, objects_refused
 from paperless_mcp.paperless.documents import (
     beyond_last_page,
@@ -83,6 +86,7 @@ from paperless_mcp.paperless.documents import (
 )
 from paperless_mcp.paperless.errors import ai_disabled
 from paperless_mcp.paperless.tasks import not_found
+from paperless_mcp.paperless.views import unseen_view
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Sequence
@@ -104,6 +108,7 @@ if TYPE_CHECKING:
         WritableKind,
     )
     from paperless_mcp.domain.versions import VersionUpload
+    from paperless_mcp.domain.views import ViewValues
 
 # Paperless's max_length of document titles and tag names.
 MAX_TITLE = 128
@@ -209,6 +214,16 @@ class FakeTaxonomy(Owned):
     matching_algorithm: MatchingAlgorithm = "any"
     match: str = ""
     case_insensitive: bool = True
+
+
+@dataclass(kw_only=True)
+class FakeSavedView(FakeTaxonomy):
+    """A saved view: filter rules and how the web UI sorts them."""
+
+    filter_rules: tuple[FilterRule, ...] = ()
+    sort_field: str | None = None
+    sort_reverse: bool = False
+    page_size: int | None = None
 
 
 @dataclass(kw_only=True)
@@ -373,7 +388,7 @@ class FakeState:
     document_types: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
     storage_paths: list[FakeStoragePath] = field(default_factory=list[FakeStoragePath])
     custom_fields: list[FakeCustomField] = field(default_factory=list[FakeCustomField])
-    saved_views: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
+    saved_views: list[FakeSavedView] = field(default_factory=list[FakeSavedView])
     groups: list[FakeGroup] = field(default_factory=list[FakeGroup])
     tasks: list[FakeTask] = field(default_factory=list[FakeTask])
     # Deleted documents, newest last; reads no longer see them, the Paperless trash does.
@@ -474,7 +489,14 @@ def seeded() -> FakeState:
             FakeStoragePath(id=1, name="e2e-archive", path="e2e/{{ created_year }}/{{ title }}")
         ],
         custom_fields=fields,
-        saved_views=[FakeTaxonomy(id=1, name="e2e-view", owner=admin.id)],
+        saved_views=[
+            FakeSavedView(
+                id=1,
+                name="e2e-view",
+                owner=admin.id,
+                filter_rules=(FilterRule(rule_type=6, value="1"),),  # 6: has tag e2e-finance
+            )
+        ],
         groups=[FakeGroup(id=1, name="e2e-group")],
         documents=[
             FakeDocument(
@@ -695,20 +717,21 @@ class FakePaperless:
         if not self.user.has("view_document"):
             message = "The Paperless user may not perform this action."
             raise PermissionDenied(message)
-        if query.query is not None and query.more_like is not None:
-            message = (
-                "Paperless rejected the request: "
-                "Specify only one of text, title_search, query, or more_like_id."
-            )
+        if not combines(searches(query)):
+            message = f"Paperless rejected the request: {ONLY_ONE_SEARCH}"
             raise Validation(message)
         documents = [d for d in self.state.documents if d.visible_to(self.user)]
-        matches = _filters(query, self.state)
+        matches: list[_Match] = [*_filters(query, self.state), *view_filters(query, self.state)]
         if query.custom_field_query is not None:
             test = compile_query(query.custom_field_query, self.state.custom_fields)
             matches.append(lambda d: test(d.custom_fields))
         terms = _words(query.query or "") - TANTIVY_OPERATORS
         if query.query is not None:
             matches.append(lambda d: terms <= _words(f"{d.title} {d.content}"))
+        if query.text is not None:
+            matches.append(lambda d: _words(query.text or "") <= _words(f"{d.title} {d.content}"))
+        if query.title_search is not None:
+            matches.append(lambda d: _words(query.title_search or "") <= _words(d.title))
         if query.more_like is not None:
             like = [d for d in documents if d.id == query.more_like]
             if not like:
@@ -716,7 +739,8 @@ class FakePaperless:
             words = _words(like[0].content)
             matches.append(lambda d: d.id != query.more_like and bool(words & _words(d.content)))
         found = [d for d in documents if all(match(d) for match in matches)]
-        found = _ordered(found, query.ordering, ranked=query.query or query.more_like)
+        ranked = query.query or query.more_like or query.text or query.title_search
+        found = _ordered(found, query.ordering, ranked=ranked)
         start = (page - 1) * page_size
         if page > 1 and start >= len(found):
             raise beyond_last_page(page)
@@ -1787,6 +1811,125 @@ class FakePaperless:
             )
         item.viewers, item.editors = views, changes
         item.view_groups, item.change_groups = view_groups, change_groups
+
+    # --- ViewReader and ViewWriter
+
+    async def list_saved_views(self) -> tuple[SavedView, ...]:
+        """`ViewReader.list_saved_views` (SavedViewViewSet list): visible views, by name.
+
+        Raises:
+            PermissionDenied: The user lacks the global `view_savedview` permission.
+        """
+        self._view_allowed("view")
+        views = [v for v in self.state.saved_views if v.visible_to(self.user)]
+        return tuple(self._saved_view(v) for v in sorted(views, key=lambda v: (v.name, v.id)))
+
+    async def get_saved_view(self, view_id: int) -> SavedView:
+        """`ViewReader.get_saved_view` (SavedViewViewSet retrieve).
+
+        Raises:
+            NotFound: No such view, or the user may not see it.
+            PermissionDenied: The user lacks the global `view_savedview` permission.
+        """
+        self._view_allowed("view")
+        return self._saved_view(self._visible_view(view_id))
+
+    @write
+    async def create_saved_view(self, name: str, values: ViewValues) -> SavedView:
+        """`ViewWriter.create_saved_view` (SavedViewViewSet create): owned by the creator.
+
+        Raises:
+            PermissionDenied: The user lacks the global `add_savedview` permission.
+            Validation: Paperless's 400 for a value, with its message.
+        """
+        self._view_allowed("add")
+        name = check_name(name)
+        check_rules(values.filter_rules or ())
+        check_page_size(values.page_size)
+        views = self.state.saved_views
+        if any(v.name == name and v.owner == self.user.id for v in views):
+            reject("error", "Object violates owner / name unique constraint")
+        view = FakeSavedView(
+            id=max((v.id for v in views), default=0) + 1,
+            name=name,
+            owner=self.user.id,
+            filter_rules=values.filter_rules or (),
+            sort_field=values.sort_field,
+            sort_reverse=bool(values.sort_reverse),
+            page_size=values.page_size,
+        )
+        views.append(view)
+        return self._saved_view(view)
+
+    @write
+    async def update_saved_view(self, view_id: int, values: ViewValues) -> SavedView:
+        """`ViewWriter.update_saved_view` (SavedViewViewSet partial update).
+
+        Unlike a create, an update accepts a name another view of the user already has.
+
+        Raises:
+            NotFound: No such view, or the user may not see it.
+            PermissionDenied: The user may not change saved views, or this one.
+            Validation: Paperless's 400 for a value, with its message.
+        """
+        self._view_allowed("change")
+        view = self._visible_view(view_id)
+        if not self.user.may_change_object(view):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        sent = values.model_fields_set
+        name = check_name(values.name) if values.name is not None else view.name
+        check_rules(values.filter_rules or ())
+        check_page_size(values.page_size)
+        view.name = name
+        if values.filter_rules is not None:
+            view.filter_rules = values.filter_rules
+        if "sort_field" in sent:
+            view.sort_field = values.sort_field
+        if values.sort_reverse is not None:
+            view.sort_reverse = values.sort_reverse
+        if "page_size" in sent:
+            view.page_size = values.page_size
+        return self._saved_view(view)
+
+    @write
+    async def delete_saved_view(self, view_id: int) -> None:
+        """`ViewWriter.delete_saved_view` (SavedViewViewSet destroy).
+
+        Raises:
+            NotFound: No such view, or the user may not see it.
+            PermissionDenied: The user may not delete saved views, or this one.
+        """
+        self._view_allowed("delete")
+        view = self._visible_view(view_id)
+        if not self.user.may_change_object(view):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        self.state.saved_views.remove(view)
+
+    def _view_allowed(self, action: str) -> None:
+        """The global permission of an action on saved views: `add_savedview`, ..."""
+        if not self.user.has(f"{action}_savedview"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+
+    def _visible_view(self, view_id: int) -> FakeSavedView:
+        found = [v for v in self.state.saved_views if v.id == view_id and v.visible_to(self.user)]
+        if not found:
+            raise unseen_view(view_id)
+        return found[0]
+
+    def _saved_view(self, view: FakeSavedView) -> SavedView:
+        return SavedView(
+            id=view.id,
+            name=view.name,
+            sort_field=view.sort_field,
+            sort_reverse=view.sort_reverse,
+            page_size=view.page_size,
+            owner=view.owner,
+            user_can_change=self.user.may_change_object(view),
+            filter_rules=view.filter_rules,
+        )
 
     async def get_document_content(self, document_id: int) -> str:
         """`DocumentReader.get_document_content` (retrieve with `fields=content`)."""

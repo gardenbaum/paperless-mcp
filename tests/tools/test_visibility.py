@@ -73,6 +73,8 @@ CORE = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "core"}
 SHIPPED_AI = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "ai"}
 SHIPPED_VERSIONS = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "versions"}
 SHIPPED_BULK = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "bulk"}
+VIEWS = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "views"}
+READ_VIEWS = {"list_saved_views", "get_saved_view", "run_saved_view"}
 
 
 async def names(server: FastMCP) -> set[str]:
@@ -103,7 +105,7 @@ async def test_several_toolsets_combine() -> None:
 async def test_all_offers_every_toolset_the_server_may_offer() -> None:
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"])
 
-    assert await names(server) == CORE | SHIPPED_AI | SHIPPED_BULK | SHIPPED_VERSIONS | {
+    assert await names(server) == CORE | SHIPPED_AI | SHIPPED_BULK | SHIPPED_VERSIONS | VIEWS | {
         "ask_something",
         "pdf_change",
         "pdf_preview",
@@ -136,6 +138,7 @@ async def test_read_only_mode_offers_only_tools_with_the_read_only_hint() -> Non
         (CORE - writing)
         | SHIPPED_AI
         | {"list_document_versions"}
+        | READ_VIEWS
         | {"ask_something", "pdf_preview"}
     )
     assert await names(server) == expected

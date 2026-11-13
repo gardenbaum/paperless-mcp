@@ -177,6 +177,109 @@ async def test_every_filter_becomes_its_paperless_parameter(make_client: ClientF
     }
 
 
+async def test_every_saved_view_filter_becomes_its_paperless_parameter(
+    make_client: ClientFactory,
+) -> None:
+    server = Documents()
+    query = DocumentQuery(
+        text="acme",
+        title_search="invoice",
+        content_contains="2026",
+        correspondent_isnull=True,
+        correspondent_in=(1, 2),
+        correspondent_none=(3,),
+        document_type_isnull=False,
+        document_type_in=(4,),
+        document_type_none=(5, 6),
+        storage_path_isnull=True,
+        storage_path_in=(7,),
+        storage_path_none=(8,),
+        tagged=True,
+        archive_serial_number=9,
+        asn_gt=10,
+        asn_lt=11,
+        asn_isnull=False,
+        created_gt=date(2026, 1, 1),
+        created_lt=date(2026, 12, 31),
+        created_year=2026,
+        created_month=11,
+        created_day=12,
+        added_gt=date(2026, 2, 1),
+        added_lt=date(2026, 2, 28),
+        modified_gt=date(2026, 3, 1),
+        modified_lt=date(2026, 3, 31),
+        owner_in=(2, 3),
+        owner_none=(4,),
+        owner_isnull=False,
+        shared_by=2,
+        mime_type="application/pdf",
+        has_duplicates=True,
+        custom_fields_icontains="hello",
+        custom_fields_all=(1, 2),
+        custom_fields_in=(3,),
+        custom_fields_none=(4, 5),
+        has_custom_fields=False,
+    )
+
+    _ = await PaperlessDocumentReader(make_client(server)).search_documents(
+        query, page=1, page_size=25
+    )
+
+    [sent] = server.sent
+    assert {name: value for name, value in sent.items() if name not in {"fields", "page"}} == {
+        "text": "acme",
+        "title_search": "invoice",
+        "content__icontains": "2026",
+        "correspondent__isnull": "true",
+        "correspondent__id__in": "1,2",
+        "correspondent__id__none": "3",
+        "document_type__isnull": "false",
+        "document_type__id__in": "4",
+        "document_type__id__none": "5,6",
+        "storage_path__isnull": "true",
+        "storage_path__id__in": "7",
+        "storage_path__id__none": "8",
+        "is_tagged": "true",
+        "archive_serial_number": "9",
+        "archive_serial_number__gt": "10",
+        "archive_serial_number__lt": "11",
+        "archive_serial_number__isnull": "false",
+        "created__date__gt": "2026-01-01",
+        "created__date__lt": "2026-12-31",
+        "created__year": "2026",
+        "created__month": "11",
+        "created__day": "12",
+        "added__date__gt": "2026-02-01",
+        "added__date__lt": "2026-02-28",
+        "modified__date__gt": "2026-03-01",
+        "modified__date__lt": "2026-03-31",
+        "owner__id__in": "2,3",
+        "owner__id__none": "4",
+        "owner__isnull": "false",
+        "shared_by__id": "2",
+        "mime_type": "application/pdf",
+        "has_duplicates": "true",
+        "custom_fields__icontains": "hello",
+        "custom_fields__id__all": "1,2",
+        "custom_fields__id__in": "3",
+        "custom_fields__id__none": "4,5",
+        "has_custom_fields": "false",
+        "page_size": "25",
+    }
+
+
+async def test_a_zero_is_a_value_not_an_absent_filter(make_client: ClientFactory) -> None:
+    server = Documents()
+
+    _ = await PaperlessDocumentReader(make_client(server)).search_documents(
+        DocumentQuery(archive_serial_number=0, asn_gt=0, created_day=0), page=1, page_size=25
+    )
+
+    [sent] = server.sent
+    assert (sent["archive_serial_number"], sent["archive_serial_number__gt"]) == ("0", "0")
+    assert sent["created__day"] == "0"
+
+
 async def test_more_like_is_sent_as_more_like_id(make_client: ClientFactory) -> None:
     server = Documents()
 
