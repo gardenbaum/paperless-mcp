@@ -3,11 +3,11 @@ id: PLMCP-23
 title: >-
   Toolset pdf: rotate, merge, split, delete pages, edit, remove password,
   reprocess
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:26:00Z'
-updated_date: '2026-11-13T21:01:00Z'
+updated_date: '2026-11-13T21:25:00Z'
 labels: []
 milestone: m-3
 dependencies:
@@ -27,18 +27,18 @@ Paperless 3.x offers server-side PDF operations through dedicated endpoints; the
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Tools rotate_documents, merge_documents, split_document, delete_pages, edit_pdf, remove_document_password and reprocess_documents exist
-- [ ] #2 Each returns the resulting task; operations that delete originals or pages require confirm
-- [ ] #3 Page ranges are validated against the page count before sending
-- [ ] #4 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
-- [ ] #5 FakePaperless and the contract suite cover every new port method
+- [x] #1 Tools rotate_documents, merge_documents, split_document, delete_pages, edit_pdf, remove_document_password and reprocess_documents exist
+- [x] #2 Each returns the resulting task; operations that delete originals or pages require confirm
+- [x] #3 Page ranges are validated against the page count before sending
+- [x] #4 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
+- [x] #5 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -76,4 +76,12 @@ I2/I3 task discovery (paperless/pdf.py): operations are serialised per writer wi
 I4: PdfService takes web_url; PdfResult has source_links and produced_links (a new version links the document that got it). M1: permission texts say ownership (or no owner) for rotate/split/delete_pages/edit_pdf/remove_password, change grant for merge without delete_originals and reprocess (COMMON, per-tool texts, REFUSED_HINT, port docstring). M2: merged filename matched as '_'.join(ids)[:100] + '_merged.pdf' in the given order (test with 17 five-digit ids). M3: ordering=-date_created (-id is ignored by Paperless). M4: reprocess_documents description no longer claims the endpoint returns tasks and says when to prefer it; bulk back-pointer added. M5: confirmations mention that the original's archive serial number moves to the new document for delete_originals and for replace_original with a single output (not for split or multi-file edits). M7: PdfTask.state description lists unknown.
 M6 (reading of AC #2): delete_pages(output='new_document') needs no confirm because no existing document loses pages; new_version and replace_original need it.
 Gates after the rebase: just check exit 0 (2648 passed, 99.97 % coverage, diff coverage 100 %); just mutation from clean: 9476 killed, 10 timeout, 0 survived, 111 reviewed equivalent, 100.0 % (three equivalent entries re-recorded with new ids and hashes); full flock just e2e on the rebased tree: 432 passed, 6 skipped, 1 failed = test_more_like_finds_other_documents[live] (PLMCP-40); the pdf live contract and e2e tests were rerun alone on the final code afterwards.
+
+Controller: review fix round accepted (I1 rebase onto 715c32b, I2-I4, M1-M7). DoD #1 left unchecked: the test order of the feature commit is not recorded per level, and some mutation-hardening tests came after the code. Gates on ca76119: just check 0 (100% diff), just mutation 100.0%, e2e 432 passed, 1 failed (test_more_like_finds_other_documents[live], PLMCP-40); pdf contract+e2e rerun on the final code: 24 passed.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adds the opt-in pdf toolset: rotate_documents, merge_documents, split_document, delete_pages, edit_pdf, remove_document_password and reprocess_documents. Page ranges are parsed and checked against the page count before sending. Operations that move originals to the trash or drop pages from a document's file require confirm, and the texts say what is lost, including the archive serial number hand-off. Paperless names no task, so the adapter serialises operations and finds the started tasks by type, owner, creation time and file name, capped at the expected count; anything it cannot tie down, or a task list it cannot read after the POST, is reported as unknown instead of an error. Results link the source and produced documents (decision-4). Deliberate snapshot change: a back-pointer in bulk_edit_documents' description to reprocess_documents.
+<!-- SECTION:FINAL_SUMMARY:END -->
