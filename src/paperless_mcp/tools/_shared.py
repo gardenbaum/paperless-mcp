@@ -10,12 +10,13 @@ calls on ``Services``. The registry tests
 import functools
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Annotated, Final, cast
 
 from fastmcp.exceptions import ResourceError, ToolError
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
-from paperless_mcp.domain.errors import PaperlessMcpError
+from paperless_mcp.domain.errors import ConfirmationRequired, PaperlessMcpError
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
@@ -27,6 +28,8 @@ if TYPE_CHECKING:
     from paperless_mcp.services.documents import DocumentService
     from paperless_mcp.services.files import FileService
     from paperless_mcp.services.instance import InstanceService
+    from paperless_mcp.services.notes import NoteService
+    from paperless_mcp.services.removal import DocumentRemoval
     from paperless_mcp.services.tasks import TaskService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
 
@@ -49,6 +52,9 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "download_document": "core",
     "get_task": "core",
     "update_document": "core",
+    "add_note": "core",
+    "delete_note": "core",
+    "delete_document": "core",
     "ask_paperless_ai": "ai",
     "get_ai_suggestions": "ai",
 }
@@ -116,6 +122,31 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
+    # Adds a record and removes none; repeating the call adds another note, so it is not idempotent.
+    "add_note": ToolAnnotations(
+        title="Add note",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    # Destructive tools take confirm and change nothing without it (decision-6). A note has no
+    # trash. Deleting again leaves the state as it is (idempotent), though the second call fails.
+    "delete_note": ToolAnnotations(
+        title="Delete note",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Moves the document to the Paperless trash, from where it can be restored.
+    "delete_document": ToolAnnotations(
+        title="Delete document",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
     # The AI tools change nothing in Paperless (read-only; repeating a call leaves the environment
     # unchanged, which is what MCP's idempotent hint means, though the text differs) and reach
     # beyond it: Paperless sends document text to its LLM backend (open world), at a cost per call.
@@ -136,6 +167,18 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
 
 logger = logging.getLogger(__name__)
 
+# The `confirm` parameter of every destructive tool (decision-6, decision-15).
+type Confirm = Annotated[
+    bool,
+    Field(
+        description=(
+            "Must be true to go ahead. Without it nothing changes and the error says what would "
+            "happen. Describe that to the user and pass true only once they agree, or if they "
+            "already asked for exactly this."
+        )
+    ),
+]
+
 # Key of the ``Services`` in the server's lifespan context.
 SERVICES: Final = "services"
 
@@ -149,6 +192,8 @@ class Services:
     documents: DocumentService
     files: FileService
     edits: DocumentEditor
+    notes: NoteService
+    removal: DocumentRemoval
     tasks: TaskService
     ai: AiService
 
@@ -175,6 +220,9 @@ def boundary[**P, R](tool: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R
             return await tool(*args, **kwargs)
         except ToolError:
             raise
+        except ConfirmationRequired as refusal:
+            # The normal first step of a two-step flow, not a failure (decision-15).
+            raise ToolError(refusal.describe(), log_level=logging.INFO) from None
         except PaperlessMcpError as error:
             raise ToolError(error.describe()) from None
         except Exception as error:

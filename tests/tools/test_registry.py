@@ -83,9 +83,14 @@ def unguarded(tools: list[Tool]) -> list[str]:
 
 
 def destructive(tool: Tool) -> bool:
-    """MCP's reading: a tool that is not read-only is destructive unless it says otherwise."""
+    """MCP's reading: a tool that is not read-only is destructive unless it says otherwise.
+
+    A tool that says it is destructive is one, whatever else it claims.
+    """
     hints = tool.annotations or ToolAnnotations()
-    return not hints.read_only_hint and hints.destructive_hint is not False
+    return hints.destructive_hint is True or (
+        not hints.read_only_hint and hints.destructive_hint is not False
+    )
 
 
 def unconfirmed(tools: list[Tool]) -> list[str]:
@@ -193,6 +198,17 @@ async def test_destructive_tools_need_confirm_defaulting_to_false() -> None:
     assert unconfirmed(await server_tools()) == []
 
 
+@pytest.mark.decision("decision-6")
+async def test_the_confirm_check_has_destructive_tools_to_check() -> None:
+    # Guards the check above against passing for want of a destructive tool.
+    tools = await server_tools()
+
+    found = {t.name for t in tools if destructive(t)}
+
+    assert found >= {"delete_note", "delete_document"}
+    assert found.isdisjoint({"update_document", "add_note", "get_document"})
+
+
 @pytest.mark.decision("decision-7")
 async def test_no_tool_takes_a_filesystem_path_outside_the_stdio_allowlist() -> None:
     assert path_parameters(await server_tools()) == []
@@ -249,6 +265,23 @@ async def empty_trash(
     *, confirm: Annotated[bool, Field(description="Set to true to really empty it.")] = False
 ) -> bool:
     """A correct destructive tool: a described confirm that defaults to false."""
+    return confirm
+
+
+@offenders.tool(
+    annotations=ToolAnnotations(title="Contradiction", read_only_hint=True, destructive_hint=True)
+)
+@boundary
+async def read_only_but_destructive() -> None:
+    """Claims to be both read-only and destructive: the destructive claim counts."""
+
+
+@offenders.tool(
+    annotations=ToolAnnotations(title="Required confirm", destructive_hint=True),
+)
+@boundary
+async def drop_with_required_confirm(*, confirm: bool) -> bool:
+    """Has a confirm, but it must be passed: the first call would already act."""
     return confirm
 
 
@@ -316,7 +349,12 @@ async def test_self_test_tools_without_the_boundary_are_found() -> None:
 async def test_self_test_destructive_tools_without_a_false_confirm_are_found() -> None:
     found = set(unconfirmed(await offending_tools()))
 
-    assert found >= {"delete_everything", "drop_without_confirm"}
+    assert found >= {
+        "delete_everything",
+        "drop_without_confirm",
+        "read_only_but_destructive",
+        "drop_with_required_confirm",
+    }
     assert "empty_trash" not in found
 
 

@@ -20,6 +20,7 @@ from hypothesis import strategies as st
 from paperless_mcp.domain.documents import CustomFieldValue, DocumentEdit, DocumentPatch
 from paperless_mcp.domain.errors import (
     Ambiguous,
+    ConfirmationRequired,
     NotFound,
     PaperlessMcpError,
     PermissionDenied,
@@ -633,10 +634,10 @@ async def test_a_failure_after_tags_were_created_names_them() -> None:
 async def test_changing_the_owner_needs_confirm_and_writes_nothing_without_it() -> None:
     setup = Setup()
 
-    with pytest.raises(Validation, match="confirm") as raised:
+    with pytest.raises(ConfirmationRequired, match="confirm") as raised:
         _ = await setup.update(owner="admin", title="never")
     setup.document.owner = 2
-    with pytest.raises(Validation, match="confirm"):
+    with pytest.raises(ConfirmationRequired, match="confirm"):
         _ = await setup.update(clear=["owner"])
 
     assert "owner" in raised.value.message

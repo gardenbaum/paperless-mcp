@@ -159,6 +159,16 @@ class _Notes(RootModel[list[_Note]]):
     pass
 
 
+class _SaveError(BaseModel):
+    """What the notes endpoint answers with status 200 when it could not save a note."""
+
+    error: str
+
+
+class _Saved(RootModel[list[_Note] | _SaveError]):
+    pass
+
+
 class _History(RootModel[list[_HistoryRow]]):
     pass
 
@@ -201,6 +211,12 @@ def unseen_document(document: int) -> NotFound:
     """The error for a ``more_like`` document that is missing or hidden from the user."""
     message = f"No document {document} exists that this user may see."
     return NotFound(message, hint="Take the id from a search_documents row.")
+
+
+def unseen_note(document: int, note: int) -> NotFound:
+    """The error for a note that is not on the document (Paperless answers 404 for both)."""
+    message = f"No note {note} exists on document {document} that this user may see."
+    return NotFound(message, hint="List the notes with get_document and include notes.")
 
 
 def beyond_last_page(page: int) -> NotFound:
@@ -447,3 +463,50 @@ class PaperlessDocumentWriter:
         except NotFound:
             raise unseen_document(document_id) from None
         return _record(row, can_change=None)
+
+    async def add_note(self, document_id: int, text: str) -> Note:
+        """See ``DocumentWriter.add_note``.
+
+        Paperless answers 200 with every note of the document, the new one last (picked as the
+        newest with the text that was sent, since others may add notes meanwhile), or with
+        ``{"error": ...}`` and status 200 when it could not save it. A 403 means the global note
+        permission is missing, the document is hidden, or the user may not change it.
+        """
+        try:
+            answer = await self._client.call(
+                "POST", f"{PATH}{document_id}/notes/", _Saved, json={"note": text}
+            )
+        except NotFound:
+            raise unseen_document(document_id) from None
+        if isinstance(answer.root, _SaveError):
+            message = "Paperless could not save the note."
+            raise Validation(message, hint="Check the Paperless log for the reason.")
+        if not answer.root:
+            message = f"Paperless sent an unexpected response for POST {PATH}{document_id}/notes/."
+            raise PaperlessMcpError(message)
+        mine = [row for row in answer.root if row.note == text] or answer.root
+        return _note(max(mine, key=lambda row: row.id))
+
+    async def delete_note(self, document_id: int, note_id: int) -> None:
+        """See ``DocumentWriter.delete_note``.
+
+        Not retried: a repeated DELETE would answer 404 after the first one succeeded.
+        Paperless answers 404 both to a missing document and to a note that is not on it.
+        """
+        try:
+            _ = await self._client.request(
+                "DELETE", f"{PATH}{document_id}/notes/", params={"id": note_id}, retry=False
+            )
+        except NotFound:
+            raise unseen_note(document_id, note_id) from None
+
+    async def delete_document(self, document_id: int) -> None:
+        """See ``DocumentWriter.delete_document``.
+
+        Paperless 3 moves the document to the trash (204). Not retried, like ``delete_note``.
+        A document the user may not see is answered 404, one they may see but not delete 403.
+        """
+        try:
+            _ = await self._client.request("DELETE", f"{PATH}{document_id}/", retry=False)
+        except NotFound:
+            raise unseen_document(document_id) from None

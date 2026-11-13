@@ -19,7 +19,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from paperless_mcp.domain.documents import CustomFieldValue, DocumentPatch, DocumentUpdate
-from paperless_mcp.domain.errors import NotFound, PaperlessMcpError, PermissionDenied, Validation
+from paperless_mcp.domain.errors import (
+    ConfirmationRequired,
+    NotFound,
+    PaperlessMcpError,
+    PermissionDenied,
+    Validation,
+)
 from paperless_mcp.services.custom_values import normalise
 from paperless_mcp.services.tag_hierarchy import blocked_removals, close_over_ancestors
 from paperless_mcp.services.taxonomy import fold
@@ -172,7 +178,7 @@ def _confirm_owner(edit: DocumentEdit, current: DocumentRecord, scalars: dict[st
             "Changing the owner needs confirm=true: the new owner (or, with no owner, every "
             "user who may view documents) takes over the document and you may lose access to it."
         )
-        raise Validation(message, hint="Pass confirm=true to change the owner.")
+        raise ConfirmationRequired(message, hint="Pass confirm=true to change the owner.")
 
 
 def _resolved(values: Iterable[int | str], created: dict[str, tuple[str, int]]) -> list[int]:

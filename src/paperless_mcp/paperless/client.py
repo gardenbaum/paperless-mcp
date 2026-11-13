@@ -187,7 +187,9 @@ class PaperlessClient:
         """Send a request and return the successful response.
 
         ``timeout`` replaces the client's default timeout (seconds) for this request. With
-        ``retry=False`` transient statuses are not retried, for calls that cost money.
+        ``retry=False`` transient statuses are not retried: for calls that cost money, and for
+        deletions, whose repeat would answer 404 once the first one went through (so a 429 is not
+        retried for them either; the caller can ask again).
 
         Raises:
             PaperlessMcpError: The matching subclass for an error status or a failed transport.

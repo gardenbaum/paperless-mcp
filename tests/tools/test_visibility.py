@@ -118,8 +118,9 @@ async def test_a_toolset_not_selected_takes_its_resources_with_it() -> None:
 async def test_read_only_mode_offers_only_tools_with_the_read_only_hint() -> None:
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"], read_only=True)
 
-    # update_document is core's first tool that changes data, so read-only mode hides it.
-    expected = (CORE - {"update_document"}) | SHIPPED_AI | {"ask_something", "bulk_preview"}
+    # The tools of core that change data are hidden in read-only mode.
+    writing = {"update_document", "add_note", "delete_note", "delete_document"}
+    expected = (CORE - writing) | SHIPPED_AI | {"ask_something", "bulk_preview"}
     assert await names(server) == expected
 
 
