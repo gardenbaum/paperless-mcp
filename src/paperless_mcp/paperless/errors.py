@@ -67,9 +67,12 @@ def _details(response: httpx2.Response) -> str:
     return "; ".join(_messages(body)[:MAX_MESSAGES])
 
 
+# What a 400 without a JSON body (Paperless's plain-text refusals) says: no details to add.
+REJECTED = "Paperless rejected the request"
+
 # Statuses whose client-safe message includes Paperless's sanitised messages: (error, prefix).
 _WITH_DETAILS: dict[int, tuple[type[PaperlessMcpError], str]] = {
-    HTTPStatus.BAD_REQUEST: (Validation, "Paperless rejected the request"),
+    HTTPStatus.BAD_REQUEST: (Validation, REJECTED),
     HTTPStatus.CONFLICT: (Conflict, "Paperless reported a conflict"),
 }
 # Statuses with a fixed message: (error, message, hint).

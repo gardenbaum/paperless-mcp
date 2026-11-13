@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         Suggestions,
     )
     from paperless_mcp.domain.instance import InstanceOverview
+    from paperless_mcp.domain.pdf import Output, PageSlot
     from paperless_mcp.domain.tasks import TaskStatus
     from paperless_mcp.domain.taxonomy import (
         TaxonomyDetail,
@@ -554,5 +555,94 @@ class TrashWriter(Protocol):
         Raises:
             PermissionDenied: As for ``restore_from_trash``.
             Validation: An id is not in the trash (or listed twice). Nothing is changed.
+        """
+        ...
+
+
+class PdfWriter(Protocol):
+    """Server-side PDF operations: Paperless queues them and tasks do the work.
+
+    Every method returns the ids of the tasks Paperless started for the request, as far as the
+    user can see them. Paperless itself answers "OK" without naming them, so the adapter finds
+    them by looking at the task list around the request. It returns no ids when the user may not
+    view tasks, when Paperless started none (e.g. removing the password of a file that has none)
+    or when they did not show up within a short bounded time: the operation was accepted all the
+    same. Requests are never retried (a repeat would do the work twice).
+
+    All of them need the global permission to change documents and a change grant on (or
+    ownership of, or no owner for) every document; the user must also be able to add documents
+    when the result is a new document, and to delete them (as owner) when an original is
+    deleted. A document the user may not change is refused as a whole.
+    """
+
+    async def rotate_documents(self, document_ids: Sequence[int], degrees: int) -> tuple[str, ...]:
+        """Rotate every page of the PDFs clockwise by ``degrees`` as a new version of each.
+
+        ``degrees`` is a multiple of 90, negative turns counter-clockwise. Each document gets its
+        own task; the older version stays.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: An id does not exist (or is hidden), is listed twice or is empty, or the
+                degrees are not a multiple of 90.
+        """
+        ...
+
+    async def merge_documents(
+        self,
+        document_ids: Sequence[int],
+        *,
+        metadata_document_id: int | None,
+        delete_originals: bool,
+    ) -> tuple[str, ...]:
+        """Merge the PDFs, in this order, into one new document.
+
+        The new document takes the metadata (title with ' (merged)', tags, ...) of
+        ``metadata_document_id`` if given, which must be one of the documents. With
+        ``delete_originals`` the merged documents go to the trash once the new one exists.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: An id does not exist (or is hidden) or is listed twice.
+        """
+        ...
+
+    async def edit_pdf(
+        self, document_id: int, pages: Sequence[PageSlot], *, output: Output
+    ) -> tuple[str, ...]:
+        """Build files from the pages of one PDF: ``pages`` in order, grouped by their file.
+
+        ``output`` decides where the result goes. ``new_version`` needs a single output file.
+        One task per output file.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: A page is beyond the document's last, the document is not a PDF, the
+                output files are not numbered 0, 1, 2... without gaps, ``new_version`` has
+                several output files, or a rotation is not a multiple of 90.
+        """
+        ...
+
+    async def remove_password(
+        self, document_id: int, password: str, *, output: Output
+    ) -> tuple[str, ...]:
+        """Unlock an encrypted PDF with ``password``; ``output`` decides where the copy goes.
+
+        A file without a password makes Paperless start no task.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: The password is wrong, or the document is not a PDF.
+        """
+        ...
+
+    async def reprocess_documents(
+        self, document_ids: Sequence[int], *, remote_ocr: bool
+    ) -> tuple[str, ...]:
+        """Run OCR and archiving again for every document; one task each.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: An id does not exist or is listed twice.
         """
         ...

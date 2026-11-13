@@ -26,7 +26,16 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import httpx2
 import pytest
-from e2e.helpers import EXPECTED_VERSION, consume, consume_text, pdf, results
+from e2e.helpers import (
+    ENCRYPTED_PASSWORD,
+    ENCRYPTED_PDF,
+    EXPECTED_VERSION,
+    consume,
+    consume_text,
+    pdf,
+    pdf_pages,
+    results,
+)
 from fakes.accounts import ADMIN, BLIND, READER
 from fakes.paperless import (
     VERSION,
@@ -45,6 +54,7 @@ from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations ar
     DocumentReader,
     DocumentWriter,
     InstanceReader,
+    PdfWriter,
     TaskReader,
     TaxonomyReader,
     TaxonomyWriter,
@@ -59,6 +69,7 @@ from paperless_mcp.paperless.bulk import PaperlessBulkWriter
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
 from paperless_mcp.paperless.documents import PaperlessDocumentReader, PaperlessDocumentWriter
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
+from paperless_mcp.paperless.pdf import PaperlessPdfWriter
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
 from paperless_mcp.paperless.trash import PaperlessTrashReader, PaperlessTrashWriter
@@ -103,6 +114,7 @@ class Ports:
     view_writes: ViewWriter
     trash: TrashReader
     trash_writes: TrashWriter
+    pdf_writes: PdfWriter
 
 
 def fake_ports(state: FakeState, user: str) -> Ports:
@@ -122,6 +134,7 @@ def fake_ports(state: FakeState, user: str) -> Ports:
         view_writes=writer,
         trash=fake,
         trash_writes=writer,
+        pdf_writes=writer,
     )
 
 
@@ -140,6 +153,7 @@ def live_ports(client: PaperlessClient) -> Ports:
         view_writes=PaperlessViewWriter(client),
         trash=PaperlessTrashReader(client),
         trash_writes=PaperlessTrashWriter(client),
+        pdf_writes=PaperlessPdfWriter(client),
     )
 
 
@@ -208,6 +222,12 @@ class Backend:
     new_document: Callable[[], int]
     # New plain text documents of the admin (live: no OCR, about six times faster than a PDF).
     new_documents: Callable[[int], list[int]]
+    # A new PDF document of the admin with this many pages (live: each page has its own text, so
+    # OCR takes a few seconds), deleted when the test ends on the live backend.
+    new_pdf: Callable[[int], int]
+    # A new PDF of the admin that is encrypted with this password and holds one page once unlocked
+    # (Paperless consumes it without text and without a page count).
+    new_encrypted: Callable[[str], int]
     # Shares an uploaded document view-only with the restricted user (see `Share`).
     share_read_only: Share
     # A user with only the given permissions and grants (see `Restricted`).
@@ -333,6 +353,41 @@ def fake_grants(state: FakeState) -> GrantsOf:
     return grants
 
 
+def fake_new_pdf(state: FakeState) -> Callable[[int], int]:
+    def new_pdf(pages: int) -> int:
+        [admin] = [user for user in state.users if user.username == ADMIN[0]]
+        number = max(d.id for d in state.documents) + 1
+        state.documents.append(
+            FakeDocument(
+                id=number,
+                title=f"contract-pdf-{uuid.uuid4().hex}",
+                owner=admin.id,
+                page_count=pages,
+            )
+        )
+        return number
+
+    return new_pdf
+
+
+def fake_new_encrypted(state: FakeState) -> Callable[[str], int]:
+    def new_encrypted(password: str) -> int:
+        [admin] = [user for user in state.users if user.username == ADMIN[0]]
+        number = max(d.id for d in state.documents) + 1
+        state.documents.append(
+            FakeDocument(
+                id=number,
+                title=f"contract-locked-{uuid.uuid4().hex}",
+                owner=admin.id,
+                page_count=None,
+                password=password,
+            )
+        )
+        return number
+
+    return new_encrypted
+
+
 def fake_new_documents(new_document: Callable[[], int]) -> Callable[[int], list[int]]:
     return lambda count: [new_document() for _ in range(count)]
 
@@ -349,6 +404,8 @@ def fake_backend(*, ai_enabled: bool = False) -> Backend:
         upload=fake_upload(state),
         new_document=fake_new_document(state),
         new_documents=fake_new_documents(fake_new_document(state)),
+        new_pdf=fake_new_pdf(state),
+        new_encrypted=fake_new_encrypted(state),
         share_read_only=fake_share(state),
         restricted=fake_restricted(state),
         grants=fake_grants(state),
@@ -403,6 +460,26 @@ def live_grants(stack: Stack) -> GrantsOf:
         )
 
     return grants
+
+
+def live_pdf(stack: Stack, created: list[int], pages: int) -> int:
+    """A PDF with `pages` pages, each with its own text layer (OCR has little to do)."""
+    title = f"contract-pdf-{uuid.uuid4().hex}"
+    texts = [f"{title} page {n}" for n in range(1, pages + 1)]
+    _, document = consume(stack.admin, title, pdf_pages(texts))
+    assert document is not None, f"Consuming {title!r} failed"
+    created.append(document)
+    return document
+
+
+def live_encrypted(stack: Stack, created: list[int], password: str) -> int:
+    """The encrypted PDF fixture (Paperless consumes it without text and without page count)."""
+    assert password == ENCRYPTED_PASSWORD, "the live fixture is locked with its own password"
+    title = f"contract-locked-{uuid.uuid4().hex}"
+    _, document = consume(stack.admin, title, ENCRYPTED_PDF)
+    assert document is not None, f"Consuming {title!r} failed"
+    created.append(document)
+    return document
 
 
 def delete_and_empty_trash(stack: Stack, documents: list[int]) -> None:
@@ -533,6 +610,8 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
                 upload=upload_live,
                 new_document=new_live_document,
                 new_documents=new_live_documents,
+                new_pdf=lambda pages: live_pdf(stack, created, pages),
+                new_encrypted=lambda password: live_encrypted(stack, created, password),
                 share_read_only=share_live,
                 restricted=live_restricted(stack, ports, users),
                 grants=live_grants(stack),

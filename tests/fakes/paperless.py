@@ -86,6 +86,7 @@ from paperless_mcp.paperless.documents import (
     unseen_version,
 )
 from paperless_mcp.paperless.errors import ai_disabled
+from paperless_mcp.paperless.pdf import not_editable, wrong_password
 from paperless_mcp.paperless.tasks import not_found
 from paperless_mcp.paperless.trash import beyond_last_page as beyond_trash
 from paperless_mcp.paperless.trash import refused as trash_refused
@@ -104,6 +105,7 @@ if TYPE_CHECKING:
         PermissionsChange,
     )
     from paperless_mcp.domain.documents import FileVersion
+    from paperless_mcp.domain.pdf import Output, PageSlot
     from paperless_mcp.domain.taxonomy import (
         MatchingAlgorithm,
         TaxonomyKind,
@@ -340,6 +342,10 @@ class FakeDocument(Owned):
     # Set on such an entry when the version went to the trash together with its document, so
     # that restoring the document brings it back; an earlier deletion stays an entry of its own.
     with_root: bool = False
+    # An encrypted PDF: Paperless consumed it without text and with no page count; removing the
+    # password gives a file with `unlocked_pages` pages.
+    password: str | None = None
+    unlocked_pages: int = 1
 
     def __post_init__(self) -> None:
         """Name the file after the title unless given; a rename keeps the file's name.
@@ -1469,6 +1475,251 @@ class FakePaperless:
             self._push(root, number, file, label, datetime.now(UTC))
             state.documents.remove(source)
 
+    # --- PdfWriter ---------------------------------------------------------------------------
+
+    def _pdf_documents(self, document_ids: Sequence[int]) -> list[FakeDocument]:
+        """The documents of a PDF request, or Paperless's 400 for unknown or repeated ids."""
+        known = {d.id: d for d in self.state.documents}
+        if len(set(document_ids)) != len(document_ids) or not set(document_ids) <= known.keys():
+            reject("documents", "Some documents in documents don't exist or were specified twice.")
+        return [known[n] for n in document_ids]
+
+    def _pdf_allowed(
+        self, documents: list[FakeDocument], *, adds: bool, deletes: bool, owner_only: bool
+    ) -> None:
+        """Paperless's permission checks of a PDF request (403), as probed on 3.4.2.
+
+        The global `change_document` and, on every document, a change grant or ownership
+        (`owner_only`: ownership alone, a grant is not enough, as for rotating and editing);
+        `add_document` when the result is a new document; for deleting originals ownership and
+        `delete_document`. Superusers may do all.
+        """
+        user = self.user
+        if user.is_superuser:
+            return
+        owns = all(d.owner in {None, user.id} for d in documents)
+        allowed = user.has("change_document") and (
+            owns if owner_only else all(d.changeable_by(user) for d in documents)
+        )
+        if allowed and adds:
+            allowed = user.has("add_document")
+        if allowed and deletes:
+            allowed = user.has("delete_document") and owns
+        if not allowed:
+            raise self._denied()
+
+    def _seen_tasks(self, task_ids: tuple[str, ...]) -> tuple[str, ...]:
+        """The task ids the adapter can find: none for a user who may not view tasks."""
+        return task_ids if self.user.has("view_paperlesstask") else ()
+
+    def _pdf_task(self, task_type: str, produced: tuple[int, ...]) -> str:
+        """Record a finished task (the fake works at once) and return its id."""
+        now = datetime.now(UTC)
+        task = FakeTask(
+            id=len(self.state.tasks) + 1,
+            task_id=str(uuid.uuid4()),
+            task_type=task_type,
+            status="success",
+            created=now,
+            finished=now,
+            document_ids=produced,
+        )
+        self.state.tasks.append(task)
+        return task.task_id
+
+    def _new_version(self, document: FakeDocument, *, pages: int | None, marker: bytes) -> int:
+        """Add an edited file as the newest version of ``document``; returns the version id."""
+        now = datetime.now(UTC)
+        version_id = self._next_id()
+        original = document.original + marker
+        archive = None if document.archive is None else document.archive + marker
+        self._push(document, version_id, FakeFile(original, archive, document.content), None, now)
+        document.page_count = pages
+        return version_id
+
+    def _new_document(
+        self, source: FakeDocument | None, title: str, pages: int | None
+    ) -> FakeDocument:
+        """A new PDF document made from ``source`` (its metadata is kept), owned by the user."""
+        number = self._next_id()
+        original = f"%PDF-1.4 fake {title} {number}".encode()
+        made = FakeDocument(
+            id=number,
+            title=title,
+            owner=self.user.id,
+            page_count=pages,
+            original=original,
+            archive=original + b"\n%archive",
+            versions=[_root_version(number, original)],
+            content="" if source is None else source.content,
+            created=SEED_DAY if source is None else source.created,
+            tags=[] if source is None else list(source.tags),
+            correspondent=None if source is None else source.correspondent,
+            document_type=None if source is None else source.document_type,
+            storage_path=None if source is None else source.storage_path,
+        )
+        self.state.documents.append(made)
+        return made
+
+    def _trash_originals(self, documents: list[FakeDocument]) -> None:
+        for document in documents:
+            self.state.documents.remove(document)
+            self.state.trash.append(document)
+
+    @write
+    async def rotate_documents(self, document_ids: Sequence[int], degrees: int) -> tuple[str, ...]:
+        """`PdfWriter.rotate_documents`: every document gets a new, rotated version.
+
+        Order (probed on 3.4.2): the global `change_document` (403), the form (400: a multiple
+        of 90 for the degrees, known and unrepeated ids), a change grant on every document (403).
+        The document keeps its id and page count; the older version stays.
+        """
+        if not self.user.has("change_document"):
+            raise self._denied()
+        if degrees % 90:
+            reject("degrees", "degrees must be a multiple of 90")
+        documents = self._pdf_documents(document_ids)
+        self._pdf_allowed(documents, adds=False, deletes=False, owner_only=True)
+        return self._seen_tasks(
+            tuple(
+                self._pdf_task(
+                    "consume_file",
+                    (
+                        self._new_version(
+                            d, pages=d.page_count, marker=f"\n%rotated {degrees}".encode()
+                        ),
+                    ),
+                )
+                for d in documents
+            )
+        )
+
+    @write
+    async def merge_documents(
+        self,
+        document_ids: Sequence[int],
+        *,
+        metadata_document_id: int | None,
+        delete_originals: bool,
+    ) -> tuple[str, ...]:
+        """`PdfWriter.merge_documents`: one new document with all the pages, in this order.
+
+        Order (probed on 3.4.2): the global `change_document` (403), the ids (400), then the
+        permissions (403: `add_document`, a change grant is enough; deleting originals needs
+        ownership and `delete_document`; a metadata document outside the list is accepted). The
+        new document is titled like the metadata document with " (merged)", else after the ids.
+        Originals go to the trash when asked.
+        """
+        if not self.user.has("change_document"):
+            raise self._denied()
+        documents = self._pdf_documents(document_ids)
+        self._pdf_allowed(documents, adds=True, deletes=delete_originals, owner_only=False)
+        source = next((d for d in documents if d.id == metadata_document_id), None)
+        title = (
+            f"{source.title} (merged)"
+            if source is not None
+            else f"{'_'.join(str(n) for n in document_ids)}_merged"
+        )
+        pages = sum(d.page_count or 0 for d in documents)
+        made = self._new_document(source, title, pages)
+        task = self._pdf_task("consume_file", (made.id,))
+        if delete_originals:
+            self._trash_originals(documents)
+        return self._seen_tasks((task,))
+
+    @write
+    async def edit_pdf(
+        self, document_id: int, pages: Sequence[PageSlot], *, output: Output
+    ) -> tuple[str, ...]:
+        """`PdfWriter.edit_pdf`: the pages, grouped into output files, as new documents or version.
+
+        Order (probed on 3.4.2): the global `change_document` (403), the form (400: a non-empty
+        page list, rotations in multiples of 90, output files numbered from 0 without gaps, a
+        single one as a new version, pages inside the document, a PDF), then the object (403).
+        """
+        if not self.user.has("change_document"):
+            raise self._denied()
+        document = self._pdf_documents([document_id])[0]
+        files = _check_edit(document, pages)
+        if output == "new_version" and len(files) > 1:
+            reject("non_field_errors", "update_document only allowed with a single output document")
+        self._pdf_allowed(
+            [document],
+            adds=output != "new_version",
+            deletes=output == "replace_original",
+            owner_only=True,
+        )
+        if output == "new_version":
+            version = self._new_version(document, pages=len(pages), marker=b"\n%edited")
+            return self._seen_tasks((self._pdf_task("consume_file", (version,)),))
+        tasks = tuple(
+            self._pdf_task(
+                "consume_file",
+                (
+                    self._new_document(
+                        document, document.title, sum(1 for s in pages if s.document == n)
+                    ).id,
+                ),
+            )
+            for n in files
+        )
+        if output == "replace_original":
+            self._trash_originals([document])
+        return self._seen_tasks(tasks)
+
+    @write
+    async def remove_password(
+        self, document_id: int, password: str, *, output: Output
+    ) -> tuple[str, ...]:
+        """`PdfWriter.remove_password`: a decrypted copy, as a new document or version.
+
+        Probed on 3.4.2: a wrong password is a plain-text 400; a file without a password is
+        accepted and starts no task; a file that is not a PDF is the same plain-text 400.
+        Permissions as for an edit.
+        """
+        if not self.user.has("change_document"):
+            raise self._denied()
+        document = self._pdf_documents([document_id])[0]
+        self._pdf_allowed(
+            [document],
+            adds=output != "new_version",
+            deletes=output == "replace_original",
+            owner_only=True,
+        )
+        if not document.mime_type.endswith("pdf"):
+            raise wrong_password()
+        if document.password is None:
+            return ()
+        if document.password != password:
+            raise wrong_password()
+        pages = document.unlocked_pages
+        if output == "new_version":
+            version = self._new_version(document, pages=pages, marker=b"\n%unlocked")
+            document.password = None
+            return self._seen_tasks((self._pdf_task("consume_file", (version,)),))
+        made = self._new_document(document, document.title, pages)
+        task = self._pdf_task("consume_file", (made.id,))
+        if output == "replace_original":
+            self._trash_originals([document])
+        return self._seen_tasks((task,))
+
+    @write
+    async def reprocess_documents(
+        self, document_ids: Sequence[int], *, remote_ocr: bool
+    ) -> tuple[str, ...]:
+        """`PdfWriter.reprocess_documents`: one task per document; the fake does no OCR.
+
+        Probed on 3.4.2: the global `change_document` (403), the ids (400), a change grant (403).
+        The tasks name no document.
+        """
+        _ = remote_ocr
+        if not self.user.has("change_document"):
+            raise self._denied()
+        documents = self._pdf_documents(document_ids)
+        self._pdf_allowed(documents, adds=False, deletes=False, owner_only=False)
+        self.state.reprocessed.extend(d.id for d in documents)
+        return self._seen_tasks(tuple(self._pdf_task("reprocess_document", ()) for _ in documents))
+
     def _owned(self, kind: WritableKind) -> list[FakeTaxonomy]:
         """The objects of a kind with owners (everything but custom fields)."""
         state = self.state
@@ -2214,6 +2465,28 @@ class FakePaperless:
 
 
 type _Match = Callable[[FakeDocument], bool]
+
+
+def _check_edit(document: FakeDocument, pages: Sequence[PageSlot]) -> list[int]:
+    """Paperless's 400s for the pages of an edit; returns the numbers of the output files."""
+    if not pages:
+        reject("operations", "This list may not be empty.")
+    for slot in pages:
+        if slot.rotate % 90:
+            reject("operations", "rotate must be a multiple of 90")
+    files = sorted({slot.document for slot in pages})
+    if files != list(range(len(files))):
+        reject("non_field_errors", "doc index is out of bounds")
+    count = document.page_count
+    if count is None or not document.mime_type.endswith("pdf"):
+        raise not_editable()
+    for slot in pages:
+        if not 1 <= slot.page <= count:
+            reject(
+                "non_field_errors",
+                f"Page {slot.page} is out of bounds for document with {count} pages.",
+            )
+    return files
 
 
 def _filters(query: DocumentQuery, state: FakeState) -> list[_Match]:
