@@ -287,6 +287,10 @@ class DocumentVersion(BaseModel):
     added: datetime
     version_label: str | None
     is_root: Annotated[bool, Field(description="True for the original upload.")]
+    checksum: Annotated[
+        str | None,
+        Field(description="SHA-256 of the file; two versions with the same checksum are copies."),
+    ] = None
 
 
 class HistoryEntry(BaseModel):

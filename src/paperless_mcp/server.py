@@ -36,7 +36,9 @@ from paperless_mcp.services.tasks import TaskService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
 from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
 from paperless_mcp.services.uploads import UploadService
-from paperless_mcp.tools import ai, core, upload, upload_stdio
+from paperless_mcp.services.version_uploads import VersionUploadService
+from paperless_mcp.services.versions import VersionService
+from paperless_mcp.tools import ai, core, upload, upload_stdio, versions, versions_stdio
 from paperless_mcp.tools._shared import (
     ANNOTATIONS,
     SERVICES,
@@ -117,13 +119,13 @@ class Catalogue:
 
 
 CATALOGUE: Final = Catalogue(
-    providers=(core.provider, ai.provider),
+    providers=(core.provider, ai.provider, versions.provider),
     annotations=ANNOTATIONS,
     tool_toolsets=TOOL_TOOLSETS,
     toolsets=TOOLSETS,
     requires=TOOLSET_REQUIRES,
-    remote_providers=(upload.remote,),
-    local_providers=(upload_stdio.local,),
+    remote_providers=(upload.remote, versions.remote),
+    local_providers=(upload_stdio.local, versions_stdio.local),
 )
 
 
@@ -239,6 +241,17 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                     adapters.documents,
                     adapters.document_writes,
                     taxonomy,
+                    tasks,
+                    web_url=web_url,
+                    max_bytes=settings.max_upload_bytes,
+                    upload_dirs=settings.upload_dirs if by_path else (),
+                ),
+                versions=VersionService(
+                    adapters.documents, adapters.document_writes, web_url=web_url
+                ),
+                version_uploads=VersionUploadService(
+                    adapters.documents,
+                    adapters.document_writes,
                     tasks,
                     web_url=web_url,
                     max_bytes=settings.max_upload_bytes,

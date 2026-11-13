@@ -35,13 +35,15 @@ from paperless_mcp.paperless.disposition import filename
 from paperless_mcp.paperless.pagination import Page
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
 
     from paperless_mcp.domain.documents import DocumentQuery, FileVersion
+    from paperless_mcp.domain.versions import VersionUpload
     from paperless_mcp.paperless.client import PaperlessClient, Params
 
 PATH = "/api/documents/"
 UPLOAD_PATH = "/api/documents/post_document/"
+MERGE_AS_VERSIONS_PATH = "/api/documents/merge_as_versions/"
 # Most bytes of a thumbnail read; real ones are 2 KB to 30 KB WebP, so this is generous.
 THUMBNAIL_LIMIT = 4 * 1024 * 1024
 FIELDS = "id,title,created,added,correspondent,document_type,storage_path,tags,custom_fields"
@@ -80,7 +82,18 @@ class _Version(BaseModel):
     id: int
     added: datetime
     version_label: str | None = None
+    checksum: str | None = None
     is_root: bool
+
+
+class _VersionDeleted(BaseModel):
+    """What deleting a version answers: ``current_version_id`` is the newest one left."""
+
+    current_version_id: int
+
+
+class _Merged(BaseModel):
+    result: str
 
 
 class _User(BaseModel):
@@ -225,6 +238,12 @@ def unseen_note(document: int, note: int) -> NotFound:
     return NotFound(message, hint="List the notes with get_document and include notes.")
 
 
+def unseen_version(document: int, version: int) -> NotFound:
+    """The error for a version that is not on the document (Paperless answers 404 for both)."""
+    message = f"No version {version} exists on document {document} that this user may see."
+    return NotFound(message, hint="List the versions with list_document_versions.")
+
+
 def beyond_last_page(page: int) -> NotFound:
     """The error for a page past the end of the results."""
     message = f"Page {page} is beyond the last page of the results."
@@ -269,6 +288,16 @@ def _hit(row: _Row) -> DocumentHit:
     )
 
 
+def _version(row: _Version) -> DocumentVersion:
+    return DocumentVersion(
+        id=row.id,
+        added=row.added,
+        version_label=row.version_label,
+        is_root=row.is_root,
+        checksum=row.checksum,
+    )
+
+
 def _record(row: _Detail, *, can_change: bool | None) -> DocumentRecord:
     return DocumentRecord(
         id=row.id,
@@ -289,12 +318,7 @@ def _record(row: _Detail, *, can_change: bool | None) -> DocumentRecord:
         mime_type=row.mime_type,
         page_count=row.page_count,
         notes_count=len(row.notes),
-        versions=tuple(
-            DocumentVersion(
-                id=v.id, added=v.added, version_label=v.version_label, is_root=v.is_root
-            )
-            for v in row.versions
-        ),
+        versions=tuple(_version(v) for v in row.versions),
         user_can_change=can_change,
     )
 
@@ -550,3 +574,73 @@ class PaperlessDocumentWriter:
             files={"document": (upload.filename, upload.content, upload.mime_type)},
         )
         return answer.root
+
+    async def upload_document_version(self, document_id: int, upload: VersionUpload) -> str:
+        """See ``DocumentWriter.upload_document_version``.
+
+        One multipart POST to ``update_version``: the file as ``document`` and the label as
+        ``version_label``. Paperless answers 404 to a document that does not exist or that the
+        user may not see, and 403 to one they may see but not change. Sent once, like an upload.
+        """
+        form = {} if upload.label is None else {"version_label": upload.label}
+        try:
+            answer = await self._client.call(
+                "POST",
+                f"{PATH}{document_id}/update_version/",
+                _TaskId,
+                data=form,
+                files={"document": (upload.filename, upload.content, upload.mime_type)},
+            )
+        except NotFound:
+            raise unseen_document(document_id) from None
+        return answer.root
+
+    async def set_version_label(
+        self, document_id: int, version_id: int, label: str | None
+    ) -> DocumentVersion:
+        """See ``DocumentWriter.set_version_label``.
+
+        ``version_label`` null clears the label; Paperless also turns an empty string into null.
+        It answers 404 to a missing or hidden document and to a version that is not on it.
+        """
+        try:
+            row = await self._client.call(
+                "PATCH",
+                f"{PATH}{document_id}/versions/{version_id}/",
+                _Version,
+                json={"version_label": label},
+            )
+        except NotFound:
+            raise unseen_version(document_id, version_id) from None
+        return _version(row)
+
+    async def delete_version(self, document_id: int, version_id: int) -> int:
+        """See ``DocumentWriter.delete_version``.
+
+        Paperless answers 200 ``{"result": "OK", "current_version_id": ...}`` (its schema says
+        204) and 400 with an HTML body for the root. Not retried, like ``delete_note``.
+        """
+        try:
+            answer = await self._client.call(
+                "DELETE",
+                f"{PATH}{document_id}/versions/{version_id}/",
+                _VersionDeleted,
+                retry=False,
+            )
+        except NotFound:
+            raise unseen_version(document_id, version_id) from None
+        return answer.current_version_id
+
+    async def merge_as_versions(
+        self, root_id: int, source_ids: Sequence[int], label: str | None
+    ) -> None:
+        """See ``DocumentWriter.merge_as_versions``.
+
+        The body lists the root first and names it again as ``root_document_id``. Paperless
+        merges within the request and answers ``{"result": "OK"}``; a user who may not change
+        one of the documents gets 403 with an HTML body.
+        """
+        body: dict[str, object] = {"documents": [root_id, *source_ids], "root_document_id": root_id}
+        if label is not None:
+            body["version_label"] = label
+        _ = await self._client.call("POST", MERGE_AS_VERSIONS_PATH, _Merged, json=body)

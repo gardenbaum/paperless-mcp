@@ -150,3 +150,20 @@ async def test_upload_document_as_a_stdio_server_with_an_allowlist_offers_it(
         [tool] = [t for t in await client.list_tools() if t.name == "upload_document"]
 
     assert tool.model_dump(mode="json", by_alias=True, exclude_none=True) == snapshot
+
+
+@pytest.mark.decision("decision-7")
+async def test_upload_document_version_as_a_stdio_server_with_an_allowlist_offers_it(
+    snapshot: SnapshotAssertion,
+) -> None:
+    """The second tool that differs in this mode (PLMCP-24), with its path parameter."""
+    server = serve(
+        admin(ai_enabled=True),
+        toolsets=["versions"],
+        stdio=True,
+        upload_dirs=["/srv/paperless/consume"],
+    )
+    async with Client(server) as client:
+        [tool] = [t for t in await client.list_tools() if t.name == "upload_document_version"]
+
+    assert tool.model_dump(mode="json", by_alias=True, exclude_none=True) == snapshot

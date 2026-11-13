@@ -56,11 +56,25 @@ FORM_REQUESTS: Mapping[tuple[str, str], str] = {
     ("POST", "/api/documents/post_document/"): (
         "form values are text, and `created` accepts a plain date (PLMCP-18)"
     ),
+    ("POST", "/api/documents/{id}/update_version/"): (
+        "openapi-core lets a form carry fields the schema does not declare (PLMCP-24)"
+    ),
 }
 # Responses whose body the generated schema describes wrongly: (method, path template, status) ->
 # reason. Their bodies are not checked; the live contract suite (tests/contract) checks the
 # adapter against the real ones instead.
 WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
+    ("DELETE", "/api/documents/{id}/versions/{version_id}/", 200): (
+        "3.4.2 answers {result, current_version_id}; the schema documents 204 without a body "
+        "(PLMCP-24)"
+    ),
+    ("DELETE", "/api/documents/{id}/versions/{version_id}/", 400): (
+        "deleting the root version is answered with HttpResponseBadRequest, text/html (PLMCP-24)"
+    ),
+    ("POST", "/api/documents/merge_as_versions/", 403): (
+        "a user without the change permission is answered with HttpResponseForbidden, text/html "
+        "(PLMCP-24)"
+    ),
     ("GET", "/api/documents/", 200): (
         "`fields=` drops properties the schema requires, and custom field values can be booleans "
         "and id lists, which the value's oneOf omits (PLMCP-10)"
@@ -310,6 +324,8 @@ def _field_problems(name: str, part: MIMEPart, kind: Json) -> list[str]:
     text = "" if is_file else cast("str", part.get_content())
     if not is_file and len(text) < cast("int", kind.get("minLength", 0)):
         problems.append(f"{name} is shorter than {kind['minLength']}")
+    if not is_file and len(text) > cast("int", kind.get("maxLength", len(text))):
+        problems.append(f"{name} is longer than {kind['maxLength']}")
     if name == "custom_fields":  # untyped in the schema; Paperless parses it as JSON
         try:
             _ = cast("object", json.loads(text))

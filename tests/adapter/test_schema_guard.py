@@ -280,3 +280,99 @@ def test_the_document_must_be_a_file_part_not_a_text_field() -> None:
 def test_valid_custom_fields_pass() -> None:
     check_request(upload({"custom_fields": '{"1": "a", "2": [3, 4], "3": true}'}))
     check_request(upload({"custom_fields": "[1, 2]"}))
+
+
+# The version endpoints of PLMCP-24
+
+HTML = {"Content-Type": "text/html"}
+
+
+def version_form(
+    fields: dict[str, str], *, document: bool = True, path: str = "/api/documents/1/update_version/"
+) -> httpx2.Request:
+    """A multipart version upload; `document=False` leaves out the one required part."""
+    files = (
+        {"document": ("v2.pdf", b"%PDF-1.4", "application/pdf")} if document else {"t": ("", b"")}
+    )
+    request = httpx2.Request("POST", BASE_URL + path, data=fields, files=files, headers=HEADERS)
+    _ = request.read()
+    return request
+
+
+def test_a_version_upload_form_with_and_without_a_label_passes() -> None:
+    check_request(version_form({}))
+    check_request(version_form({"version_label": "final"}))
+    check_request(version_form({"version_label": "x" * 64}))
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [
+        pytest.param(version_form({"title": "t"}), id="undeclared field"),
+        pytest.param(version_form({}, document=False), id="no document"),
+        pytest.param(version_form({"version_label": "x" * 65}), id="a label over 64 characters"),
+        pytest.param(
+            httpx2.Request(
+                "POST",
+                BASE_URL + "/api/documents/1/update_version/",
+                json={"version_label": "x"},
+                headers=HEADERS,
+            ),
+            id="JSON instead of a form",
+        ),
+    ],
+)
+def test_a_version_upload_form_outside_the_schema_is_rejected(request_: httpx2.Request) -> None:
+    with pytest.raises(SchemaViolationError):
+        check_request(request_)
+
+
+def test_the_label_patch_and_the_merge_body_are_checked_against_their_schemas() -> None:
+    label = httpx2.Request(
+        "PATCH",
+        BASE_URL + "/api/documents/1/versions/2/",
+        json={"version_label": None},
+        headers=HEADERS,
+    )
+    merge = httpx2.Request(
+        "POST",
+        BASE_URL + "/api/documents/merge_as_versions/",
+        json={"documents": [1, 2], "root_document_id": 1, "version_label": "x"},
+        headers=HEADERS,
+    )
+    check_request(label)
+    check_request(merge)
+    for bad in (
+        httpx2.Request(
+            "PATCH",
+            BASE_URL + "/api/documents/1/versions/2/",
+            json={"version_label": "x" * 65},
+            headers=HEADERS,
+        ),
+        httpx2.Request(
+            "POST",
+            BASE_URL + "/api/documents/merge_as_versions/",
+            json={"documents": [1, 2]},
+            headers=HEADERS,
+        ),
+    ):
+        with pytest.raises(SchemaViolationError):
+            check_request(bad)
+
+
+def test_deleting_a_version_is_answered_200_with_the_current_version_not_204() -> None:
+    request = httpx2.Request("DELETE", BASE_URL + "/api/documents/1/versions/2/", headers=HEADERS)
+
+    check_response(request, httpx2.Response(200, json={"result": "OK", "current_version_id": 1}))
+    check_response(request, httpx2.Response(400, text="Cannot delete the root", headers=HTML))
+
+
+def test_a_viewer_merging_is_answered_with_html() -> None:
+    request = httpx2.Request(
+        "POST",
+        BASE_URL + "/api/documents/merge_as_versions/",
+        json={"documents": [1, 2], "root_document_id": 1},
+        headers=HEADERS,
+    )
+
+    check_response(request, httpx2.Response(403, text="Insufficient permissions", headers=HTML))

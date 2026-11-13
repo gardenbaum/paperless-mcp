@@ -34,9 +34,11 @@ if TYPE_CHECKING:
     from paperless_mcp.services.taxonomy import TaxonomyResolver
     from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
     from paperless_mcp.services.uploads import UploadService
+    from paperless_mcp.services.version_uploads import VersionUploadService
+    from paperless_mcp.services.versions import VersionService
 
 # Every toolset; each tool carries exactly one of them as its only tag.
-TOOLSETS: Final = frozenset({"core", "ai"})
+TOOLSETS: Final = frozenset({"core", "ai", "versions"})
 
 # Tools whose result is an image or a file as MCP content blocks, with no output schema and no
 # structured content (decision-11); every other tool has a typed return model (decision-4).
@@ -63,6 +65,11 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "create_taxonomy_item": "core",
     "update_taxonomy_item": "core",
     "delete_taxonomy_item": "core",
+    "list_document_versions": "versions",
+    "upload_document_version": "versions",
+    "set_document_version_label": "versions",
+    "delete_document_version": "versions",
+    "merge_documents_as_versions": "versions",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
@@ -202,6 +209,47 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=False,
         open_world_hint=False,
     ),
+    "list_document_versions": ToolAnnotations(
+        title="List document versions",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Not destructive and not idempotent (decision-6): it adds a version and takes nothing away
+    # (the older versions stay), but every call adds one, also for content already held.
+    "upload_document_version": ToolAnnotations(
+        title="Upload document version",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    # Not destructive: it only sets the one label the caller named, which is the whole request.
+    "set_document_version_label": ToolAnnotations(
+        title="Set document version label",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6): the version goes to the Paperless trash, from where it can be
+    # restored, and the document then shows the version before it.
+    "delete_document_version": ToolAnnotations(
+        title="Delete document version",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6): the merged documents vanish for good, no trash, with their
+    # metadata and notes; repeating the call fails because they are gone.
+    "merge_documents_as_versions": ToolAnnotations(
+        title="Merge documents as versions",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
 }
 
 logger = logging.getLogger(__name__)
@@ -237,6 +285,8 @@ class Services:
     tasks: TaskService
     ai: AiService
     uploads: UploadService
+    versions: VersionService
+    version_uploads: VersionUploadService
 
 
 def services(ctx: Context) -> Services:

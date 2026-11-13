@@ -18,6 +18,7 @@ write its contract tests.
 """
 
 import functools
+import hashlib
 import re
 import uuid
 from dataclasses import dataclass, field, replace
@@ -67,7 +68,12 @@ from paperless_mcp.domain.instance import (
 )
 from paperless_mcp.domain.tasks import TaskState, TaskStatus
 from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyDetail, TaxonomyItem
-from paperless_mcp.paperless.documents import beyond_last_page, unseen_document, unseen_note
+from paperless_mcp.paperless.documents import (
+    beyond_last_page,
+    unseen_document,
+    unseen_note,
+    unseen_version,
+)
 from paperless_mcp.paperless.errors import ai_disabled
 from paperless_mcp.paperless.tasks import not_found
 
@@ -84,9 +90,12 @@ if TYPE_CHECKING:
         TaxonomyValues,
         WritableKind,
     )
+    from paperless_mcp.domain.versions import VersionUpload
 
 # Paperless's max_length of document titles and tag names.
 MAX_TITLE = 128
+# And of version labels.
+MAX_LABEL = 64
 
 VERSION = "3.4.2"
 API_VERSION = 10
@@ -243,6 +252,15 @@ NO_AI_SUGGESTIONS = AiSuggestions(
 CHAT_NO_CONTENT = "Sorry, I couldn't find any content to answer your question."
 
 
+@dataclass(frozen=True)
+class FakeFile:
+    """The file of one version of a document, and the text Paperless read from it."""
+
+    original: bytes
+    archive: bytes | None
+    content: str
+
+
 @dataclass(kw_only=True)
 class FakeDocument(Owned):
     """A document.
@@ -269,6 +287,9 @@ class FakeDocument(Owned):
     # Newest first, as Paperless sends it; a "create" entry holds the OCR text as `content`.
     history: list[HistoryEntry] = field(default_factory=list[HistoryEntry])
     versions: list[DocumentVersion] = field(default_factory=list[DocumentVersion])
+    # The file of every version by version id, filled in when the document gets a second version
+    # (the root's file is then kept here); `original`, `archive` and `content` are the newest's.
+    version_files: dict[int, FakeFile] = field(default_factory=dict[int, FakeFile])
     suggestions: Suggestions = field(default_factory=lambda: NO_SUGGESTIONS)
     ai_suggestions: AiSuggestions = field(default_factory=lambda: NO_AI_SUGGESTIONS)
     # The name of the uploaded file; the seed's files are named after the title.
@@ -279,8 +300,13 @@ class FakeDocument(Owned):
     thumbnail: bytes = THUMBNAIL
 
     def __post_init__(self) -> None:
-        """Name the file after the title unless given; a rename keeps the file's name."""
+        """Name the file after the title unless given; a rename keeps the file's name.
+
+        A document made without versions gets its root version, as every Paperless document has.
+        """
         self.file_name = self.file_name or f"{self.title}.pdf"
+        if not self.versions:
+            self.versions = [_root_version(self.id, self.original)]
 
     @property
     def original_filename(self) -> str:
@@ -386,12 +412,13 @@ def _created(document_id: int, title: str, content: str) -> HistoryEntry:
     )
 
 
-def _root_version(document_id: int) -> DocumentVersion:
+def _root_version(document_id: int, original: bytes = b"%PDF-1.4 fake original") -> DocumentVersion:
     return DocumentVersion(
         id=document_id,
         added=datetime(2026, 11, 11, 19, 47, tzinfo=UTC),
         version_label=None,
         is_root=True,
+        checksum=hashlib.sha256(original).hexdigest(),
     )
 
 
@@ -844,7 +871,7 @@ class FakePaperless:
                 if upload.mime_type == "application/pdf"
                 else None,
                 history=[_created(number, title, text)],
-                versions=[_root_version(number)],
+                versions=[_root_version(number, upload.content)],
             )
         )
         task.status = "success"
@@ -1032,6 +1059,228 @@ class FakePaperless:
             raise PermissionDenied(message)
         self.state.documents.remove(document)
         self.state.trash.append(document)
+
+    def _next_id(self) -> int:
+        """The next free id: versions share the id space of documents (trash included)."""
+        state = self.state
+        used = {d.id for d in (*state.documents, *state.trash)}
+        used |= {v.id for d in (*state.documents, *state.trash) for v in d.versions}
+        return max(used, default=0) + 1
+
+    def _denied(self) -> PermissionDenied:
+        return PermissionDenied("The Paperless user may not perform this action.")
+
+    def _versioned(self, document_id: int, *global_permissions: str) -> FakeDocument:
+        """The document for a change of its versions, in Paperless 3.4.2's order of checks.
+
+        The global permissions the HTTP method needs (403), the document, which only has to exist
+        (404: a hidden one is a 403 below, not a 404), then `has_perms_owner_aware`: the owner,
+        a superuser, anyone for an unowned document, or a user with a change grant (403).
+        """
+        for needed in global_permissions:
+            if not self.user.has(needed):
+                raise self._denied()
+        document = self._document(document_id)
+        if not document.changeable_by(self.user):
+            raise self._denied()
+        return document
+
+    @staticmethod
+    def _show(document: FakeDocument, file: FakeFile) -> None:
+        """Make `file` the file and text the document shows (its newest version's)."""
+        document.original, document.archive, document.content = (
+            file.original,
+            file.archive,
+            file.content,
+        )
+        document.modified = datetime.now(UTC)
+
+    @staticmethod
+    def _push(
+        document: FakeDocument, version_id: int, file: FakeFile, label: str | None, now: datetime
+    ) -> None:
+        """Add `file` as the newest version `version_id`; the root's file is kept on the first."""
+        if not document.version_files:
+            document.version_files[document.id] = FakeFile(
+                document.original, document.archive, document.content
+            )
+        document.version_files[version_id] = file
+        document.versions.insert(
+            0,
+            DocumentVersion(
+                id=version_id,
+                added=now,
+                version_label=label,
+                is_root=False,
+                checksum=hashlib.sha256(file.original).hexdigest(),
+            ),
+        )
+        FakePaperless._show(document, file)
+
+    @write
+    async def upload_document_version(self, document_id: int, upload: VersionUpload) -> str:
+        """`DocumentWriter.upload_document_version` (the `update_version` action).
+
+        Like `upload_document`, consumption is immediate: the task names the new version, which
+        becomes the newest. The document keeps its metadata, its MIME type and its first file
+        name. Probed on 3.4.2: a file type it cannot consume and a label over 64 characters are
+        400s; a blank label is stored as none; the same content again is a second version.
+
+        Order: the global `add_document` permission (403, the HTTP method's), the form (400), the
+        document (404), then `change_document` and the object (403, see `_versioned`).
+
+        Raises:
+            PermissionDenied: See above.
+            Validation: Paperless's 400 for the form, with its message.
+        """
+        if not self.user.has("add_document"):
+            raise self._denied()
+        if upload.mime_type not in CONSUMABLE:
+            reject("document", f"File type {upload.mime_type} not supported")
+        if upload.label is not None and len(upload.label) > MAX_LABEL:
+            reject("version_label", f"Ensure this field has no more than {MAX_LABEL} characters.")
+        document = self._versioned(document_id, "change_document")
+        now = datetime.now(UTC)
+        text = (
+            upload.content.decode(errors="replace") if upload.mime_type.startswith("text/") else ""
+        )
+        archive = upload.content + b"\n%archive" if upload.mime_type == "application/pdf" else None
+        version_id = self._next_id()
+        file = FakeFile(upload.content, archive, text)
+        self._push(document, version_id, file, upload.label or None, now)
+        task = FakeTask(
+            id=len(self.state.tasks) + 1,
+            task_id=str(uuid.uuid4()),
+            created=now,
+            finished=now,
+            status="success",
+            document_ids=(version_id,),
+        )
+        self.state.tasks.append(task)
+        return task.task_id
+
+    @write
+    async def set_version_label(
+        self, document_id: int, version_id: int, label: str | None
+    ) -> DocumentVersion:
+        """`DocumentWriter.set_version_label` (PATCH `versions/{id}/`); a blank label is none.
+
+        Order: the global `change_document` permission (403), the label (400), the document (404),
+        the object (403, see `_versioned`), the version (404).
+
+        Raises:
+            NotFound: The document has no such version (404 alike for both).
+            PermissionDenied: See above.
+            Validation: The label is longer than 64 characters.
+        """
+        if not self.user.has("change_document"):
+            raise self._denied()
+        if label is not None and len(label) > MAX_LABEL:
+            reject("version_label", f"Ensure this field has no more than {MAX_LABEL} characters.")
+        document = self._versioned(document_id)
+        found = [v for v in document.versions if v.id == version_id]
+        if not found:
+            raise unseen_version(document_id, version_id)
+        changed = found[0].model_copy(update={"version_label": label or None})
+        document.versions = [changed if v.id == version_id else v for v in document.versions]
+        return changed
+
+    @write
+    async def delete_version(self, document_id: int, version_id: int) -> int:
+        """`DocumentWriter.delete_version` (DELETE `versions/{id}/`): a soft delete.
+
+        The version row goes to the trash under its own id, and the document shows the newest
+        version that is left (its file and text). Deleting needs the delete permission, not the
+        change permission: the global `delete_document` (403), the document (404), then the
+        owner, a superuser or anyone for an unowned document (403: a change grant is not enough),
+        then the version (404) and not the root (400).
+
+        Raises:
+            NotFound: The document has no such version.
+            PermissionDenied: See above.
+            Validation: The version is the root.
+        """
+        if not self.user.has("delete_document"):
+            raise self._denied()
+        document = self._document(document_id)
+        if not self.user.may_change_object(document):
+            raise self._denied()
+        found = [v for v in document.versions if v.id == version_id]
+        if not found:
+            raise unseen_version(document_id, version_id)
+        if found[0].is_root:
+            reject(
+                "version", "Cannot delete the root/original version. Delete the document instead."
+            )
+        document.versions = [v for v in document.versions if v.id != version_id]
+        gone = document.version_files.pop(version_id)
+        self.state.trash.append(
+            FakeDocument(
+                id=version_id,
+                title=document.title,
+                owner=document.owner,
+                versions=[found[0]],
+                original=gone.original,
+                archive=gone.archive,
+                content=gone.content,
+            )
+        )
+        current = document.versions[0]
+        self._show(document, document.version_files[current.id])
+        return current.id
+
+    @write
+    async def merge_as_versions(
+        self, root_id: int, source_ids: Sequence[int], label: str | None
+    ) -> None:
+        """`DocumentWriter.merge_as_versions`: the sources vanish, their files become versions.
+
+        Probed on 3.4.2: it merges at once; the sources are removed for good (no trash) and
+        keep nothing but their file; the last source becomes the newest version; a source with
+        versions, a version as source, a duplicate or an unknown id and a label with several
+        sources are 400s. The form is checked first (it does not look at who may see what: a
+        document the user may not see is a 403 below, not a missing one), then, for anyone but a
+        superuser: the global `change_document` and a change
+        grant or ownership of every document, ownership (or no owner) of every document, and the
+        global `delete_document` (403), because the sources stop existing.
+
+        Raises:
+            PermissionDenied: See above.
+            Validation: Paperless's 400, with its message.
+        """
+        state = self.state
+        wanted = [root_id, *source_ids]
+        seen = {d.id: d for d in state.documents}
+        child_versions = {v.id for d in state.documents for v in d.versions if not v.is_root}
+        if len(set(wanted)) != len(wanted) or not set(wanted) <= (seen.keys() | child_versions):
+            reject("documents", "Some documents in documents don't exist or were specified twice.")
+        if child_versions & set(wanted):
+            reject("non_field_errors", "Only top-level documents can be merged as versions.")
+        if label is not None and len(source_ids) != 1:
+            reject(
+                "non_field_errors",
+                "version_label can only be used when merging one source document.",
+            )
+        if any(len(seen[n].versions) > 1 for n in source_ids):
+            reject(
+                "non_field_errors",
+                "Documents with existing versions cannot be merged into another document.",
+            )
+        owned = all(seen[n].owner in {None, self.user.id} for n in wanted)
+        changeable = all(seen[n].changeable_by(self.user) for n in wanted)
+        if not self.user.is_superuser and not (
+            self.user.has("change_document")
+            and changeable
+            and owned
+            and self.user.has("delete_document")
+        ):
+            raise self._denied()
+        root = seen[root_id]
+        for number in source_ids:
+            source = seen[number]
+            file = FakeFile(source.original, source.archive, source.content)
+            self._push(root, number, file, label, datetime.now(UTC))
+            state.documents.remove(source)
 
     def _owned(self, kind: WritableKind) -> list[FakeTaxonomy]:
         """The objects of a kind with owners (everything but custom fields)."""

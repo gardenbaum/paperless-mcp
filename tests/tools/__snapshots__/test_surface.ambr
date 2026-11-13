@@ -933,6 +933,84 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'versions',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Delete document version',
+      }),
+      'description': '''
+        Delete one version of a document by moving it to the Paperless trash.
+        
+        Two steps: call without confirm first. Nothing is deleted and the error names the version
+        and what the document shows afterwards, with confirm=true to pass. If it is the newest
+        version, the document's file and text revert to the version before it. The root version (the
+        original upload) cannot be deleted this way: delete the whole document with delete_document.
+        The trash keeps the version until it is emptied; restore it in the Paperless web UI or with
+        the trash toolset if enabled. Needs the permission to delete documents, and the user must own
+        the document, be a superuser, or the document must be unowned (a change grant is not enough).
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'version_id': dict({
+            'description': "Version id, from list_document_versions (the root's is the document's).",
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'version_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'delete_document_version',
+      'outputSchema': dict({
+        'description': 'A version that was deleted; the document and its other versions stay.',
+        'properties': dict({
+          'current_version_id': dict({
+            'description': 'The newest version that is left: downloads and text show it.',
+            'type': 'integer',
+          }),
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'message': dict({
+            'description': 'What happened and how to get the version back.',
+            'type': 'string',
+          }),
+          'version_id': dict({
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'version_id',
+          'current_version_id',
+          'message',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Delete document version',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'core',
           ]),
         }),
@@ -2029,6 +2107,18 @@
                       'format': 'date-time',
                       'type': 'string',
                     }),
+                    'checksum': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'default': None,
+                      'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+                    }),
                     'id': dict({
                       'type': 'integer',
                     }),
@@ -2687,6 +2777,118 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'versions',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List document versions',
+      }),
+      'description': '''
+        List the file versions of a document, newest first.
+        
+        The newest version is the file and text the document shows (get_document_content,
+        download_document); the root is the original upload. Each version has an id, its upload
+        time, an optional label and the checksum of its file (equal checksums are the same file).
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'list_document_versions',
+      'outputSchema': dict({
+        'description': 'The file versions of a document, newest first.',
+        'properties': dict({
+          'current_version_id': dict({
+            'description': 'The newest version: the file downloads and the text show.',
+            'type': 'integer',
+          }),
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'title': dict({
+            'type': 'string',
+          }),
+          'versions': dict({
+            'items': dict({
+              'description': 'One file version of a document.',
+              'properties': dict({
+                'added': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'checksum': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'is_root': dict({
+                  'description': 'True for the original upload.',
+                  'type': 'boolean',
+                }),
+                'version_label': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+              }),
+              'required': list([
+                'id',
+                'added',
+                'version_label',
+                'is_root',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'title',
+          'current_version_id',
+          'versions',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List document versions',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'core',
           ]),
         }),
@@ -2871,6 +3073,149 @@
         'type': 'object',
       }),
       'title': 'List taxonomy',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'versions',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Merge documents as versions',
+      }),
+      'description': '''
+        Merge documents into another document as its newest versions.
+        
+        The merged documents vanish for good (not even into the trash): their titles, tags,
+        correspondents, notes and other metadata are lost and only their files stay, as versions of
+        the root document, which keeps its own metadata. Two steps: call without confirm first.
+        Nothing is merged and the error names the documents and what would happen, with confirm=true
+        to pass. Documents that already have versions of their own cannot be merged in. Needs the
+        permissions to change and to delete documents, and the user must own every document (or be a
+        superuser, or the documents must be unowned); a change grant is not enough.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'label': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Version label (at most 64 characters) for the new version; only when exactly one document is merged.',
+          }),
+          'root_document_id': dict({
+            'description': 'The document that keeps its identity and gets the new versions.',
+            'type': 'integer',
+          }),
+          'source_document_ids': dict({
+            'description': 'The documents whose files become versions of the root, in this order (the last one newest); at most 20, none with versions of its own.',
+            'items': dict({
+              'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+        }),
+        'required': list([
+          'root_document_id',
+          'source_document_ids',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'merge_documents_as_versions',
+      'outputSchema': dict({
+        'description': 'Documents that were merged into another document as its newest versions.',
+        'properties': dict({
+          'document_id': dict({
+            'description': 'The document that now holds the versions.',
+            'type': 'integer',
+          }),
+          'merged_document_ids': dict({
+            'description': 'The documents that were merged in; they no longer exist on their own.',
+            'items': dict({
+              'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'versions': dict({
+            'description': 'Newest first.',
+            'items': dict({
+              'description': 'One file version of a document.',
+              'properties': dict({
+                'added': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'checksum': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'is_root': dict({
+                  'description': 'True for the original upload.',
+                  'type': 'boolean',
+                }),
+                'version_label': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+              }),
+              'required': list([
+                'id',
+                'added',
+                'version_label',
+                'is_root',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'merged_document_ids',
+          'versions',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Merge documents as versions',
     }),
     dict({
       '_meta': dict({
@@ -3421,6 +3766,117 @@
         'type': 'object',
       }),
       'title': 'Search documents',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'versions',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Set document version label',
+      }),
+      'description': '''
+        Set or clear the label of one version of a document, the root version's too.
+        
+        Labels are free text (e.g. 'signed copy') and only help tell versions apart; nothing else
+        changes. Needs the permission to change documents and ownership of the document or a change
+        grant on it.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'label': dict({
+            'description': 'The new label, at most 64 characters; an empty string clears it.',
+            'type': 'string',
+          }),
+          'version_id': dict({
+            'description': "Version id, from list_document_versions (the root's is the document's).",
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'version_id',
+          'label',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'set_document_version_label',
+      'outputSchema': dict({
+        'description': 'A version after its label was set.',
+        'properties': dict({
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'version': dict({
+            'description': 'One file version of a document.',
+            'properties': dict({
+              'added': dict({
+                'format': 'date-time',
+                'type': 'string',
+              }),
+              'checksum': dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+                'default': None,
+                'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+              }),
+              'id': dict({
+                'type': 'integer',
+              }),
+              'is_root': dict({
+                'description': 'True for the original upload.',
+                'type': 'boolean',
+              }),
+              'version_label': dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'null',
+                  }),
+                ]),
+              }),
+            }),
+            'required': list([
+              'id',
+              'added',
+              'version_label',
+              'is_root',
+            ]),
+            'type': 'object',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'version',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Set document version label',
     }),
     dict({
       '_meta': dict({
@@ -4331,6 +4787,18 @@
                       'format': 'date-time',
                       'type': 'string',
                     }),
+                    'checksum': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'default': None,
+                      'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+                    }),
                     'id': dict({
                       'type': 'integer',
                     }),
@@ -5060,6 +5528,163 @@
         'type': 'object',
       }),
       'title': 'Upload document',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'versions',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Upload document version',
+      }),
+      'description': "Upload a file, sent as base64 content, to a document as a new version. The new version becomes the newest one: from then on the document's file, download and text are the new file's, while title, tags and other metadata stay and the older versions are kept. The type comes from the content, not the name: PDF, images, plain text and CSV (Office, OpenDocument and RTF only if Paperless runs Tika). Paperless consumes the file later: the result holds the task_id and, with wait_seconds, the version_id; a problem found only then shows as state failure. Each call adds a version, also for content Paperless already holds (no duplicate check). Needs the permissions to add and change documents, and the user must own the document, hold a change grant on it, or be a superuser, or the document must be unowned.",
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'content_base64': dict({
+            'description': "The file's bytes as standard base64 (RFC 4648) on one line, without a data: prefix. The server refuses files over its size limit (10 MiB by default).",
+            'minLength': 1,
+            'type': 'string',
+          }),
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+          'filename': dict({
+            'description': "The file's name, e.g. 'Rechnung März v2.pdf'. Directories are dropped, other characters (non-ASCII too) are kept.",
+            'minLength': 1,
+            'type': 'string',
+          }),
+          'label': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Version label, at most 64 characters; default: none.',
+          }),
+          'wait_seconds': dict({
+            'default': 0,
+            'description': 'Wait up to this many seconds for Paperless to consume the file and return the new version_id; more than 30 is cut to 30. 0 returns the task id at once; follow it with get_task.',
+            'minimum': 0,
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'content_base64',
+          'filename',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'upload_document_version',
+      'outputSchema': dict({
+        'description': 'A file Paperless accepted as a new version and, if it was waited for, its outcome.',
+        'properties': dict({
+          'document_id': dict({
+            'description': 'The document the version belongs to.',
+            'type': 'integer',
+          }),
+          'filename': dict({
+            'description': 'The name the file was uploaded under.',
+            'type': 'string',
+          }),
+          'message': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Why consumption failed, or why the state is unknown.',
+          }),
+          'mime_type': dict({
+            'description': 'The type found in the content.',
+            'type': 'string',
+          }),
+          'size_bytes': dict({
+            'type': 'integer',
+          }),
+          'state': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'pending',
+                  'started',
+                  'success',
+                  'failure',
+                  'revoked',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'const': 'unknown',
+                'type': 'string',
+              }),
+            ]),
+            'description': 'pending, started, success, failure or revoked; unknown when the task could not be read after the upload (e.g. this user may not view tasks): the upload was accepted all the same.',
+          }),
+          'task_id': dict({
+            'description': 'Follow it with get_task; Paperless consumes later.',
+            'type': 'string',
+          }),
+          'version_id': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The new version once consumption succeeded; else null.',
+          }),
+          'wait': dict({
+            'description': 'not_requested: wait_seconds was 0; finished: consumption ended within the wait (see state); timed_out: still running, ask get_task later.',
+            'enum': list([
+              'not_requested',
+              'finished',
+              'timed_out',
+            ]),
+            'type': 'string',
+          }),
+          'waited_seconds': dict({
+            'type': 'number',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'task_id',
+          'state',
+          'message',
+          'document_id',
+          'version_id',
+          'web_url',
+          'wait',
+          'waited_seconds',
+          'filename',
+          'mime_type',
+          'size_bytes',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Upload document version',
     }),
   ])
 # ---
@@ -6796,6 +7421,18 @@
                       'format': 'date-time',
                       'type': 'string',
                     }),
+                    'checksum': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'default': None,
+                      'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+                    }),
                     'id': dict({
                       'type': 'integer',
                     }),
@@ -9097,6 +9734,18 @@
                     'added': dict({
                       'format': 'date-time',
                       'type': 'string',
+                    }),
+                    'checksum': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'default': None,
+                      'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
                     }),
                     'id': dict({
                       'type': 'integer',
@@ -10837,6 +11486,18 @@
                       'format': 'date-time',
                       'type': 'string',
                     }),
+                    'checksum': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'default': None,
+                      'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+                    }),
                     'id': dict({
                       'type': 'integer',
                     }),
@@ -11490,6 +12151,118 @@
         'type': 'object',
       }),
       'title': 'Get task',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'versions',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List document versions',
+      }),
+      'description': '''
+        List the file versions of a document, newest first.
+        
+        The newest version is the file and text the document shows (get_document_content,
+        download_document); the root is the original upload. Each version has an id, its upload
+        time, an optional label and the checksum of its file (equal checksums are the same file).
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'document_id': dict({
+            'description': 'Document id, from search_documents.',
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'document_id',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'list_document_versions',
+      'outputSchema': dict({
+        'description': 'The file versions of a document, newest first.',
+        'properties': dict({
+          'current_version_id': dict({
+            'description': 'The newest version: the file downloads and the text show.',
+            'type': 'integer',
+          }),
+          'document_id': dict({
+            'type': 'integer',
+          }),
+          'title': dict({
+            'type': 'string',
+          }),
+          'versions': dict({
+            'items': dict({
+              'description': 'One file version of a document.',
+              'properties': dict({
+                'added': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'checksum': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'is_root': dict({
+                  'description': 'True for the original upload.',
+                  'type': 'boolean',
+                }),
+                'version_label': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+              }),
+              'required': list([
+                'id',
+                'added',
+                'version_label',
+                'is_root',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'web_url': dict({
+            'description': 'Link to the document in the Paperless web UI.',
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_id',
+          'title',
+          'current_version_id',
+          'versions',
+          'web_url',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List document versions',
     }),
     dict({
       '_meta': dict({
@@ -12529,5 +13302,189 @@
       'type': 'object',
     }),
     'title': 'Upload document',
+  })
+# ---
+# name: test_upload_document_version_as_a_stdio_server_with_an_allowlist_offers_it
+  dict({
+    '_meta': dict({
+      'fastmcp': dict({
+        'tags': list([
+          'versions',
+        ]),
+      }),
+    }),
+    'annotations': dict({
+      'destructiveHint': False,
+      'idempotentHint': False,
+      'openWorldHint': False,
+      'readOnlyHint': False,
+      'title': 'Upload document version',
+    }),
+    'description': "Upload a file to a document as a new version. Give the file either as path (an absolute path of a regular file inside the directories the operator allowed; symlinks are followed only to files inside them) or as base64 content_base64 with a filename. The new version becomes the newest one: from then on the document's file, download and text are the new file's, while title, tags and other metadata stay and the older versions are kept. The type comes from the content, not the name: PDF, images, plain text and CSV (Office, OpenDocument and RTF only if Paperless runs Tika). Paperless consumes the file later: the result holds the task_id and, with wait_seconds, the version_id; a problem found only then shows as state failure. Each call adds a version, also for content Paperless already holds (no duplicate check). Needs the permissions to add and change documents, and the user must own the document, hold a change grant on it, or be a superuser, or the document must be unowned.",
+    'inputSchema': dict({
+      'additionalProperties': False,
+      'properties': dict({
+        'content_base64': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': "The file's bytes as standard base64 on one line, without a data: prefix; needs filename. Not together with path.",
+        }),
+        'document_id': dict({
+          'description': 'Document id, from search_documents.',
+          'type': 'integer',
+        }),
+        'filename': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': "The name to upload under, e.g. 'Rechnung März v2.pdf'; required with content_base64, default with path: the file's own name. Directories are dropped.",
+        }),
+        'label': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Version label, at most 64 characters; default: none.',
+        }),
+        'path': dict({
+          'anyOf': list([
+            dict({
+              'format': 'path',
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Absolute path of the file on the machine this server runs on. Only files inside the directories the operator allowed can be read; anything else is not found. Not together with content_base64.',
+        }),
+        'wait_seconds': dict({
+          'default': 0,
+          'description': 'Wait up to this many seconds for Paperless to consume the file and return the new version_id; more than 30 is cut to 30. 0 returns the task id at once; follow it with get_task.',
+          'minimum': 0,
+          'type': 'integer',
+        }),
+      }),
+      'required': list([
+        'document_id',
+      ]),
+      'type': 'object',
+    }),
+    'name': 'upload_document_version',
+    'outputSchema': dict({
+      'description': 'A file Paperless accepted as a new version and, if it was waited for, its outcome.',
+      'properties': dict({
+        'document_id': dict({
+          'description': 'The document the version belongs to.',
+          'type': 'integer',
+        }),
+        'filename': dict({
+          'description': 'The name the file was uploaded under.',
+          'type': 'string',
+        }),
+        'message': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'description': 'Why consumption failed, or why the state is unknown.',
+        }),
+        'mime_type': dict({
+          'description': 'The type found in the content.',
+          'type': 'string',
+        }),
+        'size_bytes': dict({
+          'type': 'integer',
+        }),
+        'state': dict({
+          'anyOf': list([
+            dict({
+              'enum': list([
+                'pending',
+                'started',
+                'success',
+                'failure',
+                'revoked',
+              ]),
+              'type': 'string',
+            }),
+            dict({
+              'const': 'unknown',
+              'type': 'string',
+            }),
+          ]),
+          'description': 'pending, started, success, failure or revoked; unknown when the task could not be read after the upload (e.g. this user may not view tasks): the upload was accepted all the same.',
+        }),
+        'task_id': dict({
+          'description': 'Follow it with get_task; Paperless consumes later.',
+          'type': 'string',
+        }),
+        'version_id': dict({
+          'anyOf': list([
+            dict({
+              'type': 'integer',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'description': 'The new version once consumption succeeded; else null.',
+        }),
+        'wait': dict({
+          'description': 'not_requested: wait_seconds was 0; finished: consumption ended within the wait (see state); timed_out: still running, ask get_task later.',
+          'enum': list([
+            'not_requested',
+            'finished',
+            'timed_out',
+          ]),
+          'type': 'string',
+        }),
+        'waited_seconds': dict({
+          'type': 'number',
+        }),
+        'web_url': dict({
+          'description': 'Link to the document in the Paperless web UI.',
+          'type': 'string',
+        }),
+      }),
+      'required': list([
+        'task_id',
+        'state',
+        'message',
+        'document_id',
+        'version_id',
+        'web_url',
+        'wait',
+        'waited_seconds',
+        'filename',
+        'mime_type',
+        'size_bytes',
+      ]),
+      'type': 'object',
+    }),
+    'title': 'Upload document version',
   })
 # ---

@@ -447,3 +447,28 @@ reason = "'UTF-8' and 'utf-8' name the same codec."
 mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁupload_document__mutmut_49"
 function_hash = "ee09c21864dc"
 reason = "httpx2 upper-cases the method; 'post' sends the same POST."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁupload_document_version__mutmut_19"
+function_hash = "539d2f3728d3"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁset_version_label__mutmut_11"
+function_hash = "2d8948cae376"
+reason = "httpx2 upper-cases the method when it builds the request, so 'patch' sends exactly what 'PATCH' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_version__mutmut_5"
+function_hash = "ef2ece8f2e84"
+reason = "request() only tests retry for truth (`if retry`), so None and False both switch retries off."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_version__mutmut_11"
+function_hash = "ef2ece8f2e84"
+reason = "httpx2 upper-cases the method when it builds the request, so 'delete' sends exactly what 'DELETE' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁmerge_as_versions__mutmut_20"
+function_hash = "bafdc9f7327b"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
