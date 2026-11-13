@@ -42,6 +42,12 @@ from fakes.custom_field_query import compile_query
 from fakes.document_values import coerce, reject, tag_closure
 from fakes.taxonomy_rules import check_colour, check_match, check_name, check_path, with_ids
 from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer, ChatSource
+from paperless_mcp.domain.bulk import (
+    FieldsChange,
+    ReferenceChange,
+    TagsChange,
+    TrashDocuments,
+)
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
     DocumentFile,
@@ -67,6 +73,7 @@ from paperless_mcp.domain.instance import (
 )
 from paperless_mcp.domain.tasks import TaskState, TaskStatus
 from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyDetail, TaxonomyItem
+from paperless_mcp.paperless.bulk import documents_refused, objects_refused
 from paperless_mcp.paperless.documents import beyond_last_page, unseen_document, unseen_note
 from paperless_mcp.paperless.errors import ai_disabled
 from paperless_mcp.paperless.tasks import not_found
@@ -77,6 +84,12 @@ if TYPE_CHECKING:
 
     from _typeshed import SupportsRichComparison
 
+    from paperless_mcp.domain.bulk import (
+        BulkKind,
+        DocumentChange,
+        ObjectPermissions,
+        PermissionsChange,
+    )
     from paperless_mcp.domain.documents import FileVersion
     from paperless_mcp.domain.taxonomy import (
         MatchingAlgorithm,
@@ -162,6 +175,9 @@ class Owned:
     owner: int | None = None
     viewers: set[int] = field(default_factory=set[int])
     editors: set[int] = field(default_factory=set[int])
+    # Group grants are stored but give nobody access: group membership is not modelled.
+    view_groups: set[int] = field(default_factory=set[int])
+    change_groups: set[int] = field(default_factory=set[int])
 
     def changeable_by(self, user: FakeUser) -> bool:
         """Paperless's `has_perms_owner_aware(user, "change_document", obj)`."""
@@ -335,6 +351,8 @@ class FakeState:
     tasks: list[FakeTask] = field(default_factory=list[FakeTask])
     # Deleted documents, newest last; reads no longer see them, the Paperless trash does.
     trash: list[FakeDocument] = field(default_factory=list[FakeDocument])
+    # The ids of the documents a bulk reprocess queued, in order (the fake does no OCR).
+    reprocessed: list[int] = field(default_factory=list[int])
     # The id of the last note created: note ids are global and never reused.
     last_note_id: int = 1
     system_status: SystemStatus = HEALTHY
@@ -907,11 +925,14 @@ class FakePaperless:
                 message = "document with this archive serial number already exists."
                 reject("archive_serial_number", message)
 
-    def _mirror_links(self, document: FakeDocument, new: dict[int, JsonValue]) -> None:
+    def _mirror_links(
+        self, document: FakeDocument, new: dict[int, JsonValue], *, check: bool = True
+    ) -> None:
         """Keep document links symmetrical like Paperless: link and unlink the other side.
 
         Linking needs change permission on every document linked to (403 otherwise, also for a
-        document the user cannot see); the other side keeps an empty list when unlinked.
+        document the user cannot see); the other side keeps an empty list when unlinked. A bulk
+        edit (``check=False``) does not check that permission.
         """
         link_fields = [f.id for f in self.state.custom_fields if f.data_type == "documentlink"]
 
@@ -920,7 +941,7 @@ class FakePaperless:
 
         by_id = {d.id: d for d in self.state.documents}
         added = {n: targets(new, n) - targets(document.custom_fields, n) for n in link_fields}
-        if any(not self.user.may_change(by_id[t]) for ids in added.values() for t in ids):
+        if check and any(not self.user.may_change(by_id[t]) for ids in added.values() for t in ids):
             message = "Insufficient permissions."
             raise PermissionDenied(message)
         for number in link_fields:
@@ -1236,6 +1257,10 @@ class FakePaperless:
         """
         self._allowed("delete", kind)
         _ = self._target(kind, item_id)
+        self._remove(kind, item_id)
+
+    def _remove(self, kind: WritableKind, item_id: int) -> None:
+        """Delete the object (if it still exists): documents lose it, a tag takes its children."""
         state = self.state
         if kind == "custom_field":
             state.custom_fields[:] = [f for f in state.custom_fields if f.id != item_id]
@@ -1256,6 +1281,214 @@ class FakePaperless:
                 document.document_type = None
             if kind == "storage_path" and document.storage_path == item_id:
                 document.storage_path = None
+
+    # --- BulkWriter
+
+    @write
+    async def bulk_edit_documents(
+        self, document_ids: Sequence[int], change: DocumentChange
+    ) -> None:
+        """`BulkWriter.bulk_edit_documents` (BulkEditView).
+
+        Order in Paperless 3.4.2: the request is validated as a whole (400: unknown or repeated
+        documents, unknown tags, references or custom fields, wrong values), then permissions
+        (403: the global `change_document`, change permission on every document, hidden ones
+        included; a deletion also needs ownership and `delete_document`), then everything is
+        applied. An empty selection is accepted.
+        """
+        state = self.state
+        known = {d.id: d for d in state.documents}
+        if len(set(document_ids)) != len(document_ids) or not set(document_ids) <= known.keys():
+            reject("documents", "Some documents in documents don't exist or were specified twice.")
+        documents = [known[number] for number in document_ids]
+        apply = self._plan(change)
+        user = self.user
+        if not user.is_superuser:
+            allowed = user.has("change_document") and all(d.changeable_by(user) for d in documents)
+            if allowed and isinstance(change, TrashDocuments):
+                owns = all(d.owner in {None, user.id} for d in documents)
+                allowed = owns and user.has("delete_document")
+            if not allowed:
+                raise documents_refused()
+        apply(documents)
+
+    def _plan(self, change: DocumentChange) -> Callable[[list[FakeDocument]], None]:
+        """Validate ``change`` like the serializer and return what applies it to documents."""
+        state = self.state
+        if isinstance(change, TagsChange):
+            known = {t.id for t in state.tags}
+            for where, wanted in (("add_tags", change.add), ("remove_tags", change.remove)):
+                if not set(wanted) <= known:
+                    message = (
+                        f"Paperless rejected the request: Some tags in {where} "
+                        "don't exist or were specified twice."
+                    )
+                    raise Validation(message)
+            return lambda docs: self._tags(docs, change)
+        if isinstance(change, ReferenceChange):
+            table = {
+                "correspondent": state.correspondents,
+                "document_type": state.document_types,
+                "storage_path": state.storage_paths,
+            }[change.field]
+            if change.value is not None and change.value not in {o.id for o in table}:
+                label = change.field.replace("_", " ").capitalize()
+                message = f"Paperless rejected the request: {label} does not exist"
+                raise Validation(message)
+            return lambda docs: self._reference(docs, change)
+        if isinstance(change, FieldsChange):
+            return self._plan_fields(change)
+        if isinstance(change, TrashDocuments):
+            return self._trash
+        return lambda docs: state.reprocessed.extend(d.id for d in docs)
+
+    @staticmethod
+    def _reference(documents: list[FakeDocument], change: ReferenceChange) -> None:
+        for document in documents:
+            document.__dict__[change.field] = change.value
+
+    def _tags(self, documents: list[FakeDocument], change: TagsChange) -> None:
+        """Remove (with the descendants), then add (with the ancestors)."""
+        tags = {t.id: t for t in self.state.tags}
+        remove = {n for tag in change.remove for n in self._tag_tree(tag)}
+        add: list[int] = []
+        for tag in change.add:
+            step: int | None = tag
+            while step is not None and step not in add:
+                add.append(step)
+                step = tags[step].parent
+        for document in documents:
+            kept = [t for t in document.tags if t not in remove]
+            document.tags = kept + [t for t in add if t not in kept]
+
+    def _plan_fields(self, change: FieldsChange) -> Callable[[list[FakeDocument]], None]:
+        fields = {f.id: f for f in self.state.custom_fields}
+        documents = {d.id for d in self.state.documents}
+        for where, wanted in (
+            ("add_custom_fields", change.values),
+            ("remove_custom_fields", change.remove),
+        ):
+            if not set(wanted) <= fields.keys():
+                message = (
+                    f"Paperless rejected the request: Some custom fields in {where} "
+                    "don't exist or were specified twice."
+                )
+                raise Validation(message)
+        stored: dict[int, JsonValue] = {}
+        for number, value in change.values.items():
+            try:
+                stored[number] = coerce(fields[number], value, documents)
+            except ValueError as error:
+                reject(f"add_custom_fields.{number}.non_field_errors", str(error))
+
+        def apply(selected: list[FakeDocument]) -> None:
+            for document in selected:
+                new = dict(document.custom_fields)
+                for number, value in stored.items():
+                    own = isinstance(value, list) and document.id in value
+                    if own and fields[number].data_type == "documentlink":
+                        continue  # Paperless skips the field of a document that links itself
+                    new[number] = value
+                for number in change.remove:
+                    _ = new.pop(number, None)
+                self._mirror_links(document, new, check=False)
+                document.custom_fields = new
+
+        return apply
+
+    def _trash(self, documents: list[FakeDocument]) -> None:
+        for document in documents:
+            self.state.documents.remove(document)
+            self.state.trash.append(document)
+
+    def _bulk_items(
+        self, kind: BulkKind, item_ids: Sequence[int], action: str
+    ) -> list[FakeTaxonomy]:
+        """The selected objects, after validating the selection (400) and the permission (403)."""
+        rows = {o.id: o for o in self._owned(kind)}
+        if not item_ids:
+            message = "Paperless rejected the request: objects must not be empty"
+            raise Validation(message)
+        if len(set(item_ids)) != len(item_ids) or not set(item_ids) <= rows.keys():
+            message = (
+                "Paperless rejected the request: "
+                "Some ids in objects don't exist or were specified twice."
+            )
+            raise Validation(message)
+        selected = [rows[number] for number in item_ids]
+        user = self.user
+        if not user.is_superuser:
+            model = kind.replace("_", "")
+            owns = all(o.owner in {None, user.id} for o in selected)
+            if not (user.has(f"{action}_{model}") and owns):
+                raise objects_refused()
+        return selected
+
+    @write
+    async def delete_taxonomy_items(self, kind: BulkKind, item_ids: Sequence[int]) -> None:
+        """`BulkWriter.delete_taxonomy_items` (BulkEditObjectsView, operation delete).
+
+        400 for an empty, unknown or repeated selection; 403 without the global `delete_*`
+        permission or for an object another user owns (hidden ones included).
+        """
+        _ = self._bulk_items(kind, item_ids, "delete")
+        for number in item_ids:
+            self._remove(kind, number)
+
+    @write
+    async def set_taxonomy_permissions(
+        self, kind: BulkKind, item_ids: Sequence[int], change: PermissionsChange
+    ) -> None:
+        """`BulkWriter.set_taxonomy_permissions` (BulkEditObjectsView, set_permissions).
+
+        Same checks as a deletion with `change_*`, and 400 for an unknown or repeated user or
+        group. Without ``merge`` the grants replace all existing ones. An owner is set when the
+        request carries one (`null` removes it), except that ``merge`` only sets it on objects
+        without an owner and never removes one.
+        """
+        state = self.state
+        given = change.permissions
+        if given is not None:
+            lists = {
+                "users": [*given.view_users, *given.change_users],
+                "groups": [*given.view_groups, *given.change_groups],
+            }
+            known = {"users": {u.id for u in state.users}, "groups": {g.id for g in state.groups}}
+            for name, wanted in lists.items():
+                if not set(wanted) <= known[name]:
+                    message = (
+                        f"Paperless rejected the request: Some {name} in "
+                        "don't exist or were specified twice."
+                    )
+                    raise Validation(message)
+        if change.owner is not None and change.owner not in {u.id for u in state.users}:
+            reject("owner", f'Invalid pk "{change.owner}" - object does not exist.')
+        for item in self._bulk_items(kind, item_ids, "change"):
+            if "owner" in change.model_fields_set and (
+                not change.merge or (change.owner is not None and item.owner is None)
+            ):
+                item.owner = change.owner
+            if given is not None:
+                self._grant(item, given, merge=change.merge)
+
+    @staticmethod
+    def _grant(item: Owned, given: ObjectPermissions, *, merge: bool) -> None:
+        """Replace the grants of ``item`` with ``given``, or add ``given`` to them.
+
+        Granting change also grants view (3.4.2 `set_permissions_for_objects`).
+        """
+        views = set(given.view_users) | set(given.change_users)
+        changes = set(given.change_users)
+        view_groups = set(given.view_groups) | set(given.change_groups)
+        change_groups = set(given.change_groups)
+        if merge:
+            views, changes = views | item.viewers, changes | item.editors
+            view_groups, change_groups = (
+                view_groups | item.view_groups,
+                change_groups | item.change_groups,
+            )
+        item.viewers, item.editors = views, changes
+        item.view_groups, item.change_groups = view_groups, change_groups
 
     async def get_document_content(self, document_id: int) -> str:
         """`DocumentReader.get_document_content` (retrieve with `fields=content`)."""
@@ -1426,6 +1659,7 @@ def _filters(query: DocumentQuery, state: FakeState) -> list[_Match]:
         (query.added_to, lambda d: query.added_to is None or d.added.date() <= query.added_to),
         (query.owner, lambda d: d.owner == query.owner),
         (query.inbox, lambda d: bool(inbox & set(d.tags)) == query.inbox),
+        (query.ids, lambda d: d.id in query.ids),
     ]
     return [match for value, match in checks if value not in {None, ()}]
 

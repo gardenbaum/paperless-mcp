@@ -38,8 +38,10 @@ from fakes.paperless import (
     seeded,
 )
 
+from paperless_mcp.domain.bulk import ObjectPermissions
 from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations are introspected
     AiReader,
+    BulkWriter,
     DocumentReader,
     DocumentWriter,
     InstanceReader,
@@ -49,6 +51,7 @@ from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations ar
 )
 from paperless_mcp.paperless.ai import PaperlessAiReader
 from paperless_mcp.paperless.auth import StaticTokenProvider
+from paperless_mcp.paperless.bulk import PaperlessBulkWriter
 from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
 from paperless_mcp.paperless.documents import PaperlessDocumentReader, PaperlessDocumentWriter
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
@@ -59,6 +62,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
 
     from e2e.helpers import Stack
+
+    from paperless_mcp.domain.bulk import BulkKind
 
 
 # Every tag a contract test creates starts with this; the live backend deletes them again.
@@ -84,6 +89,7 @@ class Ports:
     tasks: TaskReader
     document_writes: DocumentWriter
     taxonomy_writes: TaxonomyWriter
+    bulk_writes: BulkWriter
     ai: AiReader
 
 
@@ -98,6 +104,7 @@ def fake_ports(state: FakeState, user: str) -> Ports:
         tasks=fake,
         document_writes=writer,
         taxonomy_writes=writer,
+        bulk_writes=writer,
         ai=fake,
     )
 
@@ -111,6 +118,7 @@ def live_ports(client: PaperlessClient) -> Ports:
         tasks=PaperlessTaskReader(client),
         document_writes=PaperlessDocumentWriter(client),
         taxonomy_writes=PaperlessTaxonomyWriter(client),
+        bulk_writes=PaperlessBulkWriter(client),
         ai=PaperlessAiReader(client),
     )
 
@@ -147,6 +155,20 @@ class Share(Protocol):
 
 
 @dataclass(frozen=True)
+class Grants:
+    """Who owns an object and who may view and change it, as ids (users and groups)."""
+
+    owner: int | None
+    permissions: ObjectPermissions
+
+
+class GrantsOf(Protocol):
+    """Reads the owner and the grants of one taxonomy object, bypassing the ports."""
+
+    def __call__(self, kind: BulkKind, item_id: int) -> Grants: ...
+
+
+@dataclass(frozen=True)
 class Backend:
     """One Paperless, seen through the seeded superuser, restricted user and blind user.
 
@@ -168,6 +190,8 @@ class Backend:
     share_read_only: Share
     # A user with only the given permissions and grants (see `Restricted`).
     restricted: Restricted
+    # The owner and grants of a taxonomy object (the ports do not expose them).
+    grants: GrantsOf
     # Whether the document with this id is in the trash (deleted, not yet emptied from it).
     in_trash: Callable[[int], bool]
     # Registers a document a test created through the port itself: the live backend deletes it
@@ -265,6 +289,28 @@ def fake_in_trash(state: FakeState) -> Callable[[int], bool]:
     return in_trash
 
 
+def fake_grants(state: FakeState) -> GrantsOf:
+    def grants(kind: BulkKind, item_id: int) -> Grants:
+        table = {
+            "tag": state.tags,
+            "correspondent": state.correspondents,
+            "document_type": state.document_types,
+            "storage_path": state.storage_paths,
+        }
+        [found] = [o for o in table[kind] if o.id == item_id]
+        return Grants(
+            owner=found.owner,
+            permissions=ObjectPermissions(
+                view_users=tuple(sorted(found.viewers)),
+                view_groups=tuple(sorted(found.view_groups)),
+                change_users=tuple(sorted(found.editors)),
+                change_groups=tuple(sorted(found.change_groups)),
+            ),
+        )
+
+    return grants
+
+
 def fake_backend(*, ai_enabled: bool = False) -> Backend:
     """The fake's backend; the E2E stack of `just e2e` has AI off, so that is the default."""
     state = seeded()
@@ -278,6 +324,7 @@ def fake_backend(*, ai_enabled: bool = False) -> Backend:
         new_document=fake_new_document(state),
         share_read_only=fake_share(state),
         restricted=fake_restricted(state),
+        grants=fake_grants(state),
         in_trash=fake_in_trash(state),
         track_document=lambda _document: None,
         expected_version=VERSION,
@@ -294,6 +341,36 @@ def live_in_trash(stack: Stack, document_id: int) -> bool:
         if not cast("dict[str, object]", listed.json())["next"]:
             return False
         page += 1
+
+
+def live_grants(stack: Stack) -> GrantsOf:
+    """Live `GrantsOf`: the object with `full_perms`, which is the only way to read its grants."""
+    paths = {
+        "tag": "/api/tags/",
+        "correspondent": "/api/correspondents/",
+        "document_type": "/api/document_types/",
+        "storage_path": "/api/storage_paths/",
+    }
+
+    def grants(kind: BulkKind, item_id: int) -> Grants:
+        row = cast(
+            "dict[str, object]",
+            stack.admin.get(f"{paths[kind]}{item_id}/", params={"full_perms": "true"})
+            .raise_for_status()
+            .json(),
+        )
+        given = cast("dict[str, dict[str, dict[str, list[int]]]]", row)["permissions"]
+        return Grants(
+            owner=cast("int | None", row["owner"]),
+            permissions=ObjectPermissions(
+                view_users=tuple(sorted(given["view"]["users"])),
+                view_groups=tuple(sorted(given["view"]["groups"])),
+                change_users=tuple(sorted(given["change"]["users"])),
+                change_groups=tuple(sorted(given["change"]["groups"])),
+            ),
+        )
+
+    return grants
 
 
 def delete_and_empty_trash(stack: Stack, documents: list[int]) -> None:
@@ -409,6 +486,7 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
                 new_document=new_live_document,
                 share_read_only=share_live,
                 restricted=live_restricted(stack, ports, users),
+                grants=live_grants(stack),
                 in_trash=lambda document_id: live_in_trash(stack, document_id),
                 track_document=created.append,
                 expected_version=EXPECTED_VERSION,

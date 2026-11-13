@@ -126,6 +126,7 @@ async def test_every_filter_becomes_its_paperless_parameter(make_client: ClientF
         inbox=False,
         custom_field_query=["due", "range", ["today", "in 30 days"]],
         ordering="-created",
+        ids=(8, 9),
     )
 
     _ = await PaperlessDocumentReader(make_client(server)).search_documents(
@@ -150,6 +151,7 @@ async def test_every_filter_becomes_its_paperless_parameter(make_client: ClientF
         "is_in_inbox": "false",
         "custom_field_query": '["due", "range", ["today", "in 30 days"]]',
         "ordering": "-created",
+        "id__in": "8,9",
         "page_size": "25",
     }
 

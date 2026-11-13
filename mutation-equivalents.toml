@@ -447,3 +447,17 @@ reason = "'UTF-8' and 'utf-8' name the same codec."
 mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁupload_document__mutmut_49"
 function_hash = "ee09c21864dc"
 reason = "httpx2 upper-cases the method; 'post' sends the same POST."
+
+mutant = "paperless_mcp.services.bulk_documents.x__document_ids__mutmut_2"
+function_hash = "292afe38a0f5"
+reason = "_document_ids only reads values of document-link fields, which custom_values.normalise always returns as lists, so the isinstance check is there for the type checker and `or True` changes nothing any test can reach."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.bulk.xǁPaperlessBulkWriterǁbulk_edit_documents__mutmut_21"
+function_hash = "e01711da5b0e"
+reason = "httpx2 upper-cases the method when it builds the request, so \"post\" goes out as POST; the client reads only the built request's method."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.bulk.xǁPaperlessBulkWriterǁ_objects__mutmut_11"
+function_hash = "3421113ae662"
+reason = "httpx2 upper-cases the method when it builds the request, so \"post\" goes out as POST; the client reads only the built request's method."

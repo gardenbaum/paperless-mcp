@@ -209,6 +209,7 @@ def params(query: DocumentQuery) -> dict[str, str | int]:
             None if query.custom_field_query is None else json.dumps(query.custom_field_query)
         ),
         "ordering": query.ordering,
+        "id__in": _csv(query.ids),
     }
     return {name: value for name, value in candidates.items() if value is not None}
 
