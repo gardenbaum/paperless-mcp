@@ -35,7 +35,8 @@ from paperless_mcp.services.removal import DocumentRemoval
 from paperless_mcp.services.tasks import TaskService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
 from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
-from paperless_mcp.tools import ai, core
+from paperless_mcp.services.uploads import UploadService
+from paperless_mcp.tools import ai, core, upload, upload_stdio
 from paperless_mcp.tools._shared import (
     ANNOTATIONS,
     SERVICES,
@@ -96,6 +97,10 @@ class Catalogue:
 
     Attributes:
         providers: One FastMCP provider per toolset module.
+        remote_providers: Providers added when the server offers no uploads by path: the tools
+            that exist in every mode, in their form for HTTP (and for stdio without an allowlist).
+        local_providers: Providers added instead of ``remote_providers`` when the server runs
+            over stdio with an upload allowlist: the same tools in their form with a path.
         annotations: The central annotation table, keyed by tool name.
         tool_toolsets: The toolset of every tool, keyed by tool name.
         toolsets: Every toolset name.
@@ -107,6 +112,8 @@ class Catalogue:
     tool_toolsets: Mapping[str, str]
     toolsets: frozenset[str]
     requires: Mapping[str, str]
+    remote_providers: Sequence[Provider] = ()
+    local_providers: Sequence[Provider] = ()
 
 
 CATALOGUE: Final = Catalogue(
@@ -115,6 +122,8 @@ CATALOGUE: Final = Catalogue(
     tool_toolsets=TOOL_TOOLSETS,
     toolsets=TOOLSETS,
     requires=TOOLSET_REQUIRES,
+    remote_providers=(upload.remote,),
+    local_providers=(upload_stdio.local,),
 )
 
 
@@ -152,6 +161,7 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
     ports: Callable[[PaperlessClient], Ports] = paperless_ports,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
+    stdio: bool = False,
 ) -> FastMCP:
     """Assemble the MCP server.
 
@@ -162,6 +172,9 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
         ports: Builds the ports on the connected client; tests pass fakes here.
         sleep: Waits between task polls; tests pass one that does not wait.
         clock: Measures the task wait; tests pass the clock their ``sleep`` advances.
+        stdio: Whether the server runs over stdio. Only then, and only with
+            ``settings.upload_dirs``, does ``upload_document`` take a path; in every other
+            case that parameter is in no schema (decision-7).
 
     Returns:
         The server. Starting it (its lifespan) raises the probe's ``PaperlessMcpError`` when
@@ -174,6 +187,8 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
     """
     credentials = StaticTokenProvider(paperless.token.get_secret_value())
     web_url = str(paperless.public_url or paperless.url)
+    by_path = stdio and bool(settings.upload_dirs)
+    variants = catalogue.local_providers if by_path else catalogue.remote_providers
 
     # Allowlist the selected toolsets (resources carry the tags too), then take out tools:
     # later visibility rules override earlier ones.
@@ -198,6 +213,7 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
             adapters = ports(client)
             taxonomy = TaxonomyResolver(adapters.taxonomy, credentials, ttl=TAXONOMY_TTL)
             documents = DocumentService(adapters.documents, taxonomy, web_url=web_url)
+            tasks = TaskService(adapters.tasks, sleep=sleep, clock=clock)
             services = Services(
                 instance=InstanceService(adapters.instance),
                 taxonomy=taxonomy,
@@ -217,8 +233,17 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                 ),
                 notes=NoteService(adapters.documents, adapters.document_writes, web_url=web_url),
                 removal=DocumentRemoval(adapters.documents, adapters.document_writes, taxonomy),
-                tasks=TaskService(adapters.tasks, sleep=sleep, clock=clock),
+                tasks=tasks,
                 ai=AiService(adapters.ai, taxonomy, web_url=web_url),
+                uploads=UploadService(
+                    adapters.documents,
+                    adapters.document_writes,
+                    taxonomy,
+                    tasks,
+                    web_url=web_url,
+                    max_bytes=settings.max_upload_bytes,
+                    upload_dirs=settings.upload_dirs if by_path else (),
+                ),
             )
             overview = await services.instance.probe(settings.startup_timeout)
             if overview is None:
@@ -236,7 +261,7 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
         name="paperless-mcp",
         instructions=INSTRUCTIONS,
         version=__version__,
-        providers=list(catalogue.providers),
+        providers=[*catalogue.providers, *variants],
         middleware=[CallLogging()],
         lifespan=start,
         # Only ToolError messages reach the client; any other exception becomes a generic error.

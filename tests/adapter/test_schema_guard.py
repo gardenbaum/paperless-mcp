@@ -206,3 +206,55 @@ def test_a_document_patch_may_carry_boolean_and_id_list_custom_field_values() ->
 def test_the_rest_of_a_document_patch_is_still_checked(body: object) -> None:
     with pytest.raises(SchemaViolationError):
         check_request(patch(body))
+
+
+def upload(
+    fields: dict[str, str | list[str]], *, document: bool = True, headers: dict[str, str] = HEADERS
+) -> httpx2.Request:
+    """A multipart upload; `document=False` leaves out the one required part."""
+    files = (
+        {"document": ("a.pdf", b"%PDF-1.4", "application/pdf")} if document else {"t": ("", b"")}
+    )
+    request = httpx2.Request(
+        "POST",
+        BASE_URL + "/api/documents/post_document/",
+        data=fields,
+        files=files,
+        headers=headers,
+    )
+    _ = request.read()
+    return request
+
+
+def test_a_form_upload_with_plain_values_passes() -> None:
+    check_request(
+        upload({"title": "t", "created": "2026-02-03", "tags": ["1", "2"], "correspondent": "3"})
+    )
+    check_request(upload({"created": "2026-02-03 06:15:00+02:00", "archive_serial_number": "0"}))
+
+
+@pytest.mark.parametrize(
+    "request_",
+    [
+        pytest.param(upload({"title": "t", "colour": "red"}), id="undeclared field"),
+        pytest.param(upload({"title": "t"}, document=False), id="no document"),
+        pytest.param(upload({"correspondent": "one"}), id="integer that is not one"),
+        pytest.param(upload({"tags": ["1", "x"]}), id="a tag that is not an integer"),
+        pytest.param(upload({"archive_serial_number": "-1"}), id="below the minimum"),
+        pytest.param(upload({"archive_serial_number": "4294967296"}), id="above the maximum"),
+        pytest.param(upload({"created": "yesterday"}), id="not a date"),
+        pytest.param(upload({"title": "t"}, headers={"Accept": HEADERS["Accept"]}), id="no token"),
+    ],
+)
+def test_a_form_upload_outside_the_schema_is_rejected(request_: httpx2.Request) -> None:
+    with pytest.raises(SchemaViolationError):
+        check_request(request_)
+
+
+def test_a_json_body_for_the_upload_is_rejected() -> None:
+    request = httpx2.Request(
+        "POST", BASE_URL + "/api/documents/post_document/", json={"title": "t"}, headers=HEADERS
+    )
+
+    with pytest.raises(SchemaViolationError, match="not multipart"):
+        check_request(request)

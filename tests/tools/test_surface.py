@@ -20,20 +20,29 @@ pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-4")]
 
 type Schema = dict[str, object]
 
-# The profiles the surface is reviewed for: server settings per profile. `default` is the
-# shipped default, `all` every toolset, `read-only` every toolset without tools that change data.
-PROFILES: dict[str, tuple[list[str] | None, bool]] = {
-    "default": (None, False),
-    "all": (["all"], False),
-    "read-only": (["all"], True),
+# The profiles the surface is reviewed for: server settings per profile (toolsets, read-only, and
+# whether the server runs over stdio with an upload allowlist). `default` is the shipped default,
+# `all` every toolset, `read-only` every toolset without tools that change data, `stdio-uploads`
+# every toolset as a stdio server sees it when the operator allows uploads by path (decision-7).
+PROFILES: dict[str, tuple[list[str] | None, bool, bool]] = {
+    "default": (None, False, False),
+    "all": (["all"], False, False),
+    "read-only": (["all"], True, False),
+    "stdio-uploads": (["all"], False, True),
 }
 profiles = pytest.mark.parametrize("profile", list(PROFILES))
 
 
 def profile_server(profile: str) -> FastMCP:
-    toolsets, read_only = PROFILES[profile]
+    toolsets, read_only, by_path = PROFILES[profile]
     # AI on, so that capability gating cannot shrink the surface under review.
-    return serve(admin(ai_enabled=True), toolsets=toolsets, read_only=read_only)
+    return serve(
+        admin(ai_enabled=True),
+        toolsets=toolsets,
+        read_only=read_only,
+        stdio=by_path,
+        upload_dirs=["/srv/paperless/consume"] if by_path else [],
+    )
 
 
 async def wire_tools(profile: str = "all") -> list[Schema]:

@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from paperless_mcp.services.tasks import TaskService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
     from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
+    from paperless_mcp.services.uploads import UploadService
 
 # Every toolset; each tool carries exactly one of them as its only tag.
 TOOLSETS: Final = frozenset({"core", "ai"})
@@ -56,6 +57,7 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "add_note": "core",
     "delete_note": "core",
     "delete_document": "core",
+    "upload_document": "core",
     "ask_paperless_ai": "ai",
     "get_ai_suggestions": "ai",
     "create_taxonomy_item": "core",
@@ -151,6 +153,15 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=False,
     ),
+    # Not destructive and not idempotent (decision-6): it adds a document and takes nothing away,
+    # but every call adds one, also for content Paperless already holds (3.4.2 keeps duplicates).
+    "upload_document": ToolAnnotations(
+        title="Upload document",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
     # The AI tools change nothing in Paperless (read-only; repeating a call leaves the environment
     # unchanged, which is what MCP's idempotent hint means, though the text differs) and reach
     # beyond it: Paperless sends document text to its LLM backend (open world), at a cost per call.
@@ -225,6 +236,7 @@ class Services:
     removal: DocumentRemoval
     tasks: TaskService
     ai: AiService
+    uploads: UploadService
 
 
 def services(ctx: Context) -> Services:

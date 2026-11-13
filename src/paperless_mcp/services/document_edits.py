@@ -26,7 +26,7 @@ from paperless_mcp.domain.errors import (
     PermissionDenied,
     Validation,
 )
-from paperless_mcp.services.custom_values import normalise
+from paperless_mcp.services.custom_values import linked, require_visible, resolve_values
 from paperless_mcp.services.tag_hierarchy import blocked_removals, close_over_ancestors
 from paperless_mcp.services.taxonomy import fold
 
@@ -166,11 +166,6 @@ def _check_new_names(values: Iterable[int | str]) -> None:
             raise Validation(message, hint="Use a shorter tag name.")
 
 
-def _linked(value: JsonValue | None) -> set[int]:
-    """The document ids in a document link value; nothing for any other value."""
-    return {n for n in value if isinstance(n, int)} if isinstance(value, list) else set()
-
-
 def _confirm_owner(edit: DocumentEdit, current: DocumentRecord, scalars: dict[str, object]) -> None:
     """An owner change (also to no owner) needs ``confirm``: the caller cannot undo it."""
     if "owner" in scalars and scalars["owner"] != current.owner and not edit.confirm:
@@ -307,35 +302,23 @@ class DocumentEditor:
         self, edit: DocumentEdit, current: DocumentRecord
     ) -> tuple[dict[int, JsonValue], set[int]]:
         """The custom field values to set (checked, in stored form) and the fields to remove."""
-        sets: dict[int, JsonValue] = {}
-        links: set[int] = set()
+        resolved = await resolve_values(self._taxonomy, edit.custom_fields)
+        sets = {number: value for number, (_, value) in resolved.items()}
         have = {item.field: item.value for item in current.custom_fields}
-        for key, value in edit.custom_fields.items():
-            item = await self._taxonomy.resolve("custom_field", key)
-            if item.id in sets:
-                message = f"Custom field {item.name!r} is given twice."
-                raise Validation(message, hint="Name each field once, by name or by id.")
-            sets[item.id] = normalise(item, value)
-            if item.data_type == "documentlink":
-                links |= _linked(sets[item.id]) - _linked(have.get(item.id))
+        links = {
+            n
+            for number, (item, value) in resolved.items()
+            if item.data_type == "documentlink"
+            for n in linked(value) - linked(have.get(number))
+        }
         removed = {
             (await self._taxonomy.resolve("custom_field", f)).id for f in edit.remove_custom_fields
         }
         if sets.keys() & removed:
             message = "A custom field is both set and removed."
             raise Validation(message, hint="Set it or remove it, not both.")
-        await self._visible(links)
+        await require_visible(self._reader, links)
         return sets, removed
-
-    async def _visible(self, documents: set[int]) -> None:
-        """Every linked document must be one the user sees (Paperless mirrors the link there)."""
-        if not documents:
-            return
-        seen = await self._reader.get_document_titles(documents)
-        missing = sorted(documents - seen.keys())
-        if missing:
-            message = f"No document {missing[0]} exists that this user may see."
-            raise NotFound(message, hint="Take the id from a search_documents row.")
 
     @staticmethod
     def _field_change(

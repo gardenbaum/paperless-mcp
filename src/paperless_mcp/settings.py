@@ -9,6 +9,8 @@ the custom ``__init__`` and the environment applies.
 """
 
 import json
+import os
+from pathlib import Path
 from typing import Annotated, ClassVar, Literal, cast
 
 from pydantic import Field, HttpUrl, SecretStr, field_validator
@@ -78,6 +80,17 @@ class ServerSettings(BaseSettings):
             with their link only. An embedded file travels base64-encoded (a third larger) in one
             MCP message, and the FastMCP client's default limit for one HTTP event is 1 MiB, so
             the default of 512 KiB (about 700 KB on the wire) fits that with room for the report.
+        max_upload_bytes: Largest file ``upload_document`` takes, base64 content or a file read
+            by path (``PAPERLESS_MCP_MAX_UPLOAD_BYTES``, 1 byte to 100 MiB). Base64 text is a
+            third larger than the file and arrives in one tool call that the caller's model has
+            to write out, so real uploads are far smaller; the default of 10 MiB covers a scan
+            of many pages. Decoding is linear (about a gigabyte a second), but the text, the
+            decoded bytes and the request body are all in memory at once, about three times
+            the file: the limit is checked on the text before anything is decoded.
+        upload_dirs: Directories ``upload_document`` may read files from, by path
+            (``PAPERLESS_MCP_UPLOAD_DIRS``): absolute paths, comma-separated or a JSON array.
+            Empty (the default) switches uploading by path off. Only the stdio transport ever
+            offers a path parameter, and only when this is set (decision-7).
     """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -90,6 +103,8 @@ class ServerSettings(BaseSettings):
     read_only: bool = False
     disabled_tools: Annotated[tuple[str, ...], NoDecode] = ()
     max_download_bytes: int = Field(default=512 * 1024, ge=1, le=32 * 1024 * 1024)
+    max_upload_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=100 * 1024 * 1024)
+    upload_dirs: Annotated[tuple[str, ...], NoDecode] = ()
 
     @field_validator("toolsets", mode="before")
     @classmethod
@@ -100,6 +115,23 @@ class ServerSettings(BaseSettings):
     @classmethod
     def _split_disabled_tools(cls, value: object) -> object:
         return _names(value, lower=False)
+
+    @field_validator("upload_dirs", mode="before")
+    @classmethod
+    def _split_upload_dirs(cls, value: object) -> object:
+        return _names(value, lower=False)
+
+    @field_validator("upload_dirs", mode="after")
+    @classmethod
+    def _check_upload_dirs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        for directory in value:
+            if not Path(directory).is_absolute():
+                message = f"{directory!r} is not an absolute path; name each directory in full"
+                raise ValueError(message)
+            if os.path.realpath(directory) == os.path.realpath(os.sep):
+                message = "the file system root is no upload directory; name the directories"
+                raise ValueError(message)
+        return value
 
     @field_validator("toolsets", mode="after")
     @classmethod

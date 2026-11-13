@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         DocumentPatch,
         DocumentQuery,
         DocumentRecord,
+        DocumentUpload,
         FileMetadata,
         FileVersion,
         HistoryEntry,
@@ -225,6 +226,21 @@ class DocumentWriter(Protocol):
             NotFound: No such document, or the user may not see it.
             PermissionDenied: The user may not delete documents, or this one (an owner, or any
                 user for an unowned document; a change grant is not enough).
+        """
+        ...
+
+    async def upload_document(self, upload: DocumentUpload) -> str:
+        """Hand a file to Paperless for consumption and return the id of its task.
+
+        Paperless checks the form, not the file: it answers at once with the task's UUID, and
+        consumption happens later. A clash it only sees then (an archive serial number that is
+        taken) fails the task, not this call. Uploading the same content twice creates two
+        documents on 3.4.2. A busy Paperless is not retried: a retry could upload twice.
+
+        Raises:
+            PermissionDenied: The user may not add documents.
+            Validation: Paperless rejected the form (unsupported file type, unknown id, bad
+                custom field value).
         """
         ...
 

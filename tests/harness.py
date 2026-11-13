@@ -44,13 +44,15 @@ def paperless_settings(url: str = URL, token: str = TOKEN) -> PaperlessSettings:
     return PaperlessSettings.model_validate({"url": url, "token": token})
 
 
-def server_settings(
+def server_settings(  # noqa: PLR0913 -- one keyword per setting a test varies
     startup_timeout: float = 2.0,
     *,
     toolsets: Sequence[str] | None = None,
     read_only: bool = False,
     disabled_tools: Sequence[str] = (),
     max_download_bytes: int | None = None,
+    max_upload_bytes: int | None = None,
+    upload_dirs: Sequence[str] = (),
 ) -> ServerSettings:
     """Server settings; `toolsets=None` leaves the setting at its shipped default."""
     given: dict[str, object] = {
@@ -62,6 +64,10 @@ def server_settings(
         given["toolsets"] = ",".join(toolsets)
     if max_download_bytes is not None:
         given["max_download_bytes"] = max_download_bytes
+    if max_upload_bytes is not None:
+        given["max_upload_bytes"] = max_upload_bytes
+    if upload_dirs:
+        given["upload_dirs"] = ",".join(upload_dirs)
     return ServerSettings.model_validate(given)
 
 
@@ -82,6 +88,9 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     read_only: bool = False,
     disabled_tools: Sequence[str] = (),
     max_download_bytes: int | None = None,
+    max_upload_bytes: int | None = None,
+    upload_dirs: Sequence[str] = (),
+    stdio: bool = False,
 ) -> FastMCP:
     """The assembled server, with `reader` in place of the Paperless adapter.
 
@@ -90,7 +99,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     `sleep` and `clock` replace the real ones the task wait uses. `toolsets`, `read_only` and
     `disabled_tools` go to the server settings; `catalogue` replaces the tools the server
     offers, to try toolsets that do not exist yet. `max_download_bytes` replaces the download
-    limit.
+    limit. `max_upload_bytes` and `upload_dirs` are the upload settings; `stdio` says the server
+    runs over stdio (the only mode that offers uploads by path, and then only with `upload_dirs`).
     """
     fake = reader if isinstance(reader, FakePaperless) else admin()
     return create_server(
@@ -101,8 +111,11 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
             read_only=read_only,
             disabled_tools=disabled_tools,
             max_download_bytes=max_download_bytes,
+            max_upload_bytes=max_upload_bytes,
+            upload_dirs=upload_dirs,
         ),
         catalogue=catalogue,
+        stdio=stdio,
         ports=lambda _client: Ports(
             instance=reader,
             taxonomy=taxonomy or fake,

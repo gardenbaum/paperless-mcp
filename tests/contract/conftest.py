@@ -170,6 +170,9 @@ class Backend:
     restricted: Restricted
     # Whether the document with this id is in the trash (deleted, not yet emptied from it).
     in_trash: Callable[[int], bool]
+    # Registers a document a test created through the port itself: the live backend deletes it
+    # (and empties its trash entry) when the test ends; the fake needs no cleanup.
+    track_document: Callable[[int], None]
     # The Paperless release behind the backend: the fake's, or the one the live stack runs
     # (`just e2e-latest` runs the suite against a newer release than the pinned one).
     expected_version: str
@@ -276,6 +279,7 @@ def fake_backend(*, ai_enabled: bool = False) -> Backend:
         share_read_only=fake_share(state),
         restricted=fake_restricted(state),
         in_trash=fake_in_trash(state),
+        track_document=lambda _document: None,
         expected_version=VERSION,
     )
 
@@ -406,6 +410,7 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
                 share_read_only=share_live,
                 restricted=live_restricted(stack, ports, users),
                 in_trash=lambda document_id: live_in_trash(stack, document_id),
+                track_document=created.append,
                 expected_version=EXPECTED_VERSION,
             )
     finally:

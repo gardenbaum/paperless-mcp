@@ -120,7 +120,7 @@ reason = "HTTP header names are case-insensitive in httpx2.Headers: the mutated 
 
 [[equivalent]]
 mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁrequest__mutmut_19"
-function_hash = "75c7ce12d941"
+function_hash = "5cb966fd0331"
 reason = "stream=None is falsy like stream=False, and httpx2 treats both as 'read the body now'."
 
 [[equivalent]]
@@ -130,12 +130,12 @@ reason = "httpx2.Request upper-cases the method, so 'get' sends the same request
 
 [[equivalent]]
 mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_build__mutmut_22"
-function_hash = "7364580e6837"
+function_hash = "d1da5ac000b5"
 reason = "HTTP header names are case-insensitive in httpx2.Headers: 'Accept' and 'accept' set the same header."
 
 [[equivalent]]
 mutant = "paperless_mcp.paperless.client.xǁPaperlessClientǁ_build__mutmut_23"
-function_hash = "7364580e6837"
+function_hash = "d1da5ac000b5"
 reason = "HTTP header names are case-insensitive in httpx2.Headers: 'Accept' and 'accept' set the same header."
 
 [[equivalent]]
