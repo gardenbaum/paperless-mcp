@@ -153,6 +153,7 @@ class FakeUser:
 
         Known gap: object-level change grants are not modelled, so a user who does not own a
         document, is not a superuser and has it shared for viewing cannot change it here.
+        (A search hit does model them: `Owned.changeable_by`.)
         """
         return self.is_superuser or document.owner in {None, self.id}
 
@@ -693,7 +694,7 @@ class FakePaperless:
         if page > 1 and start >= len(found):
             raise beyond_last_page(page)
         hits = tuple(
-            _hit(d, _highlight(d.content, terms) if query.query is not None else None)
+            _hit(d, self.user, _highlight(d.content, terms) if query.query is not None else None)
             for d in found[start : start + page_size]
         )
         return DocumentPage(
@@ -925,14 +926,11 @@ class FakePaperless:
                 message = "document with this archive serial number already exists."
                 reject("archive_serial_number", message)
 
-    def _mirror_links(
-        self, document: FakeDocument, new: dict[int, JsonValue], *, check: bool = True
-    ) -> None:
+    def _mirror_links(self, document: FakeDocument, new: dict[int, JsonValue]) -> None:
         """Keep document links symmetrical like Paperless: link and unlink the other side.
 
         Linking needs change permission on every document linked to (403 otherwise, also for a
-        document the user cannot see); the other side keeps an empty list when unlinked. A bulk
-        edit (``check=False``) does not check that permission.
+        document the user cannot see); the other side keeps an empty list when unlinked.
         """
         link_fields = [f.id for f in self.state.custom_fields if f.data_type == "documentlink"]
 
@@ -941,7 +939,7 @@ class FakePaperless:
 
         by_id = {d.id: d for d in self.state.documents}
         added = {n: targets(new, n) - targets(document.custom_fields, n) for n in link_fields}
-        if check and any(not self.user.may_change(by_id[t]) for ids in added.values() for t in ids):
+        if any(not self.user.may_change(by_id[t]) for ids in added.values() for t in ids):
             message = "Insufficient permissions."
             raise PermissionDenied(message)
         for number in link_fields:
@@ -1361,8 +1359,10 @@ class FakePaperless:
             kept = [t for t in document.tags if t not in remove]
             document.tags = kept + [t for t in add if t not in kept]
 
-    def _plan_fields(self, change: FieldsChange) -> Callable[[list[FakeDocument]], None]:
-        fields = {f.id: f for f in self.state.custom_fields}
+    def _checked_values(
+        self, change: FieldsChange, fields: dict[int, FakeCustomField]
+    ) -> dict[int, JsonValue]:
+        """The values in stored form, after the serializer's checks (400)."""
         documents = {d.id for d in self.state.documents}
         for where, wanted in (
             ("add_custom_fields", change.values),
@@ -1381,20 +1381,57 @@ class FakePaperless:
             except ValueError as error:
                 reject(f"add_custom_fields.{number}.non_field_errors", str(error))
 
-        def apply(selected: list[FakeDocument]) -> None:
-            for document in selected:
-                new = dict(document.custom_fields)
-                for number, value in stored.items():
-                    own = isinstance(value, list) and document.id in value
-                    if own and fields[number].data_type == "documentlink":
-                        continue  # Paperless skips the field of a document that links itself
-                    new[number] = value
-                for number in change.remove:
-                    _ = new.pop(number, None)
-                self._mirror_links(document, new, check=False)
-                document.custom_fields = new
+        return stored
 
-        return apply
+    def _plan_fields(self, change: FieldsChange) -> Callable[[list[FakeDocument]], None]:
+        fields = {f.id: f for f in self.state.custom_fields}
+        stored = self._checked_values(change, fields)
+        links = {n for n, f in fields.items() if f.data_type == "documentlink"}
+        user = self.user
+        if not user.is_superuser:
+            # The serializer checks the linked documents too: change permission on all of them.
+            by_id = {d.id: d for d in self.state.documents}
+            for number in links & stored.keys():
+                if any(not by_id[t].changeable_by(user) for t in _ids(stored[number])):
+                    raise documents_refused()
+
+        return lambda selected: self._set_fields(selected, stored, links, change.remove)
+
+    def _set_fields(
+        self,
+        selected: list[FakeDocument],
+        stored: dict[int, JsonValue],
+        links: set[int],
+        removed: tuple[int, ...],
+    ) -> None:
+        for document in selected:
+            for number, value in stored.items():
+                if number in links and document.id in _ids(value):
+                    continue  # Paperless skips the field of a document that links itself
+                document.custom_fields[number] = value
+                if number in links:
+                    self._link_back(document, number, _ids(value))
+            for number in removed:
+                old = document.custom_fields.pop(number, None)
+                if number in links:
+                    self._unlink_back(document, number, _ids(old))
+
+    def _link_back(self, document: FakeDocument, number: int, targets: list[int]) -> None:
+        """Add the reverse link on the targets; 3.4.2 never takes one from an old target."""
+        by_id = {d.id: d for d in self.state.documents}
+        for target in targets:
+            other = by_id[target].custom_fields
+            back = _ids(other.get(number))
+            if document.id not in back:
+                other[number] = [*back, document.id]
+
+    def _unlink_back(self, document: FakeDocument, number: int, targets: list[int]) -> None:
+        """Take the reverse link from the targets of a removed field."""
+        by_id = {d.id: d for d in self.state.documents}
+        for target in targets:
+            if target in by_id and number in by_id[target].custom_fields:
+                other = by_id[target].custom_fields
+                other[number] = [n for n in _ids(other[number]) if n != document.id]
 
     def _trash(self, documents: list[FakeDocument]) -> None:
         for document in documents:
@@ -1724,7 +1761,12 @@ def _record(
     )
 
 
-def _hit(document: FakeDocument, highlights: str | None) -> DocumentHit:
+def _ids(value: JsonValue) -> list[int]:
+    """The document ids of a document-link value (nothing for any other value)."""
+    return [n for n in value if isinstance(n, int)] if isinstance(value, list) else []
+
+
+def _hit(document: FakeDocument, user: FakeUser, highlights: str | None) -> DocumentHit:
     return DocumentHit(
         id=document.id,
         title=document.title,
@@ -1739,4 +1781,5 @@ def _hit(document: FakeDocument, highlights: str | None) -> DocumentHit:
             for number, value in document.custom_fields.items()
         ),
         highlights=highlights,
+        user_can_change=document.changeable_by(user),
     )

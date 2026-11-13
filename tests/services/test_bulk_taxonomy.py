@@ -262,7 +262,7 @@ async def test_the_owner_and_grants_are_set_by_name_after_confirmation() -> None
     assert report.applied
     assert report.message == (
         "Applied: set the owner to 'e2e-reader' and the grants (view users 'e2e-reader', view "
-        "groups 'e2e-group', change users none, change groups #1; replacing all existing "
+        "groups 'e2e-group', change users none, change groups 'e2e-group'; replacing all existing "
         "grants) on 2 tags 'e2e-finance', 'e2e-inbox'."
     )
 
@@ -312,15 +312,59 @@ async def test_a_cleared_owner_is_sent_as_none_and_a_left_out_owner_is_not_sent(
     assert grants.permissions == ObjectPermissions(change_users=(ADMIN_ID,))
 
 
-async def test_ids_of_users_and_groups_are_passed_on_without_listing_them() -> None:
+async def test_ids_of_users_and_groups_are_checked_and_named_when_they_can_be_listed() -> None:
     setup = Setup()
     operation = SetPermissions(op="set_permissions", owner=READER_ID, view_users=["3", 2])
 
+    report = await setup.run("tag", [INBOX], operation, dry_run=True)
     _ = await setup.run("tag", [INBOX], operation)
 
     [(_, _, change)] = setup.fake.permissions
     assert change.owner == READER_ID
     assert change.permissions == ObjectPermissions(view_users=(READER_ID, ADMIN_ID))
+    assert "set the owner to 'e2e-reader'" in report.message
+    assert "view users 'e2e-reader', 'admin'," in report.message
+
+
+async def test_an_unknown_id_or_a_name_made_of_digits_is_not_taken_on_trust() -> None:
+    setup = Setup(writes=False)
+
+    with pytest.raises(NotFound) as unknown:
+        _ = await setup.run(
+            "tag", [INBOX], SetPermissions(op="set_permissions", view_users=["99"]), dry_run=True
+        )
+    setup.state.users.append(replace(setup.state.users[1], id=77, username="5"))
+    with pytest.raises(NotFound) as named:
+        _ = await setup.run(
+            "tag", [INBOX], SetPermissions(op="set_permissions", view_groups=[5]), dry_run=True
+        )
+
+    assert unknown.value.message == "No user has id 99."
+    assert named.value.message == "No group has id 5."
+
+
+async def test_a_user_named_like_an_id_is_pointed_out() -> None:
+    setup = Setup(writes=False)
+    setup.state.users.append(replace(setup.state.users[1], id=77, username="55"))
+
+    with pytest.raises(NotFound) as raised:
+        _ = await setup.run(
+            "tag", [INBOX], SetPermissions(op="set_permissions", owner="55"), dry_run=True
+        )
+
+    assert raised.value.hint == "A user is named '55'; pass its id 77 instead."
+
+
+async def test_ids_pass_on_unchecked_when_the_user_may_not_list_them() -> None:
+    setup = Setup(READER[0], writes=False)
+    setup.state.tags[3].owner = None
+    operation = SetPermissions(op="set_permissions", view_users=["3", 2], change_groups=[1])
+
+    report = await setup.run("tag", [INBOX], operation, dry_run=True)
+
+    assert "view users #3, #2, view groups none, change users none, change groups #1;" in (
+        report.message
+    )
 
 
 async def test_a_user_name_needs_the_permission_to_list_users_else_an_id_is_asked_for() -> None:
@@ -459,7 +503,7 @@ async def test_several_principals_are_listed_with_commas() -> None:
 
     report = await setup.run("tag", [INBOX], operation, dry_run=True)
 
-    assert "view users 'e2e-reader', #2," in report.message
+    assert "view users 'e2e-reader', 'admin'," in report.message
 
 
 async def test_a_removed_owner_with_grants_is_one_sentence() -> None:

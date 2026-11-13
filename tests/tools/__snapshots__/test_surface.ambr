@@ -520,10 +520,13 @@
         confirm=true to execute. Documents that already are as asked are counted and left alone.
         One operation per call, on documents you name by id. Tags are hierarchical: adding a child
         adds its parent, and removing a parent whose child tags stay is refused (list the children
-        too). Custom fields are merged: only the fields you name change. delete moves documents to
-        the Paperless trash; reprocess runs OCR again in the background. Paperless checks every
-        document first: if you may not change one of them, none changes. Needs change permission on
-        the documents, and ownership and the delete permission for delete.
+        too). Custom fields are merged: only the fields you name change. Document links are mirrored:
+        linking A to B also changes B (you need change permission there), so also_changed lists
+        those documents; a shorter list does not unlink the old target (Paperless 3.4.2), removing
+        the field does. delete moves documents to the Paperless trash; reprocess runs OCR again in
+        the background. Paperless checks every document first: if you may not change one of them
+        (blocked lists them), none changes and nothing is sent. Needs change permission on the
+        documents, and ownership and the delete permission for delete.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -830,9 +833,67 @@
             'description': 'Documents that change (a preview) or changed (applied).',
             'type': 'integer',
           }),
+          'also_changed': dict({
+            'description': "Documents that are not selected but change because document links are mirrored on them (at most 10); title '#id' if you cannot see it.",
+            'items': dict({
+              'description': 'A document the operation changes, with what changes on it.',
+              'properties': dict({
+                'change': dict({
+                  'type': 'string',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'change',
+                'web_url',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
           'applied': dict({
             'description': 'true: Paperless was asked to make the change.',
             'type': 'boolean',
+          }),
+          'blocked': dict({
+            'description': 'Selected documents you may not change. While there are any, Paperless refuses the whole batch and nothing changes.',
+            'items': dict({
+              'description': 'A document the operation changes, with what changes on it.',
+              'properties': dict({
+                'change': dict({
+                  'type': 'string',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'change',
+                'web_url',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
           }),
           'dry_run': dict({
             'description': 'true: a preview, nothing was changed.',
@@ -895,6 +956,8 @@
           'affected_count',
           'unchanged_count',
           'sample',
+          'also_changed',
+          'blocked',
           'message',
         ]),
         'type': 'object',
@@ -1040,7 +1103,7 @@
                   }),
                   'merge': dict({
                     'default': False,
-                    'description': 'true adds the given users and groups to the existing grants. false (default) replaces all grants with exactly the lists given; a list left out becomes empty.',
+                    'description': 'true adds the given users and groups to the existing grants. false (default) replaces all grants: when any list is given, lists left out become empty.',
                     'type': 'boolean',
                   }),
                   'op': dict({

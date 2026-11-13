@@ -339,13 +339,17 @@ async def test_removing_a_parent_from_a_document_that_only_has_it_is_fine() -> N
 
 
 async def test_adding_a_child_while_removing_its_parent_is_refused() -> None:
-    setup = Setup(writes=False)
-    setup.document(SECOND).tags = [FINANCE]
+    setup = Setup(writes=False)  # whatever the documents hold, the request contradicts itself
 
-    with pytest.raises(Validation, match="also removes its child tags 'e2e-invoices'"):
+    with pytest.raises(Validation) as raised:
         _ = await setup.run(
             [SECOND], ModifyTags(op="modify_tags", add=["e2e-invoices"], remove=["e2e-finance"])
         )
+
+    assert raised.value.message == (
+        "Adding 'e2e-invoices' needs its parent 'e2e-finance', which is also removed."
+    )
+    assert raised.value.hint == "Keep the parent, or do not add the child."
 
 
 async def test_modifying_tags_adds_and_removes_in_one_step() -> None:
@@ -824,7 +828,25 @@ async def test_a_hidden_linked_document_comes_with_a_hint() -> None:
             dry_run=True,
         )
 
-    assert raised.value.hint == "Take the id from a search_documents row."
+    assert raised.value.hint == "Take the ids from search_documents rows."
+
+
+async def test_a_link_to_a_document_the_user_may_only_view_is_refused_naming_it() -> None:
+    setup = Setup(READER[0], writes=False)
+    view_only(setup, THIRD)
+
+    with pytest.raises(PermissionDenied) as raised:
+        _ = await setup.run(
+            [SECOND],
+            ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [THIRD]}),
+            dry_run=True,
+        )
+
+    assert raised.value.message == (
+        "A link also changes the linked document, and you may not change 1 document "
+        "('Third invoice')."
+    )
+    assert raised.value.hint == "Link only to documents you may change."
 
 
 async def test_the_taxonomy_cache_forgets_custom_field_counts_after_a_field_edit() -> None:
@@ -855,3 +877,298 @@ async def test_a_refused_tag_removal_counts_the_documents_and_joins_their_childr
         "Removing 'e2e-finance' also removes its child tags 'e2e-invoices', 'e2e-receipts' "
         "(on 3 documents)."
     )
+
+
+# --- review round 1
+
+
+async def test_a_child_tag_under_a_parent_the_user_cannot_see_is_labelled_not_a_crash() -> None:
+    setup = Setup(READER[0], writes=False)
+    setup.state.tags.append(replace(setup.state.tags[0], id=9, name="visible child", parent=3))
+
+    report = await setup.run([SECOND], AddTags(op="add_tags", tags=["visible child"]), dry_run=True)
+
+    assert report.sample[0].change == "tags +visible child, +#3 (a tag you cannot see)"
+
+
+async def test_removing_tags_says_that_child_tags_the_user_cannot_see_go_too() -> None:
+    setup = Setup(writes=False)
+
+    with pytest.raises(ConfirmationRequired) as raised:
+        _ = await setup.run(
+            [PUBLIC], RemoveTags(op="remove_tags", tags=["e2e-inbox"]), confirm=False
+        )
+
+    assert raised.value.message == (
+        "Nothing was changed. Confirming would remove the tags 'e2e-inbox' from 1 document "
+        "('e2e-public-invoice'); child tags you cannot see (other users') come off the "
+        "document with them."
+    )
+
+
+def link_state(setup: Setup, links: dict[int, list[int]]) -> None:
+    field = setup.field("e2e-documentlink")
+    for number, targets in links.items():
+        setup.document(number).custom_fields[field] = [*targets]
+
+
+async def test_a_document_link_names_the_documents_that_are_changed_by_mirroring() -> None:
+    setup = Setup(writes=False)
+    link = ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [THIRD]})
+
+    report = await setup.run([SECOND], link, dry_run=True)
+
+    assert [(row.id, row.title) for row in report.also_changed] == [(THIRD, "Third invoice")]
+    assert report.also_changed[0].change == "link mirrored"
+    assert report.affected_count == 1
+    assert report.message == (
+        "Dry run, nothing was changed. Confirming would set the custom fields 'e2e-documentlink' "
+        "on 1 document ('Second invoice') and, because document links are mirrored, also "
+        "changes 1 document that is not selected ('Third invoice'). To go ahead, call again "
+        "without dry_run and with confirm=true."
+    )
+    with pytest.raises(ConfirmationRequired, match="also changes 1 document that is not selected"):
+        _ = await setup.run([SECOND], link, confirm=False)
+
+
+async def test_dropped_links_and_a_removed_link_field_change_the_old_targets() -> None:
+    setup = Setup(writes=False)
+    link_state(setup, {SECOND: [THIRD], THIRD: [SECOND]})
+
+    moved = await setup.run(
+        [SECOND],
+        ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [PUBLIC]}),
+        dry_run=True,
+    )
+    dropped = await setup.run(
+        [SECOND],
+        ModifyCustomFields(op="modify_custom_fields", remove=["e2e-documentlink"]),
+        dry_run=True,
+    )
+
+    # Setting a new list does not unlink the old target (3.4.2); removing the field does.
+    assert [row.id for row in moved.also_changed] == [PUBLIC]
+    assert [row.id for row in dropped.also_changed] == [THIRD]
+
+
+async def test_a_selected_document_is_not_listed_as_also_changed_and_hidden_ones_are_ids() -> None:
+    setup = Setup(READER[0], writes=False)
+    link_state(setup, {SECOND: [PRIVATE]})
+    both = await setup.run(
+        [SECOND, THIRD],
+        ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [SECOND]}),
+        dry_run=True,
+    )
+    hidden = await setup.run(
+        [SECOND],
+        ModifyCustomFields(op="modify_custom_fields", remove=["e2e-documentlink"]),
+        dry_run=True,
+    )
+
+    assert [row.id for row in both.also_changed] == []
+    assert [(row.id, row.title) for row in hidden.also_changed] == [(PRIVATE, "#2")]
+
+
+async def test_applied_links_report_the_mirrored_documents() -> None:
+    setup = Setup()
+
+    report = await setup.run(
+        [SECOND],
+        ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [THIRD]}),
+    )
+
+    assert report.message == (
+        "Applied to 1 document: set the custom fields 'e2e-documentlink' on the selected "
+        "documents. Mirrored on 1 other document ('Third invoice')."
+    )
+    assert [row.id for row in report.also_changed] == [THIRD]
+
+
+def view_only(setup: Setup, number: int) -> None:
+    """Make the document the admin's own, shared with the reader for viewing only."""
+    setup.document(number).owner = 2
+    setup.document(number).viewers = {3}
+
+
+async def test_a_blocking_document_is_named_and_the_execution_is_refused_before_sending() -> None:
+    setup = Setup(READER[0], writes=False)
+    view_only(setup, SECOND)
+    operation = AddTags(op="add_tags", tags=["e2e-inbox"])
+
+    preview = await setup.run([PUBLIC, SECOND], operation, dry_run=True)
+    with pytest.raises(PermissionDenied) as refused:
+        _ = await setup.run([PUBLIC, SECOND], operation, confirm=True)
+
+    assert [(row.id, row.change) for row in preview.blocked] == [(SECOND, "you may not change it")]
+    assert preview.message == (
+        "Dry run, nothing was changed. Paperless would refuse this batch, so none would "
+        "change: you may not change 1 document ('Second invoice'). Leave it out, or ask its "
+        "owner for change permission."
+    )
+    assert refused.value.message == (
+        "You may not change 1 document ('Second invoice'), so Paperless would refuse the whole "
+        "batch; nothing was sent."
+    )
+    assert (
+        refused.value.hint == "Leave those documents out, or ask their owner for change permission."
+    )
+    assert setup.fake.calls == []
+
+
+async def test_a_confirmation_without_confirm_also_comes_after_the_permission_check() -> None:
+    setup = Setup(READER[0], writes=False)
+    view_only(setup, SECOND)
+
+    with pytest.raises(PermissionDenied):
+        _ = await setup.run([SECOND], AddTags(op="add_tags", tags=["e2e-inbox"]), confirm=False)
+
+
+async def test_a_document_that_is_already_as_asked_does_not_block_the_batch() -> None:
+    setup = Setup(READER[0], only=frozenset({"view_document", "change_document", "view_tag"}))
+    view_only(setup, THIRD)  # has the inbox tag already: not part of the batch
+
+    report = await setup.run([SECOND, THIRD], AddTags(op="add_tags", tags=["e2e-inbox"]))
+
+    assert (report.applied, report.blocked) == (True, ())
+
+
+def extra_documents(setup: Setup, *numbers: int) -> None:
+    setup.state.documents.extend(FakeDocument(id=n, title=f"Doc {n}") for n in numbers)
+
+
+async def test_many_blocking_documents_are_listed_by_three_and_counted() -> None:
+    setup = Setup(READER[0], writes=False)
+    extra_documents(setup, 10, 11, 12, 13)
+    for number in (SECOND, 10, 11, 12, 13):
+        view_only(setup, number)
+
+    report = await setup.run(
+        [SECOND, 10, 11, 12, 13], AddTags(op="add_tags", tags=["e2e-inbox"]), dry_run=True
+    )
+
+    assert report.message == (
+        "Dry run, nothing was changed. Paperless would refuse this batch, so none would "
+        "change: you may not change 5 documents ('Second invoice', 'Doc 10', 'Doc 11' and 2 "
+        "more). Leave them out, or ask their owner for change permission."
+    )
+    assert [row.web_url for row in report.blocked][:1] == [f"{WEB}/documents/{SECOND}/details"]
+    assert len(report.blocked) == 5
+
+
+async def test_removing_tags_from_several_documents_says_documents() -> None:
+    setup = Setup(writes=False)
+
+    with pytest.raises(ConfirmationRequired) as raised:
+        _ = await setup.run(
+            [PUBLIC, THIRD], RemoveTags(op="remove_tags", tags=["e2e-inbox"]), confirm=False
+        )
+
+    assert raised.value.message.endswith(
+        "; child tags you cannot see (other users') come off the documents with them."
+    )
+
+
+async def test_many_mirrored_documents_are_counted_and_listed_by_three() -> None:
+    setup = Setup()
+    extra_documents(setup, 10, 11, 12, 13)
+    link = ModifyCustomFields(
+        op="modify_custom_fields", values={"e2e-documentlink": [10, 11, 12, 13]}
+    )
+
+    with pytest.raises(ConfirmationRequired) as raised:
+        _ = await setup.run([SECOND], link, confirm=False)
+    report = await setup.run([SECOND], link)
+
+    assert raised.value.message == (
+        "Nothing was changed. Confirming would set the custom fields 'e2e-documentlink' on 1 "
+        "document ('Second invoice') and, because document links are mirrored, also changes 4 "
+        "documents that are not selected ('Doc 10', 'Doc 11', 'Doc 12' and 1 more)."
+    )
+    assert report.message == (
+        "Applied to 1 document: set the custom fields 'e2e-documentlink' on the selected "
+        "documents. Mirrored on 4 other documents ('Doc 10', 'Doc 11', 'Doc 12' and 1 more)."
+    )
+    assert report.also_changed[0].web_url == f"{WEB}/documents/10/details"
+    assert len(report.also_changed) == 4
+
+
+async def test_mirroring_collects_the_targets_of_every_document_and_field() -> None:
+    setup = Setup(writes=False)
+    extra_documents(setup, 10, 11)
+    link_state(setup, {SECOND: [10], THIRD: [11]})
+    setup.document(THIRD).custom_fields[setup.field("e2e-string")] = "x"
+
+    moved = await setup.run(
+        [SECOND, THIRD],
+        ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [PUBLIC]}),
+        dry_run=True,
+    )
+    dropped = await setup.run(
+        [SECOND, THIRD],
+        ModifyCustomFields(op="modify_custom_fields", remove=["e2e-documentlink", "e2e-string"]),
+        dry_run=True,
+    )
+
+    assert [row.id for row in moved.also_changed] == [PUBLIC]
+    assert sorted(row.id for row in dropped.also_changed) == [10, 11]
+
+
+async def test_two_link_fields_both_count() -> None:
+    setup = Setup(writes=False)
+    extra_documents(setup, 10, 11)
+    second = replace(setup.state.custom_fields[7], id=99, name="second-link")
+    setup.state.custom_fields.append(second)
+
+    report = await setup.run(
+        [SECOND],
+        ModifyCustomFields(
+            op="modify_custom_fields",
+            values={"e2e-documentlink": [10], "second-link": [11]},
+        ),
+        dry_run=True,
+    )
+
+    assert sorted(row.id for row in report.also_changed) == [10, 11]
+
+
+async def test_a_target_that_is_already_linked_is_not_reported_and_hits_add_up() -> None:
+    setup = Setup(writes=False)
+    extra_documents(setup, 10, 11)
+    link_state(setup, {SECOND: [10]})
+
+    report = await setup.run(
+        [THIRD, SECOND],
+        ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [10, 11]}),
+        dry_run=True,
+    )
+
+    assert sorted(row.id for row in report.also_changed) == [10, 11]
+
+
+async def test_a_document_that_already_links_a_target_does_not_report_it() -> None:
+    setup = Setup(writes=False)
+    extra_documents(setup, 10, 11)
+    link_state(setup, {SECOND: [10]})
+
+    report = await setup.run(
+        [SECOND],
+        ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [10, 11]}),
+        dry_run=True,
+    )
+
+    assert [row.id for row in report.also_changed] == [11]
+
+
+async def test_removing_a_link_field_from_a_document_that_lacks_it_reports_the_others() -> None:
+    setup = Setup(writes=False)
+    extra_documents(setup, 10)
+    link_state(setup, {SECOND: [10]})
+    setup.document(THIRD).custom_fields[setup.field("e2e-string")] = "x"
+
+    report = await setup.run(
+        [THIRD, SECOND],
+        ModifyCustomFields(op="modify_custom_fields", remove=["e2e-documentlink", "e2e-string"]),
+        dry_run=True,
+    )
+
+    assert [row.id for row in report.also_changed] == [10]

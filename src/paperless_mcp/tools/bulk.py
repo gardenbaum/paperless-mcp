@@ -65,10 +65,13 @@ async def bulk_edit_documents(
     confirm=true to execute. Documents that already are as asked are counted and left alone.
     One operation per call, on documents you name by id. Tags are hierarchical: adding a child
     adds its parent, and removing a parent whose child tags stay is refused (list the children
-    too). Custom fields are merged: only the fields you name change. delete moves documents to
-    the Paperless trash; reprocess runs OCR again in the background. Paperless checks every
-    document first: if you may not change one of them, none changes. Needs change permission on
-    the documents, and ownership and the delete permission for delete.
+    too). Custom fields are merged: only the fields you name change. Document links are mirrored:
+    linking A to B also changes B (you need change permission there), so also_changed lists
+    those documents; a shorter list does not unlink the old target (Paperless 3.4.2), removing
+    the field does. delete moves documents to the Paperless trash; reprocess runs OCR again in
+    the background. Paperless checks every document first: if you may not change one of them
+    (blocked lists them), none changes and nothing is sent. Needs change permission on the
+    documents, and ownership and the delete permission for delete.
     """  # noqa: D205 -- the summary is one sentence; FastMCP sends the docstring as is
     return await services(ctx).bulk_documents.edit(
         document_ids, operation, dry_run=dry_run, confirm=confirm

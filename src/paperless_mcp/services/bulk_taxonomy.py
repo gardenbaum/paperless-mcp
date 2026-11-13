@@ -66,6 +66,10 @@ GRANT_LISTS: Final[tuple[tuple[str, Literal["user", "group"]], ...]] = (
 )
 
 
+def _numeric(value: NameOrId) -> bool:
+    return isinstance(value, int) or (value.strip().isascii() and value.strip().isdigit())
+
+
 def _plural(count: int, noun: str) -> str:
     return noun if count == 1 else f"{noun}s"
 
@@ -212,20 +216,22 @@ class BulkTaxonomyEditor:
     async def _principals(
         self, kind: Literal["user", "group"], values: Sequence[NameOrId]
     ) -> _Principals:
-        """Ids and names of users or groups; an id is passed on, Paperless decides."""
+        """Ids and names of users or groups, checked against the list the user may see.
+
+        An id is passed on unchecked only when the user may not list that kind.
+        """
         ids: list[int] = []
         names: list[str] = []
         for value in values:
-            if isinstance(value, int) or (value.strip().isascii() and value.strip().isdigit()):
-                ids.append(int(value))
-                names.append(f"#{int(value)}")
-                continue
             try:
                 found = await self._resolver.resolve(kind, value)
             except PermissionDenied as error:
-                raise PermissionDenied(
-                    error.message, hint=f"Pass the {kind} id instead of the name."
-                ) from None
+                if not _numeric(value):
+                    hint = f"Pass the {kind} id instead of the name."
+                    raise PermissionDenied(error.message, hint=hint) from None
+                ids.append(int(value))  # the user may not list them: Paperless decides
+                names.append(f"#{int(value)}")
+                continue
             ids.append(found.id)
             names.append(quoted(found.name))
         return _Principals(ids=tuple(ids), names=tuple(names))

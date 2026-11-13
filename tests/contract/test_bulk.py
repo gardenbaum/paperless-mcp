@@ -21,6 +21,7 @@ from paperless_mcp.domain.bulk import (
     TagsChange,
     TrashDocuments,
 )
+from paperless_mcp.domain.documents import DocumentQuery
 from paperless_mcp.domain.errors import PermissionDenied, Validation
 from paperless_mcp.domain.taxonomy import OptionInput, TaxonomyValues
 
@@ -215,6 +216,60 @@ async def test_a_document_that_the_link_names_itself_is_skipped(backend: Backend
 
     assert await fields_of(ports, second) == {link: [first]}
     assert await fields_of(ports, first) == {link: [second]}
+
+
+@pytest.mark.contract(DOCUMENTS)
+async def test_a_link_needs_change_permission_on_the_linked_document_too(
+    backend: Backend,
+) -> None:
+    # 3.4.2 checks the linked documents like the edited ones (the serializer of the value).
+    link = await make(backend.admin, "custom_field", data_type="documentlink")
+    mine, viewed, changeable = (backend.new_document() for _ in range(3))
+    allowed = frozenset({"view_document", "change_document"})
+    user = backend.restricted(allowed, change=[mine, changeable], view=[viewed])
+
+    with pytest.raises(PermissionDenied):
+        await user.bulk_writes.bulk_edit_documents((mine,), FieldsChange(values={link: [viewed]}))
+    assert await fields_of(backend.admin, mine) == {}
+    assert await fields_of(backend.admin, viewed) == {}
+
+    await user.bulk_writes.bulk_edit_documents((mine,), FieldsChange(values={link: [changeable]}))
+    assert await fields_of(backend.admin, changeable) == {link: [mine]}
+
+
+@pytest.mark.contract(DOCUMENTS)
+async def test_a_moved_link_keeps_the_old_reverse_link_but_a_removed_field_takes_it_away(
+    backend: Backend,
+) -> None:
+    # A 3.4.2 quirk, pinned: setting a shorter list leaves a one-sided link on the old target
+    # (the field is rewritten before the old value is compared); removing the field cleans up.
+    ports = backend.admin
+    link = await make(ports, "custom_field", data_type="documentlink")
+    first, old, new = backend.new_document(), backend.new_document(), backend.new_document()
+    writer = ports.bulk_writes
+    await writer.bulk_edit_documents((first,), FieldsChange(values={link: [old]}))
+
+    await writer.bulk_edit_documents((first,), FieldsChange(values={link: [new]}))
+
+    assert await fields_of(ports, first) == {link: [new]}
+    assert await fields_of(ports, new) == {link: [first]}
+    assert await fields_of(ports, old) == {link: [first]}
+    await writer.bulk_edit_documents((first,), FieldsChange(remove=(link,)))
+    assert await fields_of(ports, new) == {link: []}
+    assert await fields_of(ports, first) == {}
+
+
+@pytest.mark.contract(DOCUMENTS)
+async def test_a_hit_says_whether_the_user_may_change_the_document(backend: Backend) -> None:
+    mine, viewed = backend.new_document(), backend.new_document()
+    allowed = frozenset({"view_document", "change_document"})
+    user = backend.restricted(allowed, change=[mine], view=[viewed])
+
+    page = await user.documents.search_documents(
+        DocumentQuery(ids=(mine, viewed)), page=1, page_size=10
+    )
+
+    assert {hit.id: hit.user_can_change for hit in page.hits} == {mine: True, viewed: False}
 
 
 @pytest.mark.contract(DOCUMENTS)
@@ -449,6 +504,11 @@ async def test_the_owner_is_set_cleared_or_left_alone(backend: Backend, kind: Bu
         kind, (item,), PermissionsChange(permissions=grant)
     )
     assert backend.grants(kind, item).owner == admin
+    assert backend.grants(kind, item).permissions == grant
+
+    # An owner-only change keeps the grants.
+    await ports.bulk_writes.set_taxonomy_permissions(kind, (item,), PermissionsChange(owner=reader))
+    assert backend.grants(kind, item).owner == reader
     assert backend.grants(kind, item).permissions == grant
 
 

@@ -206,6 +206,7 @@ class DocumentHit(BaseModel):
     tags: tuple[int, ...]
     custom_fields: tuple[CustomFieldValue, ...]
     highlights: str | None = None
+    user_can_change: bool | None = None
 
 
 class DocumentPage(BaseModel):

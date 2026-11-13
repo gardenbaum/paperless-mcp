@@ -168,7 +168,7 @@ class SetPermissions(_Operation):
         Field(
             description=(
                 "true adds the given users and groups to the existing grants. false (default) "
-                "replaces all grants with exactly the lists given; a list left out becomes empty."
+                "replaces all grants: when any list is given, lists left out become empty."
             )
         ),
     ] = False
@@ -287,6 +287,24 @@ class DocumentBulkReport(BaseModel):
     sample: Annotated[
         tuple[DocumentSample, ...],
         Field(description=f"The first {SAMPLE_SIZE} documents that change, in selection order."),
+    ]
+    also_changed: Annotated[
+        tuple[DocumentSample, ...],
+        Field(
+            description=(
+                "Documents that are not selected but change because document links are "
+                f"mirrored on them (at most {SAMPLE_SIZE}); title '#id' if you cannot see it."
+            )
+        ),
+    ]
+    blocked: Annotated[
+        tuple[DocumentSample, ...],
+        Field(
+            description=(
+                "Selected documents you may not change. While there are any, Paperless "
+                "refuses the whole batch and nothing changes."
+            )
+        ),
     ]
     message: str
 

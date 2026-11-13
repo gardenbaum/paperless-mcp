@@ -44,7 +44,10 @@ PATH = "/api/documents/"
 UPLOAD_PATH = "/api/documents/post_document/"
 # Most bytes of a thumbnail read; real ones are 2 KB to 30 KB WebP, so this is generous.
 THUMBNAIL_LIMIT = 4 * 1024 * 1024
-FIELDS = "id,title,created,added,correspondent,document_type,storage_path,tags,custom_fields"
+FIELDS = (
+    "id,title,created,added,correspondent,document_type,storage_path,tags,custom_fields,"
+    "user_can_change"
+)
 # A single document without its content (the OCR text can be a million characters).
 DETAIL_FIELDS = (
     "id,title,created,added,modified,archive_serial_number,owner,correspondent,document_type,"
@@ -73,6 +76,7 @@ class _Row(BaseModel):
     storage_path: int | None
     tags: list[int]
     custom_fields: list[_Value]
+    user_can_change: bool | None = None
     search_hit: _Hit | None = Field(default=None, alias="__search_hit__")
 
 
@@ -267,6 +271,7 @@ def _hit(row: _Row) -> DocumentHit:
             if row.search_hit
             else None
         ),
+        user_can_change=row.user_can_change,
     )
 
 
