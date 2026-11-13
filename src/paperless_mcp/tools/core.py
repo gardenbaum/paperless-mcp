@@ -51,7 +51,13 @@ from paperless_mcp.domain.taxonomy_edits import TaxonomyCreate, TaxonomyEdit
 from paperless_mcp.services.documents import DEFAULT_SLICE, HISTORY_LIMIT
 from paperless_mcp.services.notes import MAX_NOTE_CHARS
 from paperless_mcp.services.tasks import MAX_WAIT_SECONDS
-from paperless_mcp.tools._shared import ANNOTATIONS, Confirm, boundary, resource_boundary, services
+from paperless_mcp.tools._shared import (
+    ANNOTATIONS,
+    Confirm,
+    boundary,
+    resource_boundary,
+    services,
+)
 
 TOOLSET = "core"
 # Most rows list_taxonomy returns and largest search page (decision-4: lists hold at most 100).
@@ -240,15 +246,7 @@ async def update_taxonomy_item(  # noqa: PLR0913 -- one parameter per setting, d
         list[str] | None,
         Field(description="Select fields: labels (or ids) of options to remove; needs confirm."),
     ] = None,
-    confirm: Annotated[
-        bool,
-        Field(
-            description=(
-                "Required to remove select options: documents that hold a removed option keep a "
-                "value that is no longer one of the field's options."
-            )
-        ),
-    ] = False,
+    confirm: Confirm = False,
 ) -> TaxonomyDetail:
     """Change a tag, correspondent, document type, storage path or custom field.
 
@@ -283,19 +281,14 @@ async def delete_taxonomy_item(
     kind: Kind,
     item: Item,
     *,
-    confirm: Annotated[
-        bool,
-        Field(
-            description="true to delete; without it nothing is deleted and the effect is explained."
-        ),
-    ] = False,
+    confirm: Confirm = False,
 ) -> TaxonomyDeletion:
     """Delete a tag, correspondent, document type, storage path or custom field for good.
 
     There is no trash for these: the documents stay but lose the tag, correspondent, type, path
-    or field value, and deleting a tag also deletes its child tags. Call it first without
-    confirm: it deletes nothing and returns the effect (documents affected, child tags that go
-    with it); call it again with confirm=true to delete.
+    or field value, and deleting a tag also deletes its child tags. Without confirm it deletes
+    nothing and fails with an error that says the effect (documents affected, child tags that go
+    with it); describe that to the user and call again with confirm=true once they agree.
     """
     return await services(ctx).taxonomy_edits.delete(kind, item, confirm=confirm)
 

@@ -303,8 +303,9 @@ mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_d
 function_hash = "5d60b85a9db1"
 reason = "httpx2 upper-cases the method when it builds the request, so 'delete' sends exactly what 'DELETE' sends."
 
+[[equivalent]]
 mutant = "paperless_mcp.services.taxonomy_edits.xǁTaxonomyEditorǁdelete__mutmut_16"
-function_hash = "f70c957a55b3"
+function_hash = "5fe9ec283ed8"
 reason = "Only tags have a parent, so the parent map built from the rows of any other kind has no children and descendants() returns the empty set whether or not the kind is checked."
 
 [[equivalent]]

@@ -15,7 +15,9 @@ from fakes.paperless import (
 )
 
 from paperless_mcp.domain.errors import (
+    CONFIRM_HINT,
     Ambiguous,
+    ConfirmationRequired,
     NotFound,
     PaperlessMcpError,
     PermissionDenied,
@@ -48,8 +50,8 @@ pytestmark = [
 class Recording(FakePaperless):
     """A fake that remembers every write it was given."""
 
-    def __init__(self, state: FakeState, *, user: str) -> None:
-        super().__init__(state, user=user, allow_writes=True)
+    def __init__(self, state: FakeState, *, user: str, writes: bool = True) -> None:
+        super().__init__(state, user=user, allow_writes=writes)
         self.writes: list[tuple[str, object]] = []
         self.updates: list[TaxonomyValues] = []
         self.lists: list[TaxonomyKind] = []
@@ -82,13 +84,15 @@ class Recording(FakePaperless):
 
 @final
 class Setup:
-    def __init__(self, user: str = ADMIN[0], *, grant: Collection[str] = ()) -> None:
+    def __init__(
+        self, user: str = ADMIN[0], *, grant: Collection[str] = (), writes: bool = True
+    ) -> None:
         self.state: FakeState = seeded()
         self.state.users = [
             replace(u, permissions=u.permissions | frozenset(grant)) if u.username == user else u
             for u in self.state.users
         ]
-        self.fake: Recording = Recording(self.state, user=user)
+        self.fake: Recording = Recording(self.state, user=user, writes=writes)
         self.resolver: TaxonomyResolver = TaxonomyResolver(
             self.fake, StaticTokenProvider("t"), ttl=3600.0
         )
@@ -444,21 +448,21 @@ async def test_options_are_named_by_label_ignoring_case_or_by_id() -> None:
 
 
 async def test_removing_an_option_needs_confirm_and_counts_the_documents_that_hold_it() -> None:
-    setup = Setup()
+    setup = Setup(writes=False)
     before = options_of(setup)
 
-    with pytest.raises(Validation) as unused:
+    with pytest.raises(ConfirmationRequired) as unused:
         _ = await setup.update("custom_field", "e2e-select", options_remove=["beta"])
-    with pytest.raises(Validation) as used:
+    with pytest.raises(ConfirmationRequired) as used:
         _ = await setup.update("custom_field", "e2e-select", options_remove=["alpha"])
 
     assert unused.value.message == (
-        "Removing options needs confirm=true: 0 documents you can see hold a removed option of "
-        "'e2e-select' and would keep a value that is no longer one of its options; "
-        "update_document can no longer set it."
+        "Nothing was changed. Confirming would remove the option(s) 'beta' of 'e2e-select': "
+        "0 documents you can see hold a removed option and would keep a value that is no "
+        "longer one of its options, and update_document can no longer set it."
     )
-    assert used.value.message.startswith("Removing options needs confirm=true: 1 document you")
-    assert used.value.hint == "Pass confirm=true to remove the options."
+    assert "'alpha' of 'e2e-select': 1 document you can see hold" in used.value.message
+    assert unused.value.hint == CONFIRM_HINT
     assert options_of(setup) == before
     assert setup.fake.writes == []
 
@@ -559,54 +563,54 @@ async def test_an_option_that_was_just_renamed_elsewhere_is_found_in_the_current
 # -- delete
 
 
-HIDDEN = "Child tags you cannot see (other users') are deleted with it as well."
+HIDDEN = "child tags you cannot see (other users') are deleted with it as well"
 EFFECTS = [
-    ("tag", "e2e-private", 3, "Tag", "It is removed from its documents (1 document). " + HIDDEN),
+    ("tag", "e2e-private", 3, "tag", "it is removed from its documents (1 document); " + HIDDEN),
     (
         "correspondent",
         "e2e-acme",
         1,
-        "Correspondent",
-        "The documents that use it (1 document) lose their correspondent.",
+        "correspondent",
+        "the documents that use it (1 document) lose their correspondent",
     ),
     (
         "document_type",
         "e2e-invoice",
         1,
-        "Document type",
-        "The documents that use it (1 document) lose their document type.",
+        "document type",
+        "the documents that use it (1 document) lose their document type",
     ),
     (
         "storage_path",
         "e2e-archive",
         1,
-        "Storage path",
-        "The documents that use it (1 document) lose their storage path.",
+        "storage path",
+        "the documents that use it (1 document) lose their storage path",
     ),
     (
         "custom_field",
         "e2e-string",
         1,
-        "Custom field",
-        "The documents that have the field (1 document) lose the field and its values.",
+        "custom field",
+        "the documents that have the field (1 document) lose the field and its values",
     ),
 ]
 
 
 @pytest.mark.parametrize(("kind", "name", "number", "label", "effect"), EFFECTS)
-async def test_a_delete_without_confirm_explains_and_deletes_nothing(
+async def test_a_delete_without_confirm_is_refused_with_the_effect(
     kind: WritableKind, name: str, number: int, label: str, effect: str
 ) -> None:
-    setup = Setup()
+    setup = Setup(writes=False)
 
-    preview = await setup.editor.delete(kind, name, confirm=False)
+    with pytest.raises(ConfirmationRequired) as raised:
+        _ = await setup.editor.delete(kind, name, confirm=False)
 
-    assert preview.message == (
-        f"Deleting {label} {name!r} (id {number}) cannot be undone. {effect} "
-        "Nothing was deleted: pass confirm=true to delete it."
+    assert raised.value.message == (
+        f"Nothing was changed. Confirming would delete {label} '{name}' (id {number}) for good: "
+        f"{effect}."
     )
-    assert (preview.deleted, preview.kind, preview.id, preview.name) == (False, kind, number, name)
-    assert (preview.document_count, preview.also_deleted) == (1, ())
+    assert raised.value.hint == CONFIRM_HINT
     assert setup.fake.writes == []
 
 
@@ -618,8 +622,8 @@ async def test_a_confirmed_delete_deletes_and_reports_it(
 
     result = await setup.editor.delete(kind, name, confirm=True)
 
-    assert result.message == f"{label} {name!r} (id {number}) was deleted. {effect}"
-    assert (result.deleted, result.kind, result.id, result.name) == (True, kind, number, name)
+    assert result.message == f"{label.capitalize()} '{name}' (id {number}) was deleted: {effect}."
+    assert (result.kind, result.id, result.name) == (kind, number, name)
     assert (result.document_count, result.also_deleted) == (1, ())
     assert setup.fake.writes == [("delete", (kind, number))]
     with pytest.raises(NotFound):
@@ -627,28 +631,28 @@ async def test_a_confirmed_delete_deletes_and_reports_it(
 
 
 async def test_a_tag_delete_names_its_child_tags_with_their_document_counts() -> None:
-    setup = Setup()
+    setup = Setup(writes=False)
     setup.state.tags.append(FakeTag(id=9, name="deep", parent=2))
-
-    preview = await setup.editor.delete("tag", 1, confirm=False)
-    result = await setup.editor.delete("tag", 1, confirm=True)
-
-    children = "'deep' (0 documents), 'e2e-invoices' (1 document)"
     effect = (
-        f"It is removed from its documents (1 document). Its child tags ({children}) "
-        f"are deleted with it. {HIDDEN}"
+        "it is removed from its documents (1 document); its child tags "
+        f"'deep (0 documents)', 'e2e-invoices (1 document)' are deleted with it; {HIDDEN}"
     )
-    assert preview.message == (
-        f"Deleting Tag 'e2e-finance' (id 1) cannot be undone. {effect} "
-        "Nothing was deleted: pass confirm=true to delete it."
+
+    with pytest.raises(ConfirmationRequired) as raised:
+        _ = await setup.editor.delete("tag", 1, confirm=False)
+    confirmed = Setup()
+    confirmed.state.tags.append(FakeTag(id=9, name="deep", parent=2))
+    result = await confirmed.editor.delete("tag", 1, confirm=True)
+
+    assert raised.value.message == (
+        f"Nothing was changed. Confirming would delete tag 'e2e-finance' (id 1) for good: {effect}."
     )
-    assert result.message == f"Tag 'e2e-finance' (id 1) was deleted. {effect}"
+    assert result.message == f"Tag 'e2e-finance' (id 1) was deleted: {effect}."
     assert [(t.name, t.document_count) for t in result.also_deleted] == [
         ("deep", 0),
         ("e2e-invoices", 1),
     ]
-    assert preview.also_deleted == result.also_deleted
-    assert {t.id for t in setup.state.tags} == {3, 4}
+    assert {t.id for t in confirmed.state.tags} == {3, 4}
 
 
 async def test_a_tag_delete_also_takes_child_tags_the_caller_cannot_see() -> None:
@@ -658,12 +662,10 @@ async def test_a_tag_delete_also_takes_child_tags_the_caller_cannot_see() -> Non
         FakeTag(id=11, name="theirs", owner=2, parent=10),
     ]
 
-    preview = await setup.editor.delete("tag", "mine", confirm=False)
     result = await setup.editor.delete("tag", "mine", confirm=True)
 
-    assert preview.also_deleted == ()
-    assert HIDDEN in preview.message
-    assert result.deleted is True
+    assert result.also_deleted == ()
+    assert HIDDEN in result.message
     assert 11 not in {t.id for t in setup.state.tags}
 
 
@@ -678,23 +680,19 @@ async def test_a_missing_item_is_not_found_with_or_without_confirm() -> None:
 
 
 async def test_the_count_comes_from_the_current_state_not_a_stale_cache() -> None:
-    setup = Setup()
+    setup = Setup(writes=False)
     _ = await setup.resolver.items("correspondent")
     setup.state.documents.append(FakeDocument(id=7, title="more", correspondent=1))
 
-    preview = await setup.editor.delete("correspondent", "e2e-acme", confirm=False)
-
-    assert preview.document_count == 2
+    with pytest.raises(ConfirmationRequired, match=r"\(2 documents\)"):
+        _ = await setup.editor.delete("correspondent", "e2e-acme", confirm=False)
 
 
 async def test_a_user_who_may_not_delete_is_denied_on_confirm_only() -> None:
-    setup = Setup(READER[0])
-
-    preview = await setup.editor.delete("tag", 1, confirm=False)
+    with pytest.raises(ConfirmationRequired):
+        _ = await Setup(READER[0], writes=False).editor.delete("tag", 1, confirm=False)
     with pytest.raises(PermissionDenied):
-        _ = await setup.editor.delete("tag", 1, confirm=True)
-
-    assert preview.deleted is False
+        _ = await Setup(READER[0]).editor.delete("tag", 1, confirm=True)
 
 
 async def test_the_cache_is_dropped_after_a_delete() -> None:
@@ -807,9 +805,10 @@ async def test_a_refused_create_says_exactly_what_is_wrong_and_what_to_do(
     kind: WritableKind, fields: dict[str, object], expected: tuple[str, str | None]
 ) -> None:
     setup = Setup()
-    name = fields.pop("name", "x")
+    name = fields.get("name", "x")
+    others = {key: value for key, value in fields.items() if key != "name"}
 
-    assert await refusal(setup.create(kind, str(name), **fields)) == expected
+    assert await refusal(setup.create(kind, str(name), **others)) == expected
     assert setup.fake.writes == []
 
 
@@ -1023,12 +1022,10 @@ async def test_a_row_without_a_document_count_counts_none() -> None:
                 for row in await super().list_taxonomy(kind)
             ]
 
-    fake = Uncounted(seeded(), user=ADMIN[0])
+    fake = Uncounted(seeded(), user=ADMIN[0], writes=False)
     resolver = TaxonomyResolver(fake, StaticTokenProvider("t"), ttl=60.0)
 
-    preview = await TaxonomyEditor(fake, fake, resolver, fake).delete(
-        "correspondent", "e2e-acme", confirm=False
-    )
-
-    assert preview.document_count == 0
-    assert "(0 documents)" in preview.message
+    with pytest.raises(ConfirmationRequired, match=r"\(0 documents\)"):
+        _ = await TaxonomyEditor(fake, fake, resolver, fake).delete(
+            "correspondent", "e2e-acme", confirm=False
+        )

@@ -16,7 +16,7 @@ import re
 from typing import TYPE_CHECKING, Final
 
 from paperless_mcp.domain.documents import DocumentQuery
-from paperless_mcp.domain.errors import Ambiguous, Validation
+from paperless_mcp.domain.errors import Ambiguous, ConfirmationRequired, Validation, listed, quoted
 from paperless_mcp.domain.taxonomy import (
     DeletedTag,
     OptionInput,
@@ -69,14 +69,14 @@ PATH_HINT = (
 )
 # Paperless prefixes a rejection with the name of the field it concerns.
 PATH_FIELD = "path: "
-HIDDEN_CHILDREN = " Child tags you cannot see (other users') are deleted with it as well."
-# What deleting an object does to the documents that use it, by kind.
+HIDDEN_CHILDREN = "child tags you cannot see (other users') are deleted with it as well"
+# What deleting an object does to the documents that use it, by kind (a clause of the refusal).
 EFFECTS: Final[dict[WritableKind, str]] = {
-    "tag": "It is removed from its documents ({docs}).",
-    "correspondent": "The documents that use it ({docs}) lose their correspondent.",
-    "document_type": "The documents that use it ({docs}) lose their document type.",
-    "storage_path": "The documents that use it ({docs}) lose their storage path.",
-    "custom_field": "The documents that have the field ({docs}) lose the field and its values.",
+    "tag": "it is removed from its documents ({docs})",
+    "correspondent": "the documents that use it ({docs}) lose their correspondent",
+    "document_type": "the documents that use it ({docs}) lose their document type",
+    "storage_path": "the documents that use it ({docs}) lose their storage path",
+    "custom_field": "the documents that have the field ({docs}) lose the field and its values",
 }
 
 
@@ -298,12 +298,13 @@ class TaxonomyEditor:
             raise Validation(message, hint="Keep at least one option or add a new one.")
         if removed and not edit.confirm:
             holding = await self._holding(field, removed)
-            message = (
-                f"Removing options needs confirm=true: {documents(holding)} you can see hold a "
-                f"removed option of {field.name!r} and would keep a value that is no longer one "
-                "of its options; update_document can no longer set it."
+            gone = [o.label for o in current if o.id in removed]
+            effect = (
+                f"remove the option(s) {listed(gone)} of {quoted(field.name)}: "
+                f"{documents(holding)} you can see hold a removed option and would keep a value "
+                "that is no longer one of its options, and update_document can no longer set it"
             )
-            raise Validation(message, hint="Pass confirm=true to remove the options.")
+            raise ConfirmationRequired.for_effect(effect)
         return (
             *(OptionInput(id=number, label=label) for number, label in kept),
             *(OptionInput(label=label) for label in added),
@@ -318,13 +319,13 @@ class TaxonomyEditor:
     async def delete(
         self, kind: WritableKind, item: NameOrId, *, confirm: bool
     ) -> TaxonomyDeletion:
-        """Delete the object, or, without ``confirm``, say what deleting it would do.
+        """Delete the object; without ``confirm`` refuse and say what deleting it would do.
 
         Raises:
+            ConfirmationRequired: ``confirm`` is false. Nothing was changed.
             NotFound: No such object.
             Ambiguous: The name matches several objects.
-            PermissionDenied: With ``confirm``: the user may not delete objects of ``kind``, or
-                this one.
+            PermissionDenied: The user may not delete objects of ``kind``, or this one.
         """
         rows = await self._reader.list_taxonomy(kind)
         found = pick(kind, rows, item)
@@ -338,26 +339,22 @@ class TaxonomyEditor:
         )
         effect = EFFECTS[kind].format(docs=documents(count))
         if kind == "tag":
-            listing = ", ".join(f"{t.name!r} ({documents(t.document_count)})" for t in below)
-            effect += f" Its child tags ({listing}) are deleted with it." if below else ""
-            effect += HIDDEN_CHILDREN
-        subject = f"{LABELS[kind].capitalize()} {found.name!r} (id {found.id})"
-        undone = f"Deleting {subject} cannot be undone. {effect}"
-        message = (
-            f"{subject} was deleted. {effect}"
-            if confirm
-            else undone + " Nothing was deleted: pass confirm=true to delete it."
-        )
-        if confirm:
-            await self._write(kind, lambda: self._writer.delete_taxonomy_item(kind, found.id))
+            if below:
+                children = listed([f"{t.name} ({documents(t.document_count)})" for t in below])
+                effect += f"; its child tags {children} are deleted with it"
+            effect += f"; {HIDDEN_CHILDREN}"
+        subject = f"{LABELS[kind]} {quoted(found.name)} (id {found.id})"
+        if not confirm:
+            msg = f"delete {subject} for good: {effect}"
+            raise ConfirmationRequired.for_effect(msg)
+        await self._write(kind, lambda: self._writer.delete_taxonomy_item(kind, found.id))
         return TaxonomyDeletion(
             kind=kind,
             id=found.id,
             name=found.name,
-            deleted=confirm,
             document_count=count,
             also_deleted=below,
-            message=message,
+            message=f"{subject[0].upper()}{subject[1:]} was deleted: {effect}.",
         )
 
     async def _write[T](self, kind: WritableKind, write: Callable[[], Awaitable[T]]) -> T:

@@ -153,14 +153,13 @@ class DeletedTag(BaseModel):
 
 
 class TaxonomyDeletion(BaseModel):
-    """The outcome of delete_taxonomy_item: what happened, or what confirm would do."""
+    """The outcome of a confirmed delete_taxonomy_item."""
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
     kind: WritableKind
     id: int
     name: str
-    deleted: Annotated[bool, Field(description="false: nothing was deleted, see message.")]
     document_count: Annotated[
         int, Field(description="Documents you can see that use it (not those of its child tags).")
     ]
@@ -173,4 +172,4 @@ class TaxonomyDeletion(BaseModel):
             )
         ),
     ] = ()
-    message: Annotated[str, Field(description="The effect of the deletion, and how to confirm.")]
+    message: Annotated[str, Field(description="What was deleted and what it did to the documents.")]

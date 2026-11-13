@@ -104,7 +104,7 @@ async def test_an_object_of_every_kind_is_created_renamed_and_deleted_with_confi
         listed = await call(client, "list_taxonomy", kind=kind, name_contains=name)
         changed = await call(client, "update_taxonomy_item", kind=kind, item=name, name=renamed)
         found = await call(client, "list_taxonomy", kind=kind, name_contains=renamed)
-        preview = await call(client, "delete_taxonomy_item", kind=kind, item=renamed)
+        preview = await error(client, "delete_taxonomy_item", kind=kind, item=renamed)
         still = await call(client, "list_taxonomy", kind=kind, name_contains=renamed)
         deleted = await call(
             client, "delete_taxonomy_item", kind=kind, item=changed["id"], confirm=True
@@ -116,10 +116,9 @@ async def test_an_object_of_every_kind_is_created_renamed_and_deleted_with_confi
     assert [r["id"] for r in rows(listed)] == [created["id"]]
     assert (changed["id"], changed["name"]) == (created["id"], renamed)
     assert [r["id"] for r in rows(found)] == [created["id"]]
-    assert preview["deleted"] is False
-    assert "confirm=true" in str(preview["message"])
+    assert "Nothing was changed. Confirming would delete" in preview
     assert still["count"] == 1
-    assert deleted["deleted"] is True
+    assert "was deleted" in str(deleted["message"])
     assert gone["count"] == 0
 
 
@@ -135,7 +134,7 @@ async def test_the_tag_hierarchy_is_kept_sane_and_a_delete_takes_the_children(
         cycle = await error(client, "update_taxonomy_item", kind="tag", item=top, parent=middle)
         itself = await error(client, "update_taxonomy_item", kind="tag", item=top, parent=top)
         _ = await call(client, "update_document", document_id=document, tags_set=[middle])
-        preview = await call(client, "delete_taxonomy_item", kind="tag", item=top)
+        preview = await error(client, "delete_taxonomy_item", kind="tag", item=top)
         freed = await call(
             client, "update_taxonomy_item", kind="tag", item=middle, clear_parent=True
         )
@@ -147,8 +146,8 @@ async def test_the_tag_hierarchy_is_kept_sane_and_a_delete_takes_the_children(
     assert child["parent"] == parent["id"]
     assert "descendant" in cycle
     assert "itself" in itself
-    assert preview["also_deleted"] == [{"name": middle, "document_count": 1}]
-    assert preview["document_count"] == 1
+    assert f"its child tags '{middle} (1 document)' are deleted with it" in preview
+    assert "it is removed from its documents (1 document)" in preview
     assert (freed["parent"], moved["parent"]) == (None, parent["id"])
     assert deleted["also_deleted"] == [{"name": middle, "document_count": 1}]
     raw = obj(parse(stack.admin.get(f"/api/documents/{document}/", params={"fields": "tags"})))
@@ -212,8 +211,9 @@ async def test_select_options_keep_their_ids_and_the_documents_that_hold_them(
     assert value["value"] == "TWO"
     assert options(field_renamed) == options(renamed)
     assert "confirm=true" in refused
-    assert "needs confirm=true: 0 documents you can see hold a removed option" in refused
-    assert "needs confirm=true: 1 document you can see hold a removed option" in holding
+    assert "remove the option(s) 'one' of" in refused
+    assert ": 0 documents you can see hold a removed option" in refused
+    assert ": 1 document you can see hold a removed option" in holding
     assert [o[1] for o in options(removed)] == ["TWO", "three"]
     stored = obj(parse(stack.admin.get(f"/api/custom_fields/{created['id']}/")))
     assert [o["id"] for o in cast("list[Json]", obj(stored["extra_data"])["select_options"])] == [
@@ -257,12 +257,12 @@ async def test_a_user_without_the_permissions_cannot_write(stack: Stack) -> None
     async with Client(server(stack, stack.reader_token)) as client:
         created = await error(client, "create_taxonomy_item", kind="tag", name=new_name())
         updated = await error(client, "update_taxonomy_item", kind="tag", item=name, name="x")
-        preview = await call(client, "delete_taxonomy_item", kind="tag", item=name)
+        preview = await error(client, "delete_taxonomy_item", kind="tag", item=name)
         deleted = await error(client, "delete_taxonomy_item", kind="tag", item=name, confirm=True)
 
     for text in (created, updated, deleted):
         assert "may not perform" in text
-    assert preview["deleted"] is False
+    assert "Nothing was changed. Confirming would delete tag" in preview
 
 
 async def test_read_only_mode_hides_the_write_tools(stack: Stack) -> None:
@@ -298,10 +298,9 @@ async def test_deleting_a_tag_also_deletes_child_tags_the_caller_cannot_see(
         child = stack.admin.post(
             "/api/tags/", json={"name": theirs, "parent": parent["id"]}
         ).raise_for_status()
-        preview = await call(client_, "delete_taxonomy_item", kind="tag", item=mine)
+        preview = await error(client_, "delete_taxonomy_item", kind="tag", item=mine)
         deleted = await call(client_, "delete_taxonomy_item", kind="tag", item=mine, confirm=True)
 
-    assert preview["also_deleted"] == []
-    assert "Child tags you cannot see" in str(preview["message"])
-    assert deleted["deleted"] is True
+    assert "child tags you cannot see (other users') are deleted with it as well" in preview
+    assert "was deleted" in str(deleted["message"])
     assert stack.admin.get(f"/api/tags/{obj(parse(child))['id']}/").status_code == 404

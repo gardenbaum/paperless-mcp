@@ -189,24 +189,22 @@ async def test_nothing_to_change_is_a_tool_error() -> None:
     assert "Nothing to change" in text
 
 
-async def test_a_delete_without_confirm_only_explains() -> None:
-    fake = writer()
-    async with Client(serve(fake)) as client:
+async def test_a_delete_without_confirm_is_an_error_that_says_the_effect() -> None:
+    state = seeded()
+    reader = FakePaperless(state, user="admin")  # created without allow_writes: a write would fail
+    async with Client(serve(reader)) as client:
         result = await client.call_tool(
-            "delete_taxonomy_item", {"kind": "tag", "item": "e2e-finance"}
+            "delete_taxonomy_item", {"kind": "tag", "item": "e2e-finance"}, raise_on_error=False
         )
         listed = await client.call_tool(
             "list_taxonomy", {"kind": "tag", "name_contains": "e2e-fin"}
         )
 
-    output = result.structured_content
-    assert output is not None
-    assert (output["deleted"], output["name"], output["also_deleted"]) == (
-        False,
-        "e2e-finance",
-        [{"name": "e2e-invoices", "document_count": 1}],
-    )
-    assert "confirm=true" in cast("str", output["message"])
+    assert result.is_error
+    text = str(result.content)
+    assert "Nothing was changed. Confirming would delete tag 'e2e-finance' (id 1) for good" in text
+    assert "'e2e-invoices (1 document)' are deleted with it" in text
+    assert "confirm" in text
     assert cast("Json", listed.structured_content)["count"] == 1
 
 
@@ -221,7 +219,7 @@ async def test_a_confirmed_delete_deletes_and_the_list_shows_it() -> None:
 
     output = result.structured_content
     assert output is not None
-    assert (output["deleted"], output["document_count"]) == (True, 1)
+    assert (output["name"], output["document_count"]) == ("e2e-acme", 1)
     assert cast("Json", listed.structured_content)["count"] == 0
     assert fake.state.documents[0].correspondent is None
 
@@ -235,3 +233,13 @@ async def test_the_write_tools_are_refused_for_a_user_without_the_permission() -
 
     for text in (created, updated, deleted):
         assert "may not perform" in text
+
+
+@pytest.mark.parametrize("tool", ["update_taxonomy_item", "delete_taxonomy_item"])
+async def test_confirm_is_the_shared_parameter_that_defaults_to_false(tool: str) -> None:
+    async with Client(serve(writer())) as client:
+        [found] = [t for t in await client.list_tools() if t.name == tool]
+
+    confirm = cast("Json", cast("Json", found.input_schema["properties"])["confirm"])
+    assert confirm["default"] is False
+    assert str(confirm["description"]).startswith("Must be true to go ahead.")
