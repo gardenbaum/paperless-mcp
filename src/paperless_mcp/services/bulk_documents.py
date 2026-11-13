@@ -220,10 +220,15 @@ class BulkDocumentEditor:
         return [(number, titles.get(number, f"#{number}")) for number in found]
 
     async def _current(self, selection: list[int]) -> list[DocumentHit]:
-        """The selected documents in selection order; every one must exist and be visible."""
-        query = DocumentQuery(ids=tuple(selection))
-        page = await self._reader.search_documents(query, page=1, page_size=MAX_DOCUMENTS)
-        found = {hit.id: hit for hit in page.hits}
+        """The given documents in the given order; every one must exist and be visible.
+
+        Read in batches of one search page, since link targets are not capped like a selection.
+        """
+        found: dict[int, DocumentHit] = {}
+        for start in range(0, len(selection), MAX_DOCUMENTS):
+            query = DocumentQuery(ids=tuple(selection[start : start + MAX_DOCUMENTS]))
+            page = await self._reader.search_documents(query, page=1, page_size=MAX_DOCUMENTS)
+            found.update((hit.id, hit) for hit in page.hits)
         missing = [number for number in selection if number not in found]
         if missing:
             noun = "document" if len(missing) == 1 else "documents"

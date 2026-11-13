@@ -605,6 +605,19 @@ async def test_a_link_to_a_visible_document_is_accepted() -> None:
     assert setup.document(SECOND).custom_fields[setup.field("e2e-documentlink")] == [PUBLIC]
 
 
+async def test_more_link_targets_than_one_search_page_are_all_checked() -> None:
+    setup = Setup()
+    targets = list(range(10, 10 + MAX_DOCUMENTS + 5))
+    setup.state.documents.extend(FakeDocument(id=n, title=f"Doc {n}") for n in targets)
+
+    _ = await setup.run(
+        [SECOND],
+        ModifyCustomFields(op="modify_custom_fields", values={"e2e-documentlink": [*targets]}),
+    )
+
+    assert setup.document(SECOND).custom_fields[setup.field("e2e-documentlink")] == targets
+
+
 # --- delete, reprocess
 
 
