@@ -62,6 +62,37 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
     ("POST", "/api/tags/", 201): (
         "3.4.2 answers a created tag without the `document_count` the schema requires (PLMCP-16)"
     ),
+    ("POST", "/api/correspondents/", 201): (
+        "3.4.2 answers a created correspondent without `document_count`, `last_correspondence` "
+        "and `permissions`, which the schema requires (PLMCP-19)"
+    ),
+    ("POST", "/api/document_types/", 201): (
+        "3.4.2 answers a created document type without `document_count` and `permissions`, "
+        "which the schema requires (PLMCP-19)"
+    ),
+    ("POST", "/api/storage_paths/", 201): (
+        "3.4.2 answers a created storage path without the `document_count` the schema requires "
+        "(PLMCP-19)"
+    ),
+    ("POST", "/api/custom_fields/", 201): (
+        "3.4.2 answers a created custom field without the `document_count` the schema requires "
+        "(PLMCP-19)"
+    ),
+    ("PATCH", "/api/correspondents/{id}/", 200): (
+        "3.4.2 answers an updated correspondent without `last_correspondence` and `permissions`, "
+        "which the schema requires (PLMCP-19)"
+    ),
+    ("PATCH", "/api/document_types/{id}/", 200): (
+        "3.4.2 answers an updated document type without the `permissions` the schema requires "
+        "(PLMCP-19)"
+    ),
+    ("GET", "/api/correspondents/{id}/", 200): (
+        "3.4.2 answers a correspondent without `last_correspondence` and `permissions`, which "
+        "the schema requires (PLMCP-19)"
+    ),
+    ("GET", "/api/document_types/{id}/", 200): (
+        "3.4.2 answers a document type without the `permissions` the schema requires (PLMCP-19)"
+    ),
     ("GET", "/api/documents/{id}/history/", 200): (
         "3.4.2 answers a bare list, not the paginated envelope of the schema, and a null actor "
         "for system changes (PLMCP-11)"

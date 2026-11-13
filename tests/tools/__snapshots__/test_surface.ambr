@@ -505,6 +505,366 @@
         }),
       }),
       'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Create taxonomy item',
+      }),
+      'description': '''
+        Create a tag, correspondent, document type, storage path or custom field.
+        
+        The kind decides which settings apply; a setting of another kind is an error. A storage
+        path needs path, a custom field needs data_type, and a select field needs select_options.
+        The new object matches nothing automatically unless matching_algorithm says so. Tags,
+        correspondents, document types and storage paths belong to you: other Paperless users do
+        not see them until they are shared, and their names are unique per kind and owner. Custom
+        fields have no owner and are visible to everyone, so their names are unique across all
+        users. Returns the object as it was stored, with the ids of select options.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'case_insensitive': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: ignore case.',
+          }),
+          'colour': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: the colour as #rrggbb.',
+          }),
+          'data_type': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'string',
+                  'url',
+                  'date',
+                  'boolean',
+                  'integer',
+                  'float',
+                  'monetary',
+                  'documentlink',
+                  'select',
+                  'longtext',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields (required): what the field holds; it cannot change later.',
+          }),
+          'is_inbox_tag': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: whether documents with it count as inbox documents.',
+          }),
+          'kind': dict({
+            'description': 'What to work on; it decides which of the other settings apply.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+            ]),
+            'type': 'string',
+          }),
+          'match': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: the words, phrase or regular expression the matching algorithm uses.',
+          }),
+          'matching_algorithm': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'none',
+                  'any',
+                  'all',
+                  'literal',
+                  'regex',
+                  'fuzzy',
+                  'auto',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: how Paperless assigns it to new documents by itself. none: never (the default when creating); any or all: any or all of the words in match; literal: the exact phrase; regex: a regular expression; fuzzy: similar words; auto: learned from your documents.',
+          }),
+          'name': dict({
+            'description': 'The new name, 1 to 128 characters, unique for you.',
+            'type': 'string',
+          }),
+          'parent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: name or id of the parent tag; see list_taxonomy.',
+          }),
+          'path': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Storage paths: the folder template for stored files, e.g. '{{ created_year }}/{{ correspondent }}/{{ title }}'. Paperless refuses unknown variables.",
+          }),
+          'select_options': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'type': 'string',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields of data_type select (required): the option labels.',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'name',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'create_taxonomy_item',
+      'outputSchema': dict({
+        'description': '''
+          A taxonomy object with its automatic-matching rule, as a write answers it.
+          
+          Fields that do not apply to the kind are null: the matching rule belongs to every kind but
+          custom fields, the inbox flag to tags, the path template to storage paths.
+        ''',
+        'properties': dict({
+          'case_insensitive': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Whether matching ignores case.',
+          }),
+          'colour': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: the colour, e.g. #a6cee3.',
+          }),
+          'data_type': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields: the data type.',
+          }),
+          'document_count': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Documents the user may see that use it; null for views, users, groups.',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'is_inbox_tag': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: documents with it count as the inbox.',
+          }),
+          'match': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'The text or pattern the algorithm uses.',
+          }),
+          'matching_algorithm': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'none',
+                  'any',
+                  'all',
+                  'literal',
+                  'regex',
+                  'fuzzy',
+                  'auto',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'How Paperless assigns it to new documents by itself; none: never.',
+          }),
+          'name': dict({
+            'description': 'The name; the username for users.',
+            'type': 'string',
+          }),
+          'parent': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: id of the parent tag.',
+          }),
+          'path': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Storage paths: the path template.',
+          }),
+          'select_options': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'An option of a select custom field; documents store its id as the value.',
+                  'properties': dict({
+                    'id': dict({
+                      'type': 'string',
+                    }),
+                    'label': dict({
+                      'type': 'string',
+                    }),
+                  }),
+                  'required': list([
+                    'id',
+                    'label',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields of type select: the options, ids and labels.',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'document_count',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Create taxonomy item',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
         'destructiveHint': True,
         'idempotentHint': True,
         'openWorldHint': False,
@@ -638,6 +998,128 @@
         'type': 'object',
       }),
       'title': 'Delete note',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Delete taxonomy item',
+      }),
+      'description': '''
+        Delete a tag, correspondent, document type, storage path or custom field for good.
+        
+        There is no trash for these: the documents stay but lose the tag, correspondent, type, path
+        or field value, and deleting a tag also deletes its child tags. Without confirm it deletes
+        nothing and fails with an error that says the effect (documents affected, child tags that go
+        with it); describe that to the user and call again with confirm=true once they agree.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'item': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'kind': dict({
+            'description': 'What to work on; it decides which of the other settings apply.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+            ]),
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'item',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'delete_taxonomy_item',
+      'outputSchema': dict({
+        'description': 'The outcome of a confirmed delete_taxonomy_item.',
+        'properties': dict({
+          'also_deleted': dict({
+            'default': list([
+            ]),
+            'description': "Tags: the child tags you can see that are deleted with it, with their document counts. Child tags you cannot see (other users') are deleted too.",
+            'items': dict({
+              'description': 'A child tag that goes with its parent, and how many documents lose it.',
+              'properties': dict({
+                'document_count': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'name',
+                'document_count',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'document_count': dict({
+            'description': 'Documents you can see that use it (not those of its child tags).',
+            'type': 'integer',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'kind': dict({
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+            ]),
+            'type': 'string',
+          }),
+          'message': dict({
+            'description': 'What was deleted and what it did to the documents.',
+            'type': 'string',
+          }),
+          'name': dict({
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'id',
+          'name',
+          'document_count',
+          'message',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Delete taxonomy item',
     }),
     dict({
       '_meta': dict({
@@ -3911,6 +4393,399 @@
         'type': 'object',
       }),
       'title': 'Update document',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Update taxonomy item',
+      }),
+      'description': '''
+        Change a tag, correspondent, document type, storage path or custom field.
+        
+        Only the settings you name change. The kind decides which settings apply. Select options
+        are added, renamed or removed one by one and the others keep their ids, so documents keep
+        their values; renaming an option changes its label for every document. The data type of a
+        custom field cannot change (create a new field instead). A tag cannot become its own
+        ancestor. Returns the object as stored, with the number of documents that use it.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'case_insensitive': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: ignore case.',
+          }),
+          'clear_parent': dict({
+            'default': False,
+            'description': 'Tags: make the tag a top-level tag (not with parent).',
+            'type': 'boolean',
+          }),
+          'colour': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: the colour as #rrggbb.',
+          }),
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'is_inbox_tag': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: whether documents with it count as inbox documents.',
+          }),
+          'item': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'kind': dict({
+            'description': 'What to work on; it decides which of the other settings apply.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+            ]),
+            'type': 'string',
+          }),
+          'match': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: the words, phrase or regular expression the matching algorithm uses.',
+          }),
+          'matching_algorithm': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'none',
+                  'any',
+                  'all',
+                  'literal',
+                  'regex',
+                  'fuzzy',
+                  'auto',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: how Paperless assigns it to new documents by itself. none: never (the default when creating); any or all: any or all of the words in match; literal: the exact phrase; regex: a regular expression; fuzzy: similar words; auto: learned from your documents.',
+          }),
+          'name': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'New name, 1 to 128 characters.',
+          }),
+          'parent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: name or id of the parent tag; see list_taxonomy.',
+          }),
+          'path': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Storage paths: the folder template for stored files, e.g. '{{ created_year }}/{{ correspondent }}/{{ title }}'. Paperless refuses unknown variables.",
+          }),
+          'select_options_add': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'type': 'string',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Select fields: labels of options to add.',
+          }),
+          'select_options_remove': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'type': 'string',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Select fields: labels (or ids) of options to remove; needs confirm.',
+          }),
+          'select_options_rename': dict({
+            'anyOf': list([
+              dict({
+                'additionalProperties': dict({
+                  'type': 'string',
+                }),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Select fields: option label (or id) to its new label.',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'item',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'update_taxonomy_item',
+      'outputSchema': dict({
+        'description': '''
+          A taxonomy object with its automatic-matching rule, as a write answers it.
+          
+          Fields that do not apply to the kind are null: the matching rule belongs to every kind but
+          custom fields, the inbox flag to tags, the path template to storage paths.
+        ''',
+        'properties': dict({
+          'case_insensitive': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Whether matching ignores case.',
+          }),
+          'colour': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: the colour, e.g. #a6cee3.',
+          }),
+          'data_type': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields: the data type.',
+          }),
+          'document_count': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Documents the user may see that use it; null for views, users, groups.',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'is_inbox_tag': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: documents with it count as the inbox.',
+          }),
+          'match': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'The text or pattern the algorithm uses.',
+          }),
+          'matching_algorithm': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'none',
+                  'any',
+                  'all',
+                  'literal',
+                  'regex',
+                  'fuzzy',
+                  'auto',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'How Paperless assigns it to new documents by itself; none: never.',
+          }),
+          'name': dict({
+            'description': 'The name; the username for users.',
+            'type': 'string',
+          }),
+          'parent': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: id of the parent tag.',
+          }),
+          'path': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Storage paths: the path template.',
+          }),
+          'select_options': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'An option of a select custom field; documents store its id as the value.',
+                  'properties': dict({
+                    'id': dict({
+                      'type': 'string',
+                    }),
+                    'label': dict({
+                      'type': 'string',
+                    }),
+                  }),
+                  'required': list([
+                    'id',
+                    'label',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields of type select: the options, ids and labels.',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'document_count',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Update taxonomy item',
     }),
   ])
 # ---
@@ -4123,6 +4998,366 @@
         }),
       }),
       'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Create taxonomy item',
+      }),
+      'description': '''
+        Create a tag, correspondent, document type, storage path or custom field.
+        
+        The kind decides which settings apply; a setting of another kind is an error. A storage
+        path needs path, a custom field needs data_type, and a select field needs select_options.
+        The new object matches nothing automatically unless matching_algorithm says so. Tags,
+        correspondents, document types and storage paths belong to you: other Paperless users do
+        not see them until they are shared, and their names are unique per kind and owner. Custom
+        fields have no owner and are visible to everyone, so their names are unique across all
+        users. Returns the object as it was stored, with the ids of select options.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'case_insensitive': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: ignore case.',
+          }),
+          'colour': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: the colour as #rrggbb.',
+          }),
+          'data_type': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'string',
+                  'url',
+                  'date',
+                  'boolean',
+                  'integer',
+                  'float',
+                  'monetary',
+                  'documentlink',
+                  'select',
+                  'longtext',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields (required): what the field holds; it cannot change later.',
+          }),
+          'is_inbox_tag': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: whether documents with it count as inbox documents.',
+          }),
+          'kind': dict({
+            'description': 'What to work on; it decides which of the other settings apply.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+            ]),
+            'type': 'string',
+          }),
+          'match': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: the words, phrase or regular expression the matching algorithm uses.',
+          }),
+          'matching_algorithm': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'none',
+                  'any',
+                  'all',
+                  'literal',
+                  'regex',
+                  'fuzzy',
+                  'auto',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: how Paperless assigns it to new documents by itself. none: never (the default when creating); any or all: any or all of the words in match; literal: the exact phrase; regex: a regular expression; fuzzy: similar words; auto: learned from your documents.',
+          }),
+          'name': dict({
+            'description': 'The new name, 1 to 128 characters, unique for you.',
+            'type': 'string',
+          }),
+          'parent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: name or id of the parent tag; see list_taxonomy.',
+          }),
+          'path': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Storage paths: the folder template for stored files, e.g. '{{ created_year }}/{{ correspondent }}/{{ title }}'. Paperless refuses unknown variables.",
+          }),
+          'select_options': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'type': 'string',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields of data_type select (required): the option labels.',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'name',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'create_taxonomy_item',
+      'outputSchema': dict({
+        'description': '''
+          A taxonomy object with its automatic-matching rule, as a write answers it.
+          
+          Fields that do not apply to the kind are null: the matching rule belongs to every kind but
+          custom fields, the inbox flag to tags, the path template to storage paths.
+        ''',
+        'properties': dict({
+          'case_insensitive': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Whether matching ignores case.',
+          }),
+          'colour': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: the colour, e.g. #a6cee3.',
+          }),
+          'data_type': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields: the data type.',
+          }),
+          'document_count': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Documents the user may see that use it; null for views, users, groups.',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'is_inbox_tag': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: documents with it count as the inbox.',
+          }),
+          'match': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'The text or pattern the algorithm uses.',
+          }),
+          'matching_algorithm': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'none',
+                  'any',
+                  'all',
+                  'literal',
+                  'regex',
+                  'fuzzy',
+                  'auto',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'How Paperless assigns it to new documents by itself; none: never.',
+          }),
+          'name': dict({
+            'description': 'The name; the username for users.',
+            'type': 'string',
+          }),
+          'parent': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: id of the parent tag.',
+          }),
+          'path': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Storage paths: the path template.',
+          }),
+          'select_options': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'An option of a select custom field; documents store its id as the value.',
+                  'properties': dict({
+                    'id': dict({
+                      'type': 'string',
+                    }),
+                    'label': dict({
+                      'type': 'string',
+                    }),
+                  }),
+                  'required': list([
+                    'id',
+                    'label',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields of type select: the options, ids and labels.',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'document_count',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Create taxonomy item',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
         'destructiveHint': True,
         'idempotentHint': True,
         'openWorldHint': False,
@@ -4256,6 +5491,128 @@
         'type': 'object',
       }),
       'title': 'Delete note',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Delete taxonomy item',
+      }),
+      'description': '''
+        Delete a tag, correspondent, document type, storage path or custom field for good.
+        
+        There is no trash for these: the documents stay but lose the tag, correspondent, type, path
+        or field value, and deleting a tag also deletes its child tags. Without confirm it deletes
+        nothing and fails with an error that says the effect (documents affected, child tags that go
+        with it); describe that to the user and call again with confirm=true once they agree.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'item': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'kind': dict({
+            'description': 'What to work on; it decides which of the other settings apply.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+            ]),
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'item',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'delete_taxonomy_item',
+      'outputSchema': dict({
+        'description': 'The outcome of a confirmed delete_taxonomy_item.',
+        'properties': dict({
+          'also_deleted': dict({
+            'default': list([
+            ]),
+            'description': "Tags: the child tags you can see that are deleted with it, with their document counts. Child tags you cannot see (other users') are deleted too.",
+            'items': dict({
+              'description': 'A child tag that goes with its parent, and how many documents lose it.',
+              'properties': dict({
+                'document_count': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'name',
+                'document_count',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'document_count': dict({
+            'description': 'Documents you can see that use it (not those of its child tags).',
+            'type': 'integer',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'kind': dict({
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+            ]),
+            'type': 'string',
+          }),
+          'message': dict({
+            'description': 'What was deleted and what it did to the documents.',
+            'type': 'string',
+          }),
+          'name': dict({
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'id',
+          'name',
+          'document_count',
+          'message',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Delete taxonomy item',
     }),
     dict({
       '_meta': dict({
@@ -7529,6 +8886,399 @@
         'type': 'object',
       }),
       'title': 'Update document',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Update taxonomy item',
+      }),
+      'description': '''
+        Change a tag, correspondent, document type, storage path or custom field.
+        
+        Only the settings you name change. The kind decides which settings apply. Select options
+        are added, renamed or removed one by one and the others keep their ids, so documents keep
+        their values; renaming an option changes its label for every document. The data type of a
+        custom field cannot change (create a new field instead). A tag cannot become its own
+        ancestor. Returns the object as stored, with the number of documents that use it.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'case_insensitive': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: ignore case.',
+          }),
+          'clear_parent': dict({
+            'default': False,
+            'description': 'Tags: make the tag a top-level tag (not with parent).',
+            'type': 'boolean',
+          }),
+          'colour': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: the colour as #rrggbb.',
+          }),
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'is_inbox_tag': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: whether documents with it count as inbox documents.',
+          }),
+          'item': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'kind': dict({
+            'description': 'What to work on; it decides which of the other settings apply.',
+            'enum': list([
+              'tag',
+              'correspondent',
+              'document_type',
+              'storage_path',
+              'custom_field',
+            ]),
+            'type': 'string',
+          }),
+          'match': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: the words, phrase or regular expression the matching algorithm uses.',
+          }),
+          'matching_algorithm': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'none',
+                  'any',
+                  'all',
+                  'literal',
+                  'regex',
+                  'fuzzy',
+                  'auto',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags, correspondents, document types, storage paths: how Paperless assigns it to new documents by itself. none: never (the default when creating); any or all: any or all of the words in match; literal: the exact phrase; regex: a regular expression; fuzzy: similar words; auto: learned from your documents.',
+          }),
+          'name': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'New name, 1 to 128 characters.',
+          }),
+          'parent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: name or id of the parent tag; see list_taxonomy.',
+          }),
+          'path': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Storage paths: the folder template for stored files, e.g. '{{ created_year }}/{{ correspondent }}/{{ title }}'. Paperless refuses unknown variables.",
+          }),
+          'select_options_add': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'type': 'string',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Select fields: labels of options to add.',
+          }),
+          'select_options_remove': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'type': 'string',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Select fields: labels (or ids) of options to remove; needs confirm.',
+          }),
+          'select_options_rename': dict({
+            'anyOf': list([
+              dict({
+                'additionalProperties': dict({
+                  'type': 'string',
+                }),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Select fields: option label (or id) to its new label.',
+          }),
+        }),
+        'required': list([
+          'kind',
+          'item',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'update_taxonomy_item',
+      'outputSchema': dict({
+        'description': '''
+          A taxonomy object with its automatic-matching rule, as a write answers it.
+          
+          Fields that do not apply to the kind are null: the matching rule belongs to every kind but
+          custom fields, the inbox flag to tags, the path template to storage paths.
+        ''',
+        'properties': dict({
+          'case_insensitive': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Whether matching ignores case.',
+          }),
+          'colour': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: the colour, e.g. #a6cee3.',
+          }),
+          'data_type': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields: the data type.',
+          }),
+          'document_count': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Documents the user may see that use it; null for views, users, groups.',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'is_inbox_tag': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: documents with it count as the inbox.',
+          }),
+          'match': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'The text or pattern the algorithm uses.',
+          }),
+          'matching_algorithm': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'none',
+                  'any',
+                  'all',
+                  'literal',
+                  'regex',
+                  'fuzzy',
+                  'auto',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'How Paperless assigns it to new documents by itself; none: never.',
+          }),
+          'name': dict({
+            'description': 'The name; the username for users.',
+            'type': 'string',
+          }),
+          'parent': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tags: id of the parent tag.',
+          }),
+          'path': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Storage paths: the path template.',
+          }),
+          'select_options': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'An option of a select custom field; documents store its id as the value.',
+                  'properties': dict({
+                    'id': dict({
+                      'type': 'string',
+                    }),
+                    'label': dict({
+                      'type': 'string',
+                    }),
+                  }),
+                  'required': list([
+                    'id',
+                    'label',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Custom fields of type select: the options, ids and labels.',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'document_count',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Update taxonomy item',
     }),
   ])
 # ---

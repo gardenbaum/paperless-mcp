@@ -302,3 +302,33 @@ reason = "request() only tests retry for truth (`if retry`), so None and False b
 mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_document__mutmut_9"
 function_hash = "5d60b85a9db1"
 reason = "httpx2 upper-cases the method when it builds the request, so 'delete' sends exactly what 'DELETE' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.taxonomy_edits.xǁTaxonomyEditorǁdelete__mutmut_16"
+function_hash = "5fe9ec283ed8"
+reason = "Only tags have a parent, so the parent map built from the rows of any other kind has no children and descendants() returns the empty set whether or not the kind is checked."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.taxonomy.xǁPaperlessTaxonomyWriterǁcreate_taxonomy_item__mutmut_21"
+function_hash = "f1693232a782"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' is sent as 'POST'."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.taxonomy.xǁPaperlessTaxonomyWriterǁupdate_taxonomy_item__mutmut_3"
+function_hash = "9e402a3c722c"
+reason = "_body() reads its kind only when create is true (the default matching rule of a new object); an update passes create=False, so None for the kind changes nothing."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.taxonomy.xǁPaperlessTaxonomyWriterǁupdate_taxonomy_item__mutmut_5"
+function_hash = "9e402a3c722c"
+reason = "_body() tests create only for truth and an update means false; None is false too."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.taxonomy.xǁPaperlessTaxonomyWriterǁupdate_taxonomy_item__mutmut_33"
+function_hash = "9e402a3c722c"
+reason = "httpx2 upper-cases the method when it builds the request, so 'patch' is sent as 'PATCH'."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.taxonomy.xǁPaperlessTaxonomyWriterǁdelete_taxonomy_item__mutmut_7"
+function_hash = "aaa315a74701"
+reason = "httpx2 upper-cases the method when it builds the request, so 'delete' is sent as 'DELETE'."

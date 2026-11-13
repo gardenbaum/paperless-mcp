@@ -29,7 +29,13 @@ if TYPE_CHECKING:
     )
     from paperless_mcp.domain.instance import InstanceOverview
     from paperless_mcp.domain.tasks import TaskStatus
-    from paperless_mcp.domain.taxonomy import TaxonomyItem, TaxonomyKind
+    from paperless_mcp.domain.taxonomy import (
+        TaxonomyDetail,
+        TaxonomyItem,
+        TaxonomyKind,
+        TaxonomyValues,
+        WritableKind,
+    )
 
 
 class InstanceReader(Protocol):
@@ -232,6 +238,51 @@ class TaxonomyWriter(Protocol):
         Raises:
             PermissionDenied: The user may not add tags.
             Validation: The name is blank, too long, or the user already has such a tag.
+        """
+        ...
+
+    async def create_taxonomy_item(
+        self, kind: WritableKind, name: str, values: TaxonomyValues
+    ) -> TaxonomyDetail:
+        """A new object of ``kind`` named ``name`` with the settings ``values`` sets.
+
+        The user owns it.
+
+        Where the kind has a matching rule it defaults to "none" (never assigned automatically).
+        ``values.name`` is ignored; a custom field needs ``data_type``, a storage path ``path``.
+
+        Raises:
+            PermissionDenied: The user may not add objects of ``kind``.
+            Validation: Paperless rejected a value (blank or duplicate name, bad colour, unknown
+                parent, invalid pattern or path template, missing options).
+        """
+        ...
+
+    async def update_taxonomy_item(
+        self, kind: WritableKind, item_id: int, values: TaxonomyValues
+    ) -> TaxonomyDetail:
+        """Change the settings ``values`` sets and return the object as it is afterwards.
+
+        Select options in ``values.select_options`` replace the old list; options with an id keep
+        it. A custom field's options stay when ``values`` leaves them out (the adapter sends
+        them along, Paperless refuses a change of a select field without them).
+
+        Raises:
+            NotFound: No such object, or the user may not see it.
+            PermissionDenied: The user may not change objects of ``kind``, or this one.
+            Validation: Paperless rejected a value (a parent that would make a cycle, ...).
+        """
+        ...
+
+    async def delete_taxonomy_item(self, kind: WritableKind, item_id: int) -> None:
+        """Delete the object for good: Paperless has no trash for taxonomy.
+
+        Documents lose what refers to it (tag, correspondent, type, path, or the custom field's
+        value); deleting a tag deletes its child tags too, at any depth.
+
+        Raises:
+            NotFound: No such object, or the user may not see it.
+            PermissionDenied: The user may not delete objects of ``kind``, or this one.
         """
         ...
 

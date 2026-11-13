@@ -34,6 +34,7 @@ from paperless_mcp.services.notes import NoteService
 from paperless_mcp.services.removal import DocumentRemoval
 from paperless_mcp.services.tasks import TaskService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
+from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
 from paperless_mcp.tools import ai, core
 from paperless_mcp.tools._shared import (
     ANNOTATIONS,
@@ -200,6 +201,9 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
             services = Services(
                 instance=InstanceService(adapters.instance),
                 taxonomy=taxonomy,
+                taxonomy_edits=TaxonomyEditor(
+                    adapters.taxonomy, adapters.taxonomy_writes, taxonomy, adapters.documents
+                ),
                 documents=documents,
                 files=FileService(
                     adapters.documents, web_url=web_url, max_bytes=settings.max_download_bytes
