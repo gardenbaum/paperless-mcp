@@ -4,6 +4,7 @@ The stack itself is started by `just e2e-up` (tests/e2e/compose.yaml). Seeding i
 object is looked up by its name or title first, so rerunning on a seeded stack changes nothing.
 """
 
+import base64
 import os
 import time
 from dataclasses import dataclass
@@ -106,15 +107,26 @@ class Stack:
 
 def pdf(text: str) -> bytes:
     """Build a one-page PDF with `text` as its text layer (no binary fixtures in the repo)."""
-    stream = f"BT /F1 18 Tf 72 720 Td ({text}) Tj ET".encode("latin-1")
+    return pdf_pages([text])
+
+
+def pdf_pages(texts: list[str]) -> bytes:
+    """Build a PDF with one page per text, each text being the page's text layer."""
+    font = 3 + 2 * len(texts)
+    kids = " ".join(f"{3 + 2 * n} 0 R" for n in range(len(texts)))
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources 6 0 R >>",
-        b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Font << /F1 5 0 R >> >>",
+        f"<< /Type /Pages /Kids [{kids}] /Count {len(texts)} >>".encode(),
     ]
+    for number, text in enumerate(texts):
+        stream = f"BT /F1 18 Tf 72 720 Td ({text}) Tj ET".encode("latin-1")
+        page = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents {4 + 2 * number} 0 R "
+            f"/Resources << /Font << /F1 {font} 0 R >> >> >>"
+        )
+        objects.append(page.encode())
+        objects.append(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
     out = b"%PDF-1.4\n"
     offsets: list[int] = []
     for number, body in enumerate(objects, start=1):
@@ -128,6 +140,32 @@ def pdf(text: str) -> bytes:
         xref,
     )
     return out
+
+
+# A one-page PDF encrypted with the user password below (RC4, made once with pikepdf): Paperless
+# consumes it without text and without a page count, and remove_password unlocks it.
+ENCRYPTED_PASSWORD = "s3cret"
+_ENCRYPTED_BASE64 = (
+    "JVBERi0xLjUKJb/3ov4KMSAwIG9iago8PCAvUGFnZXMgMiAwIFIgL1R5cGUgL0NhdGFsb2cgPj4KZW5kb2Jq"
+    "CjIgMCBvYmoKPDwgL0NvdW50IDEgL0tpZHMgWyAzIDAgUiBdIC9UeXBlIC9QYWdlcyA+PgplbmRvYmoKMyAw"
+    "IG9iago8PCAvQ29udGVudHMgNCAwIFIgL01lZGlhQm94IFsgMCAwIDYxMiA3OTIgXSAvUGFyZW50IDIgMCBS"
+    "IC9SZXNvdXJjZXMgPDwgL0ZvbnQgPDwgL0YxIDUgMCBSID4+ID4+IC9UeXBlIC9QYWdlID4+CmVuZG9iago0"
+    "IDAgb2JqCjw8IC9MZW5ndGggNTIgL0ZpbHRlciAvRmxhdGVEZWNvZGUgPj4Kc3RyZWFtCpPKZdOxUKR8MGzb"
+    "q86EM2b+cpBF9ExMMDss0C3NUr3nIhfACHZyPJIRxsEITBF0DJYTtJYKZW5kc3RyZWFtCmVuZG9iago1IDAg"
+    "b2JqCjw8IC9CYXNlRm9udCAvSGVsdmV0aWNhIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udCA+PgplbmRv"
+    "YmoKNiAwIG9iago8PCAvQ0YgPDwgL1N0ZENGIDw8IC9BdXRoRXZlbnQgL0RvY09wZW4gL0NGTSAvVjIgL0xl"
+    "bmd0aCAxNiA+PiA+PiAvRW5jcnlwdE1ldGFkYXRhIGZhbHNlIC9GaWx0ZXIgL1N0YW5kYXJkIC9MZW5ndGgg"
+    "MTI4IC9PIDwwZGUzODU1ZmM1MzI2NTY5ZTc2NTkwNmNhZjY0ZTQ0MjlhNGMyMGQ2ZTk5NmZkZWY5NjNlOWI1"
+    "MDgwZjllMDgzPiAvT0UgPD4gL1AgLTEwMjggL1IgNCAvU3RtRiAvU3RkQ0YgL1N0ckYgL1N0ZENGIC9VIDw3"
+    "ZDJhMGM2MGZjODEwYzBkZTY1ZDVhZTRlZDUzNmQwNjAwMjE0NDY5OTBiOWU0MTE0MDcxYTRkOTEwNDk4NGMx"
+    "PiAvVUUgPD4gL1YgNCA+PgplbmRvYmoKeHJlZgowIDcKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE1"
+    "IDAwMDAwIG4gCjAwMDAwMDAwNjQgMDAwMDAgbiAKMDAwMDAwMDEyMyAwMDAwMCBuIAowMDAwMDAwMjUxIDAw"
+    "MDAwIG4gCjAwMDAwMDAzNzQgMDAwMDAgbiAKMDAwMDAwMDQ0NCAwMDAwMCBuIAp0cmFpbGVyIDw8IC9Sb290"
+    "IDEgMCBSIC9TaXplIDcgL0lEIFs8MGVjMGQ0NjQ2MTdkZWIxYmUyYTI1YmU2MGY4ZjAyOTU+PDBlYzBkNDY0"
+    "NjE3ZGViMWJlMmEyNWJlNjBmOGYwMjk1Pl0gL0VuY3J5cHQgNiAwIFIgPj4Kc3RhcnR4cmVmCjc4MAolJUVP"
+    "Rgo="
+)
+ENCRYPTED_PDF = base64.b64decode(_ENCRYPTED_BASE64)
 
 
 def client(token: str) -> httpx2.Client:

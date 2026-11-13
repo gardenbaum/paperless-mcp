@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from paperless_mcp.services.files import FileService
     from paperless_mcp.services.instance import InstanceService
     from paperless_mcp.services.notes import NoteService
+    from paperless_mcp.services.pdf import PdfService
     from paperless_mcp.services.removal import DocumentRemoval
     from paperless_mcp.services.tasks import TaskService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
@@ -42,7 +43,7 @@ if TYPE_CHECKING:
     from paperless_mcp.services.views import ViewService
 
 # Every toolset; each tool carries exactly one of them as its only tag.
-TOOLSETS: Final = frozenset({"core", "ai", "bulk", "versions", "views", "trash"})
+TOOLSETS: Final = frozenset({"core", "ai", "bulk", "versions", "views", "trash", "pdf"})
 
 # Tools whose result is an image or a file as MCP content blocks, with no output schema and no
 # structured content (decision-11); every other tool has a typed return model (decision-4).
@@ -85,6 +86,13 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "list_trash": "trash",
     "restore_from_trash": "trash",
     "empty_trash": "trash",
+    "rotate_documents": "pdf",
+    "merge_documents": "pdf",
+    "split_document": "pdf",
+    "delete_pages": "pdf",
+    "edit_pdf": "pdf",
+    "remove_document_password": "pdf",
+    "reprocess_documents": "pdf",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
@@ -232,6 +240,63 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         title="Run saved view",
         read_only_hint=True,
         idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Not destructive: the rotated file becomes a new version and the older one stays. Not
+    # idempotent: every call adds a version (and turns the pages further).
+    "rotate_documents": ToolAnnotations(
+        title="Rotate documents",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6) with delete_originals: the originals go to the trash. Not
+    # idempotent: every call makes another merged document.
+    "merge_documents": ToolAnnotations(
+        title="Merge documents",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    "split_document": ToolAnnotations(
+        title="Split document",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6): pages vanish from what the document shows, or the original goes
+    # to the trash; confirm is required for both.
+    "delete_pages": ToolAnnotations(
+        title="Delete pages",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    "edit_pdf": ToolAnnotations(
+        title="Edit PDF",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    "remove_document_password": ToolAnnotations(
+        title="Remove document password",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6): the archived file and the text are replaced. Not idempotent: the
+    # OCR of another run may read differently.
+    "reprocess_documents": ToolAnnotations(
+        title="Reprocess documents",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
         open_world_hint=False,
     ),
     # Saved views are filters, not documents (decision-14 applies by analogy): creating one adds a
@@ -411,6 +476,7 @@ class Services:
     bulk_taxonomy: BulkTaxonomyEditor
     views: ViewService
     trash: TrashService
+    pdf: PdfService
 
 
 def services(ctx: Context) -> Services:

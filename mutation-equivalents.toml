@@ -547,3 +547,18 @@ reason = "deleted=None instead of False: _described only tests the flag for trut
 mutant = "paperless_mcp.paperless.trash.xǁPaperlessTrashWriterǁ_post__mutmut_26"
 function_hash = "2d408d05e432"
 reason = "httpx2 upper-cases the method when it builds the request, so \"post\" goes out as POST; the client reads only the built request's method."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.pdf.xǁPdfServiceǁreprocess__mutmut_6"
+function_hash = "93c62a1f2bbe"
+reason = "pdf=None is falsy like pdf=False: reprocessing takes any file type, and `_documents` only tests `pdf` for truth."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.pdf.xǁPdfServiceǁ_result__mutmut_149"
+function_hash = "05338aacc36b"
+reason = "waited is a sum of values that TaskService already rounded to a tenth, so its float error is far below a hundredth: rounding to two decimals gives the same value as rounding to one."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.pdf.xǁPaperlessPdfWriterǁ_run__mutmut_17"
+function_hash = "8f86cafa4e37"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."

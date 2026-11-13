@@ -85,6 +85,34 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
         "a user without the change permission is answered with HttpResponseForbidden, text/html "
         "(PLMCP-24)"
     ),
+    ("POST", "/api/documents/rotate/", 403): (
+        "a user who may not change the documents is answered with HttpResponseForbidden, "
+        "text/html (PLMCP-23)"
+    ),
+    ("POST", "/api/documents/merge/", 403): (
+        "a user who may not change the documents is answered with HttpResponseForbidden, "
+        "text/html (PLMCP-23)"
+    ),
+    ("POST", "/api/documents/edit_pdf/", 403): (
+        "a user who may not change the documents is answered with HttpResponseForbidden, "
+        "text/html (PLMCP-23)"
+    ),
+    ("POST", "/api/documents/remove_password/", 403): (
+        "a user who may not change the documents is answered with HttpResponseForbidden, "
+        "text/html (PLMCP-23)"
+    ),
+    ("POST", "/api/documents/reprocess/", 403): (
+        "a user who may not change the documents is answered with HttpResponseForbidden, "
+        "text/html (PLMCP-23)"
+    ),
+    ("POST", "/api/documents/edit_pdf/", 400): (
+        "a PDF edit that fails (a wrong password, a file that is not a PDF) is answered with "
+        "HttpResponseBadRequest, text/html; field errors are DRF JSON as usual (PLMCP-23)"
+    ),
+    ("POST", "/api/documents/remove_password/", 400): (
+        "a password removal that fails (wrong password, not a PDF) is answered with "
+        "HttpResponseBadRequest, text/html; field errors are DRF JSON as usual (PLMCP-23)"
+    ),
     ("GET", "/api/documents/", 200): (
         "`fields=` drops properties the schema requires, and custom field values can be booleans "
         "and id lists, which the value's oneOf omits (PLMCP-10)"

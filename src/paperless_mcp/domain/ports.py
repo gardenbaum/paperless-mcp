@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         Suggestions,
     )
     from paperless_mcp.domain.instance import InstanceOverview
+    from paperless_mcp.domain.pdf import Output, PageSlot, StartedTasks
     from paperless_mcp.domain.tasks import TaskStatus
     from paperless_mcp.domain.taxonomy import (
         TaxonomyDetail,
@@ -554,5 +555,98 @@ class TrashWriter(Protocol):
         Raises:
             PermissionDenied: As for ``restore_from_trash``.
             Validation: An id is not in the trash (or listed twice). Nothing is changed.
+        """
+        ...
+
+
+class PdfWriter(Protocol):
+    """Server-side PDF operations: Paperless queues them and tasks do the work.
+
+    Every method returns the tasks Paperless started for the request, as far as they can be found
+    (``StartedTasks``). Paperless itself answers "OK" without naming them, so the adapter finds
+    them by looking at the task list around the request: tasks of this user that are newer than
+    the request's mark, of the operation's kind and file, at most as many as the request starts.
+    Fewer are returned when the user may not view tasks, when Paperless started none (e.g.
+    removing the password of a file that has none), when they did not show up within a short
+    bounded time or when reading them failed: the operation was accepted all the same, and none
+    of this is raised. Operations are serialised per writer, and requests are never retried (a
+    repeat would do the work twice).
+
+    Permissions (probed on 3.4.2): all need the global permission to change documents. Rotating,
+    editing, splitting, deleting pages and removing a password also need ownership of every
+    document (or no owner; a change grant is not enough). Merging and reprocessing accept a
+    change grant. A new document needs the permission to add documents, and deleting an original
+    needs ownership and the permission to delete.
+    """
+
+    async def rotate_documents(self, document_ids: Sequence[int], degrees: int) -> StartedTasks:
+        """Rotate every page of the PDFs clockwise by ``degrees`` as a new version of each.
+
+        ``degrees`` is a multiple of 90, negative turns counter-clockwise. Each document gets its
+        own task; the older version stays.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: An id does not exist (or is hidden), is listed twice or is empty, or the
+                degrees are not a multiple of 90.
+        """
+        ...
+
+    async def merge_documents(
+        self,
+        document_ids: Sequence[int],
+        *,
+        metadata_document_id: int | None,
+        delete_originals: bool,
+    ) -> StartedTasks:
+        """Merge the PDFs, in this order, into one new document.
+
+        The new document takes the metadata (title with ' (merged)', tags, ...) of
+        ``metadata_document_id`` if given, which must be one of the documents. With
+        ``delete_originals`` the merged documents go to the trash once the new one exists.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: An id does not exist (or is hidden) or is listed twice.
+        """
+        ...
+
+    async def edit_pdf(
+        self, document_id: int, pages: Sequence[PageSlot], *, output: Output
+    ) -> StartedTasks:
+        """Build files from the pages of one PDF: ``pages`` in order, grouped by their file.
+
+        ``output`` decides where the result goes. ``new_version`` needs a single output file.
+        One task per output file.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: A page is beyond the document's last, the document is not a PDF, the
+                output files are not numbered 0, 1, 2... without gaps, ``new_version`` has
+                several output files, or a rotation is not a multiple of 90.
+        """
+        ...
+
+    async def remove_password(
+        self, document_id: int, password: str, *, output: Output
+    ) -> StartedTasks:
+        """Unlock an encrypted PDF with ``password``; ``output`` decides where the copy goes.
+
+        A file without a password makes Paperless start no task.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: The password is wrong, or the document is not a PDF.
+        """
+        ...
+
+    async def reprocess_documents(
+        self, document_ids: Sequence[int], *, remote_ocr: bool
+    ) -> StartedTasks:
+        """Run OCR and archiving again for every document; one task each.
+
+        Raises:
+            PermissionDenied: See the class docstring.
+            Validation: An id does not exist or is listed twice.
         """
         ...
