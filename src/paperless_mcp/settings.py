@@ -18,6 +18,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from paperless_mcp.domain.toolsets import ALL_TOOLSETS
 
+# Directories that are views of the running system, not places for documents.
+PSEUDO_FILE_SYSTEMS = ("/proc", "/sys", "/dev", "/run")
+
 type LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
@@ -90,7 +93,10 @@ class ServerSettings(BaseSettings):
         upload_dirs: Directories ``upload_document`` may read files from, by path
             (``PAPERLESS_MCP_UPLOAD_DIRS``): absolute paths, comma-separated or a JSON array.
             Empty (the default) switches uploading by path off. Only the stdio transport ever
-            offers a path parameter, and only when this is set (decision-7).
+            offers a path parameter, and only when this is set (decision-7). The file system
+            root, the home directory itself, /proc, /sys, /dev and /run are refused as
+            entries, and files and folders whose name starts with a dot below an entry are never
+            read (``.ssh``, ``.env``).
     """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -128,8 +134,15 @@ class ServerSettings(BaseSettings):
             if not Path(directory).is_absolute():
                 message = f"{directory!r} is not an absolute path; name each directory in full"
                 raise ValueError(message)
-            if os.path.realpath(directory) == os.path.realpath(os.sep):
+            real = os.path.realpath(directory)
+            if real == os.path.realpath(os.sep):
                 message = "the file system root is no upload directory; name the directories"
+                raise ValueError(message)
+            if real == os.path.realpath(Path("~").expanduser()):
+                message = "the home directory itself is no upload directory; name a folder in it"
+                raise ValueError(message)
+            if any(real == fs or real.startswith(fs + os.sep) for fs in PSEUDO_FILE_SYSTEMS):
+                message = "/proc, /sys, /dev and /run hold no documents; name a folder with files"
                 raise ValueError(message)
         return value
 

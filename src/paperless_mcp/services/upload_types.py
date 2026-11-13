@@ -10,10 +10,15 @@ and OpenDocument files and RTF need its Tika and Gotenberg add-ons: when they ar
 refuses them with a clear 400, so they are allowed here and Paperless has the last word. Not
 recognised (so refused here): legacy binary Office files (OLE containers cannot be told apart
 without parsing them), HTML, e-mail and markup in general.
+
+A file can be several things at once (a PDF that is also a zip, or an image that is also a PDF).
+The first signature wins, and Paperless decides again when it consumes the file; this module
+keeps obvious non-documents out, it is no malware scanner.
 """
 
 import io
 import zipfile
+import zlib
 from typing import Final
 
 PDF: Final = "application/pdf"
@@ -34,8 +39,19 @@ OPENDOCUMENT: Final = frozenset({ODF + "text", ODF + "spreadsheet", ODF + "prese
 BMP_HEADERS: Final = frozenset({12, 40, 52, 56, 64, 108, 124})
 BMP_INFO_AT: Final = 14
 
-# The bytes text may hold: everything from the space up, tab, line feed, form feed, carriage return.
-TEXT_BYTES: Final = bytes(range(32, 256)) + b"\t\n\x0c\r"
+# The bytes text may hold: from the space up except DEL, tab, line feed, form feed, carriage return.
+TEXT_BYTES: Final = bytes((*range(32, 127), *range(128, 256), 9, 10, 12, 13))
+BYTE_ORDER_MARK: Final = "\ufeff"
+# What reading a crafted archive can raise: encrypted or unsupported members, damaged data.
+UNREADABLE: Final = (
+    zipfile.BadZipFile,
+    RuntimeError,
+    NotImplementedError,
+    zlib.error,
+    EOFError,
+    ValueError,
+    OSError,
+)
 
 # Every type `sniff` can return.
 CONSUMABLE: Final = frozenset(
@@ -71,9 +87,10 @@ def _zipped(data: bytes) -> str | None:
                     None,
                 )
             if "mimetype" in names:
-                declared = bundle.open("mimetype").read(100).decode("ascii", errors="replace")
+                with bundle.open("mimetype") as member:
+                    declared = member.read(100).decode("ascii", errors="replace")
                 return declared if declared in OPENDOCUMENT else None
-    except zipfile.BadZipFile:
+    except UNREADABLE:
         return None
     return None
 
@@ -86,7 +103,7 @@ def _text(data: bytes, filename: str) -> str | None:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    if text.lstrip().startswith("<"):
+    if text.removeprefix(BYTE_ORDER_MARK).lstrip().startswith("<"):
         return None
     return CSV if filename.lower().endswith(".csv") else TEXT
 

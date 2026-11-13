@@ -35,10 +35,37 @@ def opendocument(kind: str) -> bytes:
     return archive({"content.xml": b"<c/>"}, first=("mimetype", kind.encode()))
 
 
-BMP = b"BM" + struct.pack("<IHHII", 70, 0, 0, 54, 40) + bytes(40)
+def bitmap(header: int, tail: bytes | None = None) -> bytes:
+    return b"BM" + struct.pack("<IHHII", 70, 0, 0, 54, header) + (tail or bytes(40))
+
+
+def crafted(damage: str) -> bytes:
+    """A zip whose `mimetype` member cannot be read the ordinary way (it fools no reader)."""
+    out = io.BytesIO()
+    info = zipfile.ZipInfo("mimetype")
+    info.compress_type = zipfile.ZIP_DEFLATED if damage == "corrupt" else zipfile.ZIP_STORED
+    with zipfile.ZipFile(out, "w") as bundle:
+        bundle.writestr(info, ODT.encode() * 4)
+    data = bytearray(out.getvalue())
+    if damage == "encrypted":  # the encryption flag, in the local and the central header
+        data[6] |= 1
+        data[data.index(b"PK\x01\x02") + 8] |= 1
+    if damage == "method":  # a compression method no reader supports
+        data[8] = 99
+        data[data.index(b"PK\x01\x02") + 10] = 99
+    if damage == "text":  # a type name that is not even ASCII
+        data[30 + len("mimetype") : 30 + len("mimetype") + 6] = b"\xff" * 6
+    if damage == "corrupt":  # deflate data that is none
+        start = 30 + len("mimetype")
+        data[start : start + 6] = b"\xff" * 6
+    return bytes(data)
+
+
+BMP = bitmap(40)
 WEBP = b"RIFF" + struct.pack("<I", 20) + b"WEBPVP8L" + bytes(12)
 
 SAMPLES = [
+    pytest.param(bitmap(40, b"\x01" * 40), "image/bmp", id="bmp whose data starts non-zero"),
     pytest.param(pdf("hello"), "application/pdf", id="pdf"),
     pytest.param(b"\x89PNG\r\n\x1a\n" + bytes(20), "image/png", id="png"),
     pytest.param(b"\xff\xd8\xff\xe0" + bytes(20), "image/jpeg", id="jpeg"),
@@ -46,7 +73,10 @@ SAMPLES = [
     pytest.param(b"GIF89a" + bytes(20), "image/gif", id="gif89a"),
     pytest.param(b"II*\x00" + bytes(20), "image/tiff", id="tiff little endian"),
     pytest.param(b"MM\x00*" + bytes(20), "image/tiff", id="tiff big endian"),
-    pytest.param(BMP, "image/bmp", id="bmp"),
+    *(
+        pytest.param(bitmap(size), "image/bmp", id=f"bmp with a {size} byte header")
+        for size in (12, 40, 52, 56, 64, 108, 124)
+    ),
     pytest.param(WEBP, "image/webp", id="webp"),
     pytest.param(b"{\\rtf1\\ansi hello}", "text/rtf", id="rtf"),
     pytest.param(office("word"), DOCX, id="docx"),
@@ -102,6 +132,17 @@ def test_the_extension_only_tells_csv_from_other_text() -> None:
         pytest.param(b"hello\x00world", id="text with a NUL"),
         pytest.param(b"caf\xe9 in latin-1", id="text that is not UTF-8"),
         pytest.param(b"<html><body>hi</body></html>", id="html"),
+        pytest.param(b"\xef\xbb\xbf<html></html>", id="html after a byte order mark"),
+        pytest.param(b"\xef\xbb\xbf \n<?xml version='1.0'?>", id="xml after a BOM and blanks"),
+        pytest.param(b"text with a delete\x7f character", id="text with DEL"),
+        pytest.param(crafted("encrypted"), id="zip member that wants a password"),
+        pytest.param(crafted("method"), id="zip member with an unknown compression"),
+        pytest.param(crafted("corrupt"), id="zip member with broken data"),
+        pytest.param(crafted("text"), id="zip member whose type is not ASCII"),
+        *(
+            pytest.param(bitmap(size), id=f"bm with a {size} byte header")
+            for size in (0, 11, 13, 39, 41, 125)
+        ),
         pytest.param(b"  \n<svg xmlns='http://www.w3.org/2000/svg'/>", id="svg"),
         pytest.param(b"RIFF" + bytes(4) + b"WAVEfmt " + bytes(12), id="riff that is not webp"),
         pytest.param(b"text with an escape \x1b[0m", id="text with a control character"),

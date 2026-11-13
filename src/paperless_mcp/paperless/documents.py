@@ -522,7 +522,8 @@ class PaperlessDocumentWriter:
 
         One multipart POST to ``post_document``: the file as ``document`` and the metadata as
         form fields, tags repeated and custom fields as a JSON object of field id to value.
-        Sent once: a retry after a lost answer could create the document twice.
+        Sent once: the client never retries a POST, and a retry after a lost answer could create
+        the document twice.
         """
         form: dict[str, str | list[str]] = {}
         if upload.title is not None:
@@ -547,6 +548,5 @@ class PaperlessDocumentWriter:
             _TaskId,
             data=form,
             files={"document": (upload.filename, upload.content, upload.mime_type)},
-            retry=False,
         )
         return answer.root

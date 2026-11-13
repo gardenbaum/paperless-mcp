@@ -4,6 +4,7 @@ title: HTTP transport secure by default
 status: To Do
 assignee: []
 created_date: '2026-11-09T19:26:00Z'
+updated_date: '2026-11-13T01:46:00Z'
 labels: []
 milestone: m-5
 dependencies:
@@ -36,3 +37,9 @@ Remote use starts with an HTTP endpoint that cannot be opened by accident: witho
 - [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From PLMCP-18 review: the stdio-only path variant of upload_document (tools/upload_stdio.py) must never be registered for HTTP: create_server(stdio=...) is the only switch and the CLI passes transport="stdio" explicitly (FASTMCP_TRANSPORT is ignored); the tool also refuses a path when ctx.transport is sse/streamable-http. HTTP entrypoints must call create_server with stdio=False. HTTP also needs a request-body size cap in front of the app: base64 content is parsed by FastMCP/pydantic before UploadService checks its size (the service only bounds the decode, not the parse), so an unbounded body costs memory first.
+<!-- SECTION:NOTES:END -->

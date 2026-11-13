@@ -13,8 +13,19 @@ the rules below make it read nothing but a regular file inside a directory the o
 - Only a regular file is read, decided on the descriptor that was opened (``fstat``), after a
   ``stat`` without opening so a pipe cannot block the open. A device, pipe, socket, directory or
   symlink is refused. At most ``max_bytes`` + 1 are read, so a file that grows is still bounded.
-- A path outside the allowlist, a missing one and an unreadable one get the same answer, so the
-  tool is no oracle for what exists on the host.
+- A file with more than one hard link is refused: a link can name a file outside the allowlist,
+  and there is no telling where it came from. Names below the allowlist that start with a dot
+  (``.ssh``, ``.env``, ``.git``) are refused: credentials live there.
+- A path with a ``..`` component is refused before anything is resolved. Resolving it first would
+  answer differently depending on what exists outside the allowlist.
+- A path outside the allowlist, a missing one, an unreadable one and all of the above get the
+  same answer, so the tool is no oracle for what exists on the host.
+
+Known limit: the allowlisted directory itself is opened by its resolved name, so someone who may
+rewrite a parent of that directory can still swap it between the check and the open. The
+directory belongs to the operator who allows it; everything below it is walked without
+following links. A file whose extension does not match its content keeps its name: Paperless
+decides the type from the content.
 """
 
 import base64
@@ -32,10 +43,9 @@ if TYPE_CHECKING:
 
 # Longest file name Paperless and common file systems take, in UTF-8 bytes.
 MAX_NAME_BYTES: Final = 255
-# Bidirectional controls that can make a name read differently from what it is.
-BIDI_CONTROLS: Final = frozenset(
-    chr(code) for code in (*range(0x202A, 0x202F), *range(0x2066, 0x206A))
-)
+# Unicode categories no file name may hold: controls, format characters (bidirectional
+# overrides, zero-width and byte order marks) and line and paragraph separators.
+FORBIDDEN_CATEGORIES: Final = frozenset({"Cc", "Cf", "Zl", "Zp"})
 KIB: Final = 1024
 MIB: Final = KIB * KIB
 # `dir_fd` and `O_NOFOLLOW` are what make the walk safe; Windows has neither.
@@ -71,8 +81,8 @@ def clean_filename(name: str) -> str:
     last = name.replace("\\", "/").rsplit("/", 1)[-1].strip()
     problem = None
     if last in {"", ".", ".."}:
-        problem = "has no name"
-    elif any(unicodedata.category(c) == "Cc" or c in BIDI_CONTROLS for c in last):
+        problem = "is empty or only dots"
+    elif any(unicodedata.category(c) in FORBIDDEN_CATEGORIES for c in last):
         problem = "has control characters"
     elif len(last.encode()) > MAX_NAME_BYTES:
         problem = f"is longer than {MAX_NAME_BYTES} bytes"
@@ -160,7 +170,7 @@ def _open_regular(
         fd = os.open(name, flags | os.O_NONBLOCK, dir_fd=held)
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode):
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink > 1:
                 raise _Refused
             if info.st_size > max_bytes:
                 raise _too_large(max_bytes)
@@ -206,14 +216,16 @@ def read_allowed(
     if not secure:
         message = "Uploading by path is not supported on this platform."
         raise Validation(message, hint="Send the file as content_base64.")
-    resolved = os.path.realpath(path)
-    found = _inside(resolved, roots)
-    if found is None or not found[1]:
+    if ".." in PurePath(path).parts:
         raise _outside(roots)
-    at("resolved")
     try:
+        resolved = os.path.realpath(path)
+        found = _inside(resolved, roots)
+        if found is None or not found[1] or any(part.startswith(".") for part in found[1]):
+            raise _Refused  # noqa: TRY301 -- one answer for every refusal
+        at("resolved")
         data = _open_regular(found[0], found[1], max_bytes, at)
-    except OSError, _Refused:
+    except OSError, ValueError, _Refused:  # ValueError: a path that cannot be encoded
         raise _outside(roots) from None
     if len(data) > max_bytes:
         raise _too_large(max_bytes)

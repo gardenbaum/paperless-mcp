@@ -243,6 +243,9 @@ def test_a_form_upload_with_plain_values_passes() -> None:
         pytest.param(upload({"archive_serial_number": "-1"}), id="below the minimum"),
         pytest.param(upload({"archive_serial_number": "4294967296"}), id="above the maximum"),
         pytest.param(upload({"created": "yesterday"}), id="not a date"),
+        pytest.param(upload({"title": ""}), id="an empty title"),
+        pytest.param(upload({"custom_fields": "{not json"}), id="custom fields that are no JSON"),
+        pytest.param(upload({"custom_fields": '{"1": '}), id="custom fields cut short"),
         pytest.param(upload({"title": "t"}, headers={"Accept": HEADERS["Accept"]}), id="no token"),
     ],
 )
@@ -258,3 +261,22 @@ def test_a_json_body_for_the_upload_is_rejected() -> None:
 
     with pytest.raises(SchemaViolationError, match="not multipart"):
         check_request(request)
+
+
+def test_the_document_must_be_a_file_part_not_a_text_field() -> None:
+    request = httpx2.Request(
+        "POST",
+        BASE_URL + "/api/documents/post_document/",
+        data={"document": "just text"},
+        files={"other": ("", b"")},
+        headers=HEADERS,
+    )
+    _ = request.read()
+
+    with pytest.raises(SchemaViolationError, match="document is not a file"):
+        check_request(request)
+
+
+def test_valid_custom_fields_pass() -> None:
+    check_request(upload({"custom_fields": '{"1": "a", "2": [3, 4], "3": true}'}))
+    check_request(upload({"custom_fields": "[1, 2]"}))

@@ -45,6 +45,12 @@ UNSUPPORTED = (
 )
 
 
+NO_DOCUMENT = (
+    "Paperless consumed the file but names no document for it (it may have been split into "
+    "several, or the new document is hidden from this user)."
+)
+
+
 class UploadService:
     """Uploads files to Paperless."""
 
@@ -105,7 +111,8 @@ class UploadService:
         ``NotFound`` when the path is outside the allowlist or not a regular file.
         """
         found, data = read_allowed(path, self._dirs, max_bytes=self._max_bytes)
-        return await self._upload(data, clean_filename(filename or found), metadata, wait_seconds)
+        name = clean_filename(found if filename is None else filename)
+        return await self._upload(data, name, metadata, wait_seconds)
 
     async def _upload(
         self, data: bytes, name: str, metadata: UploadMetadata, wait_seconds: float
@@ -176,28 +183,34 @@ class UploadService:
         """What the upload did, after the wait; the task id alone if the task cannot be read."""
         try:
             report = await self._tasks.get(task_id, wait_seconds=wait_seconds)
-        except PaperlessMcpError as error:
-            # The file is in Paperless: the task id must reach the caller, or a retry duplicates it.
+            document = (
+                report.document_ids[0]
+                if report.state == "success" and report.document_ids
+                else None
+            )
+        except Exception as error:  # noqa: BLE001 -- the file is in Paperless: the task id must get out
+            # An error here would invite a retry, and with it a second document.
+            reason = error.message if isinstance(error, PaperlessMcpError) else "unexpected error"
             return UploadResult(
                 task_id=task_id,
                 state="unknown",
                 message=(
-                    f"Paperless accepted the file, but its task could not be read ({error.message})"
-                    f"; the outcome is unknown. Follow the task with get_task."
+                    f"Paperless accepted the file, but its task could not be read ({reason}); "
+                    "the outcome is unknown. Follow the task with get_task."
                 ),
                 document_id=None,
                 web_url=None,
-                wait="not_requested",
+                wait="timed_out" if wait_seconds > 0 else "not_requested",
                 waited_seconds=0,
                 filename=upload.filename,
                 mime_type=upload.mime_type,
                 size_bytes=len(upload.content),
             )
-        document = report.document_ids[0] if report.state == "success" else None
+        note = NO_DOCUMENT if report.state == "success" and document is None else None
         return UploadResult(
             task_id=task_id,
             state=report.state,
-            message=report.message,
+            message=report.message or note,
             document_id=document,
             web_url=None if document is None else document_link(self._web_url, document),
             wait=report.wait,

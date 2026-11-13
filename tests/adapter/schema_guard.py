@@ -28,6 +28,8 @@ from openapi_core.templating.paths.finders import APICallPathFinder
 from werkzeug.datastructures import Headers, ImmutableMultiDict
 
 if TYPE_CHECKING:
+    from email.message import MIMEPart
+
     from openapi_core.templating.datatypes import TemplateResult
 
 SCHEMA_PATH = Path(__file__).parents[2] / "docs" / "vendor" / "paperless" / "openapi.json"
@@ -301,6 +303,32 @@ def _narrowed(request: httpx2.Request) -> bytes | None:
     return json.dumps(body).encode()
 
 
+def _field_problems(name: str, part: MIMEPart, kind: Json) -> list[str]:
+    """What is wrong with one part of a form, against its property of the form schema."""
+    is_file = part.get_filename() is not None
+    problems = ["document is not a file part"] if name == "document" and not is_file else []
+    text = "" if is_file else cast("str", part.get_content())
+    if not is_file and len(text) < cast("int", kind.get("minLength", 0)):
+        problems.append(f"{name} is shorter than {kind['minLength']}")
+    if name == "custom_fields":  # untyped in the schema; Paperless parses it as JSON
+        try:
+            _ = cast("object", json.loads(text))
+        except ValueError:
+            problems.append("custom_fields is not valid JSON")
+    items = cast("Json", kind.get("items", kind))
+    try:
+        if items.get("type") == "integer":
+            number = int(text)
+            low, high = items.get("minimum", number), items.get("maximum", number)
+            if not low <= number <= high:  # pyright: ignore[reportOperatorIssue] -- JSON numbers
+                problems.append(f"{name} is out of range")
+        if kind.get("format") == "date-time":
+            _ = datetime.fromisoformat(text)
+    except ValueError:
+        problems.append(f"{name}={text!r} is not valid for its type")
+    return problems
+
+
 def _form_errors(request: httpx2.Request, template: str) -> list[str]:
     """What is wrong with the fields of a multipart request, against its form schema."""
     operation = cast("Json", _PATHS[template][request.method.lower()])
@@ -326,19 +354,7 @@ def _form_errors(request: httpx2.Request, template: str) -> list[str]:
         if name not in names
     ]
     for name, part in sent:
-        text = cast("str", part.get_content()) if part.get_filename() is None else ""
-        kind = properties.get(name, {})
-        items = cast("Json", kind.get("items", kind))
-        try:
-            if items.get("type") == "integer":
-                number = int(text)
-                low, high = items.get("minimum", number), items.get("maximum", number)
-                if not low <= number <= high:  # pyright: ignore[reportOperatorIssue] -- JSON numbers
-                    problems.append(f"{name} is out of range")
-            if kind.get("format") == "date-time":
-                _ = datetime.fromisoformat(text)
-        except ValueError:
-            problems.append(f"{name}={text!r} is not valid for its type")
+        problems += _field_problems(name, part, properties.get(name, {}))
     return problems
 
 

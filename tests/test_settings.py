@@ -1,9 +1,13 @@
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 
 from paperless_mcp.settings import PaperlessSettings, ServerSettings
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 URL = "http://paperless.internal:8000"
 TOKEN = "test-token"
@@ -283,5 +287,40 @@ def test_the_filesystem_root_is_refused_as_an_upload_directory(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", "/")
+
+    assert invalid_fields(ServerSettings) == [("upload_dirs",)]
+
+
+@pytest.mark.parametrize("directory", ["/proc", "/sys", "/dev", "/run", "/proc/self", "/dev/pts"])
+def test_a_pseudo_file_system_is_refused_as_an_upload_directory(
+    monkeypatch: pytest.MonkeyPatch, directory: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", directory)
+
+    assert invalid_fields(ServerSettings) == [("upload_dirs",)]
+
+
+def test_the_home_directory_itself_is_refused_but_a_folder_in_it_is_fine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", str(tmp_path))
+    assert invalid_fields(ServerSettings) == [("upload_dirs",)]
+
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", f"{tmp_path}/scans, {tmp_path}/../other")
+    assert ServerSettings.model_validate({}).upload_dirs == (
+        f"{tmp_path}/scans",
+        f"{tmp_path}/../other",
+    )
+
+
+def test_a_symlink_to_the_home_directory_is_refused_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / "shortcut").symlink_to(home, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", str(tmp_path / "shortcut"))
 
     assert invalid_fields(ServerSettings) == [("upload_dirs",)]

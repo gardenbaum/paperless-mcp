@@ -574,8 +574,9 @@ class UploadResult(BaseModel):
         UploadState,
         Field(
             description=(
-                "pending, started, success, failure or revoked; unknown when Paperless does not "
-                "let this user view tasks (the upload was accepted all the same)."
+                "pending, started, success, failure or revoked; unknown when the task could not "
+                "be read after the upload (e.g. this user may not view tasks): the upload was "
+                "accepted all the same."
             )
         ),
     ]

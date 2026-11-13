@@ -52,7 +52,8 @@ class Recording(FakePaperless):
         self.uploads: list[DocumentUpload] = []
         self.slow_reads: int = slow_reads
         self.reads: int = 0
-        self.read_error: PaperlessMcpError | None = None
+        self.read_error: Exception | None = None
+        self.hide_documents: bool = False
 
     @override
     async def upload_document(self, upload: DocumentUpload) -> str:
@@ -65,6 +66,8 @@ class Recording(FakePaperless):
         if self.read_error:
             raise self.read_error
         status = await super().get_task(task_id)
+        if self.hide_documents:
+            return status.model_copy(update={"document_ids": ()})
         if self.reads <= self.slow_reads:
             return status.model_copy(
                 update={"state": "started", "document_ids": (), "finished": None}
@@ -245,6 +248,41 @@ async def test_the_file_name_is_cleaned_and_non_ascii_names_are_kept() -> None:
     assert [u.filename for u in setup.fake.uploads] == ["Rechnung Käse 日本語.pdf", "März.pdf"]
 
 
+async def test_a_title_of_exactly_128_characters_is_accepted() -> None:
+    setup = Setup()
+
+    _ = await setup.upload(title="x" * 128)
+
+    assert setup.sent.title == "x" * 128
+
+
+async def test_no_wait_is_the_default_for_both_sources(folder: Path) -> None:
+    setup = Setup(upload_dirs=(str(folder),))
+    content = b64(pdf("x"))
+
+    one = await setup.service.from_content(content, "a.pdf", UploadMetadata())
+    two = await setup.service.from_path(str(folder / "scan März.pdf"), None, UploadMetadata())
+
+    assert (one.wait, two.wait) == ("not_requested", "not_requested")
+    assert setup.clock.now == 0
+
+
+async def test_a_wait_of_one_second_that_cannot_be_made_is_reported_as_timed_out() -> None:
+    setup = Setup(user=READER[0], permissions=frozenset({"add_document", "view_uisettings"}))
+
+    result = await setup.upload(wait_seconds=1)
+
+    assert result.wait == "timed_out"
+
+
+async def test_the_largest_archive_serial_number_is_accepted() -> None:
+    setup = Setup()
+
+    _ = await setup.upload(archive_serial_number=4_294_967_295)
+
+    assert setup.sent.archive_serial_number == 4_294_967_295
+
+
 async def test_a_name_that_is_no_name_is_refused_before_anything_is_sent() -> None:
     setup = Setup()
 
@@ -358,11 +396,45 @@ async def test_a_user_who_may_not_view_tasks_still_gets_the_task_id() -> None:
         "unknown",
         None,
         None,
-        "not_requested",
+        "timed_out",  # a wait was asked for, and could not be made
     )
+    assert result.waited_seconds == 0
     assert result.message is not None
     assert "outcome is unknown" in result.message
     assert "get_task" in result.message
+
+
+async def test_an_unreadable_task_without_a_wait_reports_no_wait() -> None:
+    setup = Setup(user=READER[0], permissions=frozenset({"add_document", "view_uisettings"}))
+
+    result = await setup.upload()
+
+    assert (result.state, result.wait) == ("unknown", "not_requested")
+
+
+async def test_a_success_without_a_document_still_returns_the_task() -> None:
+    """Barcode splitting, or a document the user may not see: success, but no id to name."""
+    setup = Setup()
+    setup.fake.hide_documents = True
+
+    result = await setup.upload(wait_seconds=30)
+
+    assert result.task_id == setup.state.tasks[0].task_id
+    assert (result.state, result.document_id, result.web_url) == ("success", None, None)
+    assert result.message is not None
+    assert "no document" in result.message
+
+
+async def test_any_failure_reading_the_task_keeps_the_id_and_hides_the_detail() -> None:
+    setup = Setup()
+    setup.fake.read_error = RuntimeError("secret internals")
+
+    result = await setup.upload(wait_seconds=30)
+
+    assert result.task_id == setup.state.tasks[0].task_id
+    assert result.state == "unknown"
+    assert result.message is not None
+    assert "secret internals" not in result.message
 
 
 @pytest.mark.parametrize("error", [NotFound("gone"), UpstreamTimeout("slow")])
@@ -439,6 +511,15 @@ async def test_a_file_in_an_allowed_directory_is_uploaded_under_its_own_name(fol
         "From disk",
     )
     assert result.filename == "scan März.pdf"
+
+
+async def test_an_empty_name_given_with_a_path_is_refused_not_replaced(folder: Path) -> None:
+    setup = Setup(upload_dirs=(str(folder),))
+
+    with pytest.raises(Validation, match="file name"):
+        _ = await setup.service.from_path(str(folder / "scan März.pdf"), "", UploadMetadata())
+
+    assert setup.untouched()
 
 
 async def test_a_name_given_with_the_path_wins(folder: Path) -> None:

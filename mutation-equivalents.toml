@@ -332,3 +332,118 @@ reason = "httpx2 upper-cases the method when it builds the request, so 'patch' i
 mutant = "paperless_mcp.paperless.taxonomy.xǁPaperlessTaxonomyWriterǁdelete_taxonomy_item__mutmut_7"
 function_hash = "aaa315a74701"
 reason = "httpx2 upper-cases the method when it builds the request, so 'delete' is sent as 'DELETE'."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x_clean_filename__mutmut_5"
+function_hash = "c37bbeb7ca2c"
+reason = "rsplit with another maxsplit and `problem = ''` instead of None: [-1] is the same last component, and an empty problem is falsy like None."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x_clean_filename__mutmut_14"
+function_hash = "c37bbeb7ca2c"
+reason = "rsplit with another maxsplit and `problem = ''` instead of None: [-1] is the same last component, and an empty problem is falsy like None."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x_clean_filename__mutmut_17"
+function_hash = "c37bbeb7ca2c"
+reason = "rsplit with another maxsplit and `problem = ''` instead of None: [-1] is the same last component, and an empty problem is falsy like None."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__read__mutmut_14"
+function_hash = "5725f000efe4"
+reason = "Same outcome for every file: a file over the limit is read on (further or whole) until it is longer than the limit and then refused; only how many bytes are read before refusing differs."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__read__mutmut_16"
+function_hash = "5725f000efe4"
+reason = "Same outcome for every file: a file over the limit is read on (further or whole) until it is longer than the limit and then refused; only how many bytes are read before refusing differs."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__read__mutmut_20"
+function_hash = "5725f000efe4"
+reason = "Same outcome for every file: a file over the limit is read on (further or whole) until it is longer than the limit and then refused; only how many bytes are read before refusing differs."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__read__mutmut_21"
+function_hash = "5725f000efe4"
+reason = "Same outcome for every file: a file over the limit is read on (further or whole) until it is longer than the limit and then refused; only how many bytes are read before refusing differs."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__open_regular__mutmut_3"
+function_hash = "c8879a989362"
+reason = "O_CLOEXEC and O_DIRECTORY on the root cannot be observed (O_RDONLY is 0; the root is a directory already checked by realpath); a stat that follows links is backed by the O_NOFOLLOW open that comes next; suppress(None) never sees an error because the held directory descriptor is always open."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__open_regular__mutmut_9"
+function_hash = "c8879a989362"
+reason = "O_CLOEXEC and O_DIRECTORY on the root cannot be observed (O_RDONLY is 0; the root is a directory already checked by realpath); a stat that follows links is backed by the O_NOFOLLOW open that comes next; suppress(None) never sees an error because the held directory descriptor is always open."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__open_regular__mutmut_10"
+function_hash = "c8879a989362"
+reason = "O_CLOEXEC and O_DIRECTORY on the root cannot be observed (O_RDONLY is 0; the root is a directory already checked by realpath); a stat that follows links is backed by the O_NOFOLLOW open that comes next; suppress(None) never sees an error because the held directory descriptor is always open."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__open_regular__mutmut_30"
+function_hash = "c8879a989362"
+reason = "O_CLOEXEC and O_DIRECTORY on the root cannot be observed (O_RDONLY is 0; the root is a directory already checked by realpath); a stat that follows links is backed by the O_NOFOLLOW open that comes next; suppress(None) never sees an error because the held directory descriptor is always open."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__open_regular__mutmut_33"
+function_hash = "c8879a989362"
+reason = "O_CLOEXEC and O_DIRECTORY on the root cannot be observed (O_RDONLY is 0; the root is a directory already checked by realpath); a stat that follows links is backed by the O_NOFOLLOW open that comes next; suppress(None) never sees an error because the held directory descriptor is always open."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__open_regular__mutmut_34"
+function_hash = "c8879a989362"
+reason = "O_CLOEXEC and O_DIRECTORY on the root cannot be observed (O_RDONLY is 0; the root is a directory already checked by realpath); a stat that follows links is backed by the O_NOFOLLOW open that comes next; suppress(None) never sees an error because the held directory descriptor is always open."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_source.x__open_regular__mutmut_63"
+function_hash = "c8879a989362"
+reason = "O_CLOEXEC and O_DIRECTORY on the root cannot be observed (O_RDONLY is 0; the root is a directory already checked by realpath); a stat that follows links is backed by the O_NOFOLLOW open that comes next; suppress(None) never sees an error because the held directory descriptor is always open."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_types.x__zipped__mutmut_22"
+function_hash = "4d43e564fff2"
+reason = "Decoding the first 100 bytes of the mimetype member as ASCII with another spelling, encoding default or one byte more, or reading all of it: the result is compared with the exact type name, which is 49 characters or fewer, so any longer or damaged content is a mismatch either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_types.x__zipped__mutmut_23"
+function_hash = "4d43e564fff2"
+reason = "Decoding the first 100 bytes of the mimetype member as ASCII with another spelling, encoding default or one byte more, or reading all of it: the result is compared with the exact type name, which is 49 characters or fewer, so any longer or damaged content is a mismatch either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_types.x__zipped__mutmut_24"
+function_hash = "4d43e564fff2"
+reason = "Decoding the first 100 bytes of the mimetype member as ASCII with another spelling, encoding default or one byte more, or reading all of it: the result is compared with the exact type name, which is 49 characters or fewer, so any longer or damaged content is a mismatch either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_types.x__zipped__mutmut_25"
+function_hash = "4d43e564fff2"
+reason = "Decoding the first 100 bytes of the mimetype member as ASCII with another spelling, encoding default or one byte more, or reading all of it: the result is compared with the exact type name, which is 49 characters or fewer, so any longer or damaged content is a mismatch either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_types.x__zipped__mutmut_27"
+function_hash = "4d43e564fff2"
+reason = "Decoding the first 100 bytes of the mimetype member as ASCII with another spelling, encoding default or one byte more, or reading all of it: the result is compared with the exact type name, which is 49 characters or fewer, so any longer or damaged content is a mismatch either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_types.x__zipped__mutmut_28"
+function_hash = "4d43e564fff2"
+reason = "Decoding the first 100 bytes of the mimetype member as ASCII with another spelling, encoding default or one byte more, or reading all of it: the result is compared with the exact type name, which is 49 characters or fewer, so any longer or damaged content is a mismatch either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_types.x__zipped__mutmut_29"
+function_hash = "4d43e564fff2"
+reason = "Decoding the first 100 bytes of the mimetype member as ASCII with another spelling, encoding default or one byte more, or reading all of it: the result is compared with the exact type name, which is 49 characters or fewer, so any longer or damaged content is a mismatch either way."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.upload_types.x__text__mutmut_9"
+function_hash = "f7fbf0e405e6"
+reason = "'UTF-8' and 'utf-8' name the same codec."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁupload_document__mutmut_49"
+function_hash = "ee09c21864dc"
+reason = "httpx2 upper-cases the method; 'post' sends the same POST."

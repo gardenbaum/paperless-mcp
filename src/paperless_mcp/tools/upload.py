@@ -62,15 +62,13 @@ type Wait = Annotated[
 ]
 
 COMMON = (
-    "The file's type is found from its content, never from its name: PDF, PNG, JPEG, GIF, TIFF, "
-    "BMP, WebP, plain text and CSV (Word, Excel, PowerPoint, OpenDocument and RTF only if "
-    "Paperless runs Tika and Gotenberg). Metadata is given by name like in search_documents; an "
-    "unknown or ambiguous name is an error and nothing is uploaded, and tags are never created. "
-    "Custom field values are checked per data type. Paperless consumes the file later (OCR, "
-    "matching, workflows), so the result holds the task_id and, with wait_seconds, the new "
-    "document_id and web_url. Problems only consumption finds, such as a taken archive serial "
-    "number, show as state failure with a message. Each call adds a document: uploading the same "
-    "content again makes a second one on Paperless 3.x, there is no duplicate check."
+    "The type comes from the content, not the name: PDF, images, plain text and CSV (Office, "
+    "OpenDocument and RTF only if Paperless runs Tika). Metadata is given by name as in "
+    "search_documents; an unknown name is an error and nothing is uploaded; tags are never "
+    "created. Paperless consumes the file later: the result holds the task_id and, with "
+    "wait_seconds, the new document_id and web_url; a problem found only then (a taken archive "
+    "serial number) shows as state failure. Each call adds a document, also for content "
+    "Paperless already holds (no duplicate check)."
 )
 
 

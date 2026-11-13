@@ -30,6 +30,24 @@ from paperless_mcp.tools.upload import (
 
 local = LocalProvider()
 
+# The transports of a remote caller (FastMCP's names); a path is never read for one of them.
+HTTP_TRANSPORTS = frozenset({"sse", "streamable-http"})
+
+
+def check_transport(transport: str | None) -> None:
+    """Refuse a path unless the request came over stdio (or the server runs in-process).
+
+    The server never registers this tool over HTTP; this is the second lock, for a server that
+    was started on the wrong transport. ``None``: no transport (tests, embedding).
+
+    Raises:
+        Validation: The request came over an HTTP transport.
+    """
+    if transport in HTTP_TRANSPORTS:
+        message = "A path can only be read when the server runs over stdio."
+        raise Validation(message, hint="Send the file as content_base64.")
+
+
 LEAD = (
     "Upload a file to Paperless as a new document. Give the file either as path (an absolute "
     "path of a regular file inside the directories the operator allowed; symlinks are followed "
@@ -97,6 +115,7 @@ async def upload_document(  # noqa: PLR0913 -- the file plus one parameter per m
     )
     uploads = services(ctx).uploads
     if path is not None:
+        check_transport(ctx.transport)
         return await uploads.from_path(str(path), filename, metadata, wait_seconds=wait_seconds)
     if filename is None:
         message = "filename is required with content_base64."

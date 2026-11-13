@@ -64,7 +64,9 @@ def test_a_file_name_loses_its_directories_and_keeps_everything_else(
 @pytest.mark.parametrize(
     "given",
     ["", "   ", ".", "..", "dir/", "a/..", "a\\..\\", "nul\x00.pdf", "bell\x07.pdf",
-     "line\nbreak.pdf", "gpj.exe\u202e.pdf", "ä" * 128],
+     "line\nbreak.pdf", "gpj.exe\u202e.pdf", "ä" * 128, "del\x7f.pdf", "c1\x85.pdf",
+     "zero\u200bwidth.pdf", "joiner\u200d.pdf", "isolate\u2066.pdf", "bom\ufeff.pdf",
+     "line\u2028sep.pdf", "para\u2029sep.pdf"],
 )  # fmt: skip
 def test_a_file_name_without_a_usable_name_is_refused(given: str) -> None:
     with pytest.raises(Validation, match="file name"):
@@ -93,6 +95,8 @@ def test_content_far_over_the_limit_is_refused_before_it_is_decoded() -> None:
     # Not even valid base64: only a check of the length first can report the size.
     with pytest.raises(Validation, match="larger than the limit"):
         _ = decode_base64("!" * 10_000, max_bytes=LIMIT)
+    with pytest.raises(Validation, match="larger than the limit"):
+        _ = decode_base64("!" * 140, max_bytes=LIMIT)  # just over the 136 characters of 100 bytes
 
 
 @pytest.mark.parametrize("limit", [1, 2, 3, 4, 5, 100])
@@ -197,8 +201,46 @@ def test_traversal_out_of_the_allowlist_is_refused(allowed: Path, relative: str)
     _ = refused(str(allowed) + "/" + relative, allowed)
 
 
-def test_traversal_that_stays_inside_is_fine_because_it_is_resolved_first(allowed: Path) -> None:
-    assert read(f"{allowed}/sub/../invoice.pdf", allowed)[0] == "invoice.pdf"
+@pytest.mark.parametrize("tail", ["sub/../invoice.pdf", "../allowed/invoice.pdf", "sub/.."])
+def test_a_parent_component_is_refused_even_when_it_stays_inside(allowed: Path, tail: str) -> None:
+    """Resolving `..` would answer differently for paths that exist and that do not: an oracle."""
+    refused_alike = refused(f"{allowed}/{tail}", allowed)
+
+    assert refused_alike.message == refused(allowed / "nope.pdf", allowed).message
+
+
+def test_a_file_with_two_names_is_refused(allowed: Path) -> None:
+    """A hard link can name a file outside the allowlist; links cannot be traced to their origin."""
+    os.link(allowed / "invoice.pdf", allowed / "second name.pdf")
+
+    _ = refused(allowed / "invoice.pdf", allowed)
+    _ = refused(allowed / "second name.pdf", allowed)
+
+
+@pytest.mark.parametrize("name", [".ssh/id.pdf", "sub/.hidden.pdf", ".env", "sub/.git/config"])
+def test_dot_files_and_dot_directories_below_the_allowlist_are_refused(
+    allowed: Path, name: str
+) -> None:
+    target = allowed / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _ = target.write_bytes(b"%PDF-1.4 secret")
+
+    refused_alike = refused(target, allowed)
+
+    assert refused_alike.message == refused(allowed / "nope.pdf", allowed).message
+
+
+def test_a_dot_directory_above_the_allowlist_is_no_problem(tmp_path: Path) -> None:
+    root = tmp_path / ".config" / "scans"
+    root.mkdir(parents=True)
+    _ = (root / "a.pdf").write_bytes(b"%PDF-1.4 ok")
+
+    assert read(root / "a.pdf", root)[1] == b"%PDF-1.4 ok"
+
+
+@pytest.mark.parametrize("name", ["lone-low\udcff.pdf", "lone-high\ud800.pdf"])
+def test_a_path_that_cannot_be_encoded_is_just_not_found(allowed: Path, name: str) -> None:
+    _ = refused(f"{allowed}/{name}", allowed)
 
 
 def test_an_absolute_path_outside_the_allowlist_is_refused(allowed: Path, outside: Path) -> None:
@@ -318,6 +360,17 @@ def at_stage(stage: str, action: Callable[[], None]) -> Callable[[str], None]:
     return hook
 
 
+def test_a_read_in_chunks_returns_every_byte_of_a_file_over_one_chunk(tmp_path: Path) -> None:
+    big = bytes(range(256)) * 600  # 153 600 bytes: more than two 64 KiB chunks
+    root = tmp_path / "big"
+    root.mkdir()
+    _ = (root / "big.bin").write_bytes(big)
+
+    assert read_allowed(str(root / "big.bin"), [str(root)], max_bytes=len(big))[1] == big
+    with pytest.raises(Validation, match="larger than the limit"):
+        _ = read_allowed(str(root / "big.bin"), [str(root)], max_bytes=len(big) - 1)
+
+
 def test_the_read_passes_the_three_stages_the_hooks_can_use(allowed: Path) -> None:
     stages: list[str] = []
 
@@ -413,3 +466,18 @@ def test_the_files_opened_are_closed_again(allowed: Path) -> None:
         _ = refused(allowed / "missing", allowed)
 
     assert len(list(Path("/dev/fd").iterdir())) == before
+
+
+def test_a_file_that_grows_by_one_byte_past_a_whole_chunk_is_still_refused(tmp_path: Path) -> None:
+    """The limit is one read chunk exactly: the guard must read on to see the extra byte."""
+    chunk = 64 * 1024
+    root = tmp_path / "chunk"
+    root.mkdir()
+    target = root / "growing.bin"
+    _ = target.write_bytes(bytes(10))
+
+    def grow() -> None:
+        _ = target.write_bytes(bytes(chunk + 1))
+
+    with pytest.raises(Validation, match="larger than the limit"):
+        _ = read_allowed(str(target), [str(root)], max_bytes=chunk, at=at_stage("opened", grow))
