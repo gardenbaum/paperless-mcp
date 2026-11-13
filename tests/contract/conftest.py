@@ -48,6 +48,8 @@ from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations ar
     TaskReader,
     TaxonomyReader,
     TaxonomyWriter,
+    TrashReader,
+    TrashWriter,
     ViewReader,
     ViewWriter,
 )
@@ -59,6 +61,7 @@ from paperless_mcp.paperless.documents import PaperlessDocumentReader, Paperless
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
+from paperless_mcp.paperless.trash import PaperlessTrashReader, PaperlessTrashWriter
 from paperless_mcp.paperless.views import PaperlessViewReader, PaperlessViewWriter
 
 if TYPE_CHECKING:
@@ -98,6 +101,8 @@ class Ports:
     ai: AiReader
     views: ViewReader
     view_writes: ViewWriter
+    trash: TrashReader
+    trash_writes: TrashWriter
 
 
 def fake_ports(state: FakeState, user: str) -> Ports:
@@ -115,6 +120,8 @@ def fake_ports(state: FakeState, user: str) -> Ports:
         ai=fake,
         views=fake,
         view_writes=writer,
+        trash=fake,
+        trash_writes=writer,
     )
 
 
@@ -131,6 +138,8 @@ def live_ports(client: PaperlessClient) -> Ports:
         ai=PaperlessAiReader(client),
         views=PaperlessViewReader(client),
         view_writes=PaperlessViewWriter(client),
+        trash=PaperlessTrashReader(client),
+        trash_writes=PaperlessTrashWriter(client),
     )
 
 
@@ -236,7 +245,7 @@ def fake_consume(state: FakeState) -> Consume:
 
 def fake_upload(state: FakeState) -> Upload:
     def upload_fake(title: str, filename: str, content: bytes, mime_type: str) -> int:
-        number = max((d.id for d in state.documents), default=0) + 1
+        number = max((d.id for d in (*state.documents, *state.trash)), default=0) + 1
         state.documents.append(
             FakeDocument(
                 id=number,
@@ -255,7 +264,7 @@ def fake_upload(state: FakeState) -> Upload:
 def fake_new_document(state: FakeState) -> Callable[[], int]:
     def new_document() -> int:
         [admin] = [user for user in state.users if user.username == ADMIN[0]]
-        number = max(d.id for d in state.documents) + 1
+        number = max(d.id for d in (*state.documents, *state.trash)) + 1
         state.documents.append(
             FakeDocument(id=number, title=f"contract-write-{uuid.uuid4().hex}", owner=admin.id)
         )

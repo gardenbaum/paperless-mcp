@@ -167,6 +167,10 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
         "BulkEditObjectsView answers HttpResponseForbidden('Insufficient permissions'), "
         "text/html (PLMCP-22)"
     ),
+    ("POST", "/api/trash/", 403): (
+        "TrashView answers a document the user may not delete with "
+        "HttpResponseForbidden('Insufficient permissions'), text/html (PLMCP-27)"
+    ),
     ("GET", "/api/status/", 200): (
         "3.4.2 nests index, classifier and sanity check under `tasks` and sends null errors; "
         "the schema has them top-level and non-nullable (PLMCP-7)"

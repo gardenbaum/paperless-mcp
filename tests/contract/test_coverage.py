@@ -28,6 +28,8 @@ from paperless_mcp.domain.ports import (
     TaskReader,
     TaxonomyReader,
     TaxonomyWriter,
+    TrashReader,
+    TrashWriter,
     ViewReader,
     ViewWriter,
 )
@@ -176,6 +178,8 @@ def test_ports_are_found_by_introspection() -> None:
         "ai": AiReader,
         "views": ViewReader,
         "view_writes": ViewWriter,
+        "trash": TrashReader,
+        "trash_writes": TrashWriter,
     }
 
 

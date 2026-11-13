@@ -35,6 +35,8 @@ if TYPE_CHECKING:
         TaskReader,
         TaxonomyReader,
         TaxonomyWriter,
+        TrashReader,
+        TrashWriter,
         ViewReader,
         ViewWriter,
     )
@@ -86,6 +88,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     ai: AiReader | None = None,
     views: ViewReader | None = None,
     view_writes: ViewWriter | None = None,
+    trash: TrashReader | None = None,
+    trash_writes: TrashWriter | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
     startup_timeout: float = 2.0,
@@ -101,6 +105,7 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     """The assembled server, with `reader` in place of the Paperless adapter.
 
     `taxonomy`, `documents`, `tasks`, `ai`, `views` and the writers default to `reader` if that is a
+    `taxonomy`, `documents`, `tasks`, `ai`, `trash` and the writers default to `reader` if that is a
     fake, else to the seeded admin's fake (which refuses writes unless created to allow them).
     `sleep` and `clock` replace the real ones the task wait uses. `toolsets`, `read_only` and
     `disabled_tools` go to the server settings; `catalogue` replaces the tools the server
@@ -133,6 +138,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
             ai=ai or fake,
             views=views or fake,
             view_writes=view_writes or fake,
+            trash=trash or fake,
+            trash_writes=trash_writes or fake,
         ),
         sleep=sleep,
         clock=clock,

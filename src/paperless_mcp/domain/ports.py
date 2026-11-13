@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         TaxonomyValues,
         WritableKind,
     )
+    from paperless_mcp.domain.trash import TrashPage
     from paperless_mcp.domain.versions import VersionUpload
     from paperless_mcp.domain.views import SavedView, ViewValues
 
@@ -501,5 +502,57 @@ class ViewWriter(Protocol):
         Raises:
             NotFound: No such view, or the user may not see it.
             PermissionDenied: The user may not delete saved views, or this one.
+        """
+        ...
+
+
+class TrashReader(Protocol):
+    """The Paperless trash: deleted documents and versions the current user may see."""
+
+    async def list_trash(self, *, page: int, page_size: int) -> TrashPage:
+        """One page of the trash, in Paperless order (by creation date, newest first).
+
+        A version deleted from a document is an entry of its own, but not while its document is
+        in the trash too (the document's entry covers it). The user sees the entries of
+        documents they own or that have no owner, all of them for a superuser; a view grant is
+        not enough.
+
+        Raises:
+            NotFound: ``page`` is beyond the last page.
+            PermissionDenied: The user lacks the global ``view_document`` permission.
+        """
+        ...
+
+
+class TrashWriter(Protocol):
+    """Changes to the trash."""
+
+    async def restore_from_trash(self, document_ids: Sequence[int]) -> None:
+        """Take the entries out of the trash.
+
+        A document comes back with its notes, versions and metadata. A version deleted from a
+        document is re-attached to it with its label and upload time, and becomes the newest
+        version if it was. Only ids that are in the trash and distinct are accepted, all or none.
+        This port always names ids: Paperless reads a request without them as "everything".
+
+        Raises:
+            PermissionDenied: The user lacks the global ``delete_document`` permission, or may
+                not delete one of the documents (an owner, or any user for an unowned one).
+            Validation: An id is not in the trash (or listed twice), or is a version whose
+                document is in the trash too: restore the document instead. Nothing is changed.
+        """
+        ...
+
+    async def empty_trash(self, document_ids: Sequence[int]) -> None:
+        """Remove the entries from the trash for good: files, text, notes and metadata are lost.
+
+        Emptying a document also removes its versions that are in the trash, those deleted
+        earlier too. Only ids that are in the trash and distinct are accepted, all or none. This
+        port always names ids: Paperless reads a request without them as "everything" and an
+        empty list as nothing, which is why callers deduplicate and never pass none.
+
+        Raises:
+            PermissionDenied: As for ``restore_from_trash``.
+            Validation: An id is not in the trash (or listed twice). Nothing is changed.
         """
         ...

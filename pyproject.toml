@@ -277,6 +277,7 @@ modules = [
     "paperless_mcp.tools.versions",
     "paperless_mcp.tools.versions_stdio",
     "paperless_mcp.tools.views",
+    "paperless_mcp.tools.trash",
 ]
 ignore_imports = [
     "paperless_mcp.tools.upload_stdio -> paperless_mcp.tools.upload",

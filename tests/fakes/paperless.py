@@ -76,6 +76,7 @@ from paperless_mcp.domain.instance import (
 )
 from paperless_mcp.domain.tasks import TaskState, TaskStatus
 from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyDetail, TaxonomyItem
+from paperless_mcp.domain.trash import TrashedDocument, TrashPage
 from paperless_mcp.domain.views import FilterRule, SavedView
 from paperless_mcp.paperless.bulk import documents_refused, objects_refused
 from paperless_mcp.paperless.documents import (
@@ -86,6 +87,8 @@ from paperless_mcp.paperless.documents import (
 )
 from paperless_mcp.paperless.errors import ai_disabled
 from paperless_mcp.paperless.tasks import not_found
+from paperless_mcp.paperless.trash import beyond_last_page as beyond_trash
+from paperless_mcp.paperless.trash import refused as trash_refused
 from paperless_mcp.paperless.views import unseen_view
 
 if TYPE_CHECKING:
@@ -330,6 +333,13 @@ class FakeDocument(Owned):
     # None: Paperless made no archive version (e.g. a plain text document).
     archive: bytes | None = b"%PDF-1.4 fake archive version, longer than the original"
     thumbnail: bytes = THUMBNAIL
+    # Set while the document is in the trash (state.trash): when it was deleted.
+    deleted_at: datetime | None = None
+    # Set on the trash entry of a deleted version: the document it was deleted from.
+    root_id: int | None = None
+    # Set on such an entry when the version went to the trash together with its document, so
+    # that restoring the document brings it back; an earlier deletion stays an entry of its own.
+    with_root: bool = False
 
     def __post_init__(self) -> None:
         """Name the file after the title unless given; a rename keeps the file's name.
@@ -1100,8 +1110,148 @@ class FakePaperless:
         if not self.user.may_change_object(document):
             message = "The Paperless user may not perform this action."
             raise PermissionDenied(message)
+        self._to_trash(document)
+
+    def _to_trash(self, document: FakeDocument) -> None:
+        """Move a document to the trash, stamped with the time; its versions go there too.
+
+        Like Paperless, which soft-deletes every version row: they are entries of their own
+        (restoring one on its own is refused while the document is in the trash).
+        """
+        now = datetime.now(UTC)
         self.state.documents.remove(document)
+        document.deleted_at = now
         self.state.trash.append(document)
+        for version in document.versions:
+            if not version.is_root:
+                entry = self._version_entry(document, version, now)
+                entry.with_root = True
+                self.state.trash.append(entry)
+
+    @staticmethod
+    def _version_entry(
+        document: FakeDocument, version: DocumentVersion, now: datetime
+    ) -> FakeDocument:
+        """The trash entry of a version: the document's title, the version's id and file."""
+        file = document.version_files[version.id]
+        return FakeDocument(
+            id=version.id,
+            title=document.title,
+            owner=document.owner,
+            created=document.created,
+            versions=[version],
+            deleted_at=now,
+            root_id=document.id,
+            original=file.original,
+            archive=file.archive,
+            content=file.content,
+        )
+
+    async def list_trash(self, *, page: int, page_size: int) -> TrashPage:
+        """`TrashReader.list_trash` (TrashView.get), ordered like the document list.
+
+        Paperless sorts by `-created`, a date, with no tie-breaker: on 3.4.2 equal dates came
+        back by id, newest first, which is what this does (an order callers must not rely on).
+
+        Needs the global `view_document` permission (403). A user sees the entries of documents
+        they own or that have no owner (a view grant is not enough), a superuser all of them. A
+        deleted version is an entry of its own, unless its document is in the trash too.
+
+        Raises:
+            NotFound: `page` is beyond the last page.
+            PermissionDenied: See above.
+        """
+        if not self.user.has("view_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        covered = {d.id for d in self.state.trash}
+        seen = [
+            d
+            for d in self.state.trash
+            if d.root_id not in covered
+            and (self.user.is_superuser or d.owner in {None, self.user.id})
+        ]
+        seen.sort(key=lambda d: (d.created, d.id), reverse=True)
+        start = (page - 1) * page_size
+        if page > 1 and start >= len(seen):
+            raise beyond_trash(page)
+        return TrashPage(
+            count=len(seen),
+            next_page=page + 1 if start + page_size < len(seen) else None,
+            entries=tuple(
+                TrashedDocument(
+                    id=d.id,
+                    title=d.title,
+                    deleted_at=d.deleted_at or datetime.min.replace(tzinfo=UTC),
+                    version_of=d.root_id,
+                )
+                for d in seen[start : start + page_size]
+            ),
+        )
+
+    @write
+    async def restore_from_trash(self, document_ids: Sequence[int]) -> None:
+        """`TrashWriter.restore_from_trash` (TrashView.post, action `restore`).
+
+        Order in Paperless 3.4.2: the global `delete_document` permission (403), every id in the
+        trash and none twice (400), the ownership of every document (403), then a version whose
+        document is in the trash too (400). A document comes back with the versions that were
+        deleted with it (one deleted earlier stays an entry of its own); a version is re-attached
+        to its document, which shows the newest one.
+        """
+        entries = self._selected(document_ids)
+        covered = {d.id for d in self.state.trash}
+        if any(d.root_id in covered for d in entries):
+            reject("documents", "Restore the root document instead of one of its versions.")
+        for entry in entries:
+            self.state.trash.remove(entry)
+            entry.deleted_at = None
+            if entry.root_id is None:
+                self.state.trash[:] = [
+                    d for d in self.state.trash if not (d.root_id == entry.id and d.with_root)
+                ]
+                self.state.documents.append(entry)
+            else:
+                self._reattach(entry)
+
+    @write
+    async def empty_trash(self, document_ids: Sequence[int]) -> None:
+        """`TrashWriter.empty_trash` (TrashView.post, action `empty`): a hard delete.
+
+        The same checks as `restore_from_trash` (except the one for versions). A document's
+        deleted versions go with it, those deleted earlier too (probed on 3.4.2).
+        """
+        entries = self._selected(document_ids)
+        gone = {d.id for d in entries}
+        self.state.trash[:] = [
+            d for d in self.state.trash if d not in entries and d.root_id not in gone
+        ]
+
+    def _selected(self, document_ids: Sequence[int]) -> list[FakeDocument]:
+        """The trash entries to act on, after the checks both actions share."""
+        if not self.user.has("delete_document"):
+            raise trash_refused()
+        if not document_ids:
+            reject("documents", "Name at least one trash entry.")
+        wanted = list(document_ids)
+        entries = [d for d in self.state.trash if d.id in wanted]
+        if len(entries) != len(wanted):
+            reject("documents", "Some documents in the list have not yet been deleted.")
+        if not all(self.user.may_change_object(d) for d in entries):
+            raise trash_refused()
+        return entries
+
+    def _reattach(self, stub: FakeDocument) -> None:
+        """Make the trash entry of a version a version of its document again."""
+        [root] = [d for d in self.state.documents if d.id == stub.root_id]
+        version = stub.versions[0]
+        if not root.version_files:
+            root.version_files[root.id] = FakeFile(root.original, root.archive, root.content)
+        root.version_files[version.id] = FakeFile(stub.original, stub.archive, stub.content)
+        root.versions = sorted(
+            [*root.versions, version], key=lambda v: (v.added, v.id), reverse=True
+        )
+        self._show(root, root.version_files[root.versions[0].id])
 
     def _next_id(self) -> int:
         """The next free id: versions share the id space of documents (trash included)."""
@@ -1260,18 +1410,8 @@ class FakePaperless:
                 "version", "Cannot delete the root/original version. Delete the document instead."
             )
         document.versions = [v for v in document.versions if v.id != version_id]
-        gone = document.version_files.pop(version_id)
-        self.state.trash.append(
-            FakeDocument(
-                id=version_id,
-                title=document.title,
-                owner=document.owner,
-                versions=[found[0]],
-                original=gone.original,
-                archive=gone.archive,
-                content=gone.content,
-            )
-        )
+        self.state.trash.append(self._version_entry(document, found[0], datetime.now(UTC)))
+        del document.version_files[version_id]
         current = document.versions[0]
         self._show(document, document.version_files[current.id])
         return current.id
@@ -1720,8 +1860,7 @@ class FakePaperless:
 
     def _trash(self, documents: list[FakeDocument]) -> None:
         for document in documents:
-            self.state.documents.remove(document)
-            self.state.trash.append(document)
+            self._to_trash(document)
 
     def _bulk_items(
         self, kind: BulkKind, item_ids: Sequence[int], action: str
