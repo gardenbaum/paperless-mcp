@@ -31,7 +31,7 @@ if TYPE_CHECKING:
         Suggestions,
     )
     from paperless_mcp.domain.instance import InstanceOverview
-    from paperless_mcp.domain.pdf import Output, PageSlot
+    from paperless_mcp.domain.pdf import Output, PageSlot, StartedTasks
     from paperless_mcp.domain.tasks import TaskStatus
     from paperless_mcp.domain.taxonomy import (
         TaxonomyDetail,
@@ -562,20 +562,24 @@ class TrashWriter(Protocol):
 class PdfWriter(Protocol):
     """Server-side PDF operations: Paperless queues them and tasks do the work.
 
-    Every method returns the ids of the tasks Paperless started for the request, as far as the
-    user can see them. Paperless itself answers "OK" without naming them, so the adapter finds
-    them by looking at the task list around the request. It returns no ids when the user may not
-    view tasks, when Paperless started none (e.g. removing the password of a file that has none)
-    or when they did not show up within a short bounded time: the operation was accepted all the
-    same. Requests are never retried (a repeat would do the work twice).
+    Every method returns the tasks Paperless started for the request, as far as they can be found
+    (``StartedTasks``). Paperless itself answers "OK" without naming them, so the adapter finds
+    them by looking at the task list around the request: tasks of this user that are newer than
+    the request's mark, of the operation's kind and file, at most as many as the request starts.
+    Fewer are returned when the user may not view tasks, when Paperless started none (e.g.
+    removing the password of a file that has none), when they did not show up within a short
+    bounded time or when reading them failed: the operation was accepted all the same, and none
+    of this is raised. Operations are serialised per writer, and requests are never retried (a
+    repeat would do the work twice).
 
-    All of them need the global permission to change documents and a change grant on (or
-    ownership of, or no owner for) every document; the user must also be able to add documents
-    when the result is a new document, and to delete them (as owner) when an original is
-    deleted. A document the user may not change is refused as a whole.
+    Permissions (probed on 3.4.2): all need the global permission to change documents. Rotating,
+    editing, splitting, deleting pages and removing a password also need ownership of every
+    document (or no owner; a change grant is not enough). Merging and reprocessing accept a
+    change grant. A new document needs the permission to add documents, and deleting an original
+    needs ownership and the permission to delete.
     """
 
-    async def rotate_documents(self, document_ids: Sequence[int], degrees: int) -> tuple[str, ...]:
+    async def rotate_documents(self, document_ids: Sequence[int], degrees: int) -> StartedTasks:
         """Rotate every page of the PDFs clockwise by ``degrees`` as a new version of each.
 
         ``degrees`` is a multiple of 90, negative turns counter-clockwise. Each document gets its
@@ -594,7 +598,7 @@ class PdfWriter(Protocol):
         *,
         metadata_document_id: int | None,
         delete_originals: bool,
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         """Merge the PDFs, in this order, into one new document.
 
         The new document takes the metadata (title with ' (merged)', tags, ...) of
@@ -609,7 +613,7 @@ class PdfWriter(Protocol):
 
     async def edit_pdf(
         self, document_id: int, pages: Sequence[PageSlot], *, output: Output
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         """Build files from the pages of one PDF: ``pages`` in order, grouped by their file.
 
         ``output`` decides where the result goes. ``new_version`` needs a single output file.
@@ -625,7 +629,7 @@ class PdfWriter(Protocol):
 
     async def remove_password(
         self, document_id: int, password: str, *, output: Output
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         """Unlock an encrypted PDF with ``password``; ``output`` decides where the copy goes.
 
         A file without a password makes Paperless start no task.
@@ -638,7 +642,7 @@ class PdfWriter(Protocol):
 
     async def reprocess_documents(
         self, document_ids: Sequence[int], *, remote_ocr: bool
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         """Run OCR and archiving again for every document; one task each.
 
         Raises:

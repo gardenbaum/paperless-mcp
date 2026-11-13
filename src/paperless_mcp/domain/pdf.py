@@ -48,6 +48,27 @@ class PageSlot(BaseModel):
     ] = 0
 
 
+# Why the tasks of a request are not all known: the user may not view tasks, or reading them failed.
+type LookupProblem = Literal["forbidden", "failed"]
+
+
+class StartedTasks(BaseModel):
+    """The tasks Paperless started for a request, as far as they could be found.
+
+    Attributes:
+        ids: Their ids, oldest first, at most ``expected`` of them.
+        expected: How many tasks the request starts.
+        problem: Why the lookup is incomplete beyond tasks that did not show up: the user may not
+            view tasks (forbidden), or reading them failed after the request was accepted (failed).
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    ids: tuple[str, ...]
+    expected: int
+    problem: LookupProblem | None = None
+
+
 # Output models are tool output schemas: a one-line class docstring each, and field descriptions
 # only where the name does not say enough.
 
@@ -58,7 +79,15 @@ class PdfTask(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
     task_id: str
-    state: Annotated[UploadState, Field(description="pending, started, success, failure, revoked.")]
+    state: Annotated[
+        UploadState,
+        Field(
+            description=(
+                "pending, started, success, failure, revoked, or unknown when the task could "
+                "not be read."
+            )
+        ),
+    ]
     message: Annotated[str | None, Field(description="Why the task failed; null otherwise.")]
     document_ids: Annotated[
         tuple[int, ...],
@@ -81,14 +110,17 @@ class PdfResult(BaseModel):
         Field(
             description=(
                 "The tasks together: failure or revoked if one did, else started or pending if "
-                "one still runs, else success. unknown when no task could be found or read: "
-                "Paperless accepted the request all the same, and the user may not view tasks "
-                "or the work is not yet visible."
+                "one still runs, else success. unknown when not all expected tasks could be "
+                "found or read: Paperless accepted the request all the same (the user may not "
+                "view tasks, or the work is not yet visible); see message."
             )
         ),
     ]
     message: Annotated[
         str | None, Field(description="Why a task failed, or why the state is unknown.")
+    ]
+    source_links: Annotated[
+        tuple[str, ...], Field(description="Links to the source documents in the Paperless web UI.")
     ]
     tasks: tuple[PdfTask, ...]
     produced_ids: Annotated[
@@ -98,6 +130,15 @@ class PdfResult(BaseModel):
                 "The documents the finished tasks produced: new documents, or for a new version "
                 "the id of that version (the document keeps its id). Empty while tasks run; "
                 "reprocessing produces none."
+            )
+        ),
+    ]
+    produced_links: Annotated[
+        tuple[str, ...],
+        Field(
+            description=(
+                "Links to the produced documents; for a new version the link of the document "
+                "that got it."
             )
         ),
     ]

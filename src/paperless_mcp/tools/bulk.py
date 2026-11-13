@@ -69,7 +69,8 @@ async def bulk_edit_documents(
     linking A to B also changes B (you need change permission there), so also_changed lists
     those documents; a shorter list does not unlink the old target (Paperless 3.4.2), removing
     the field does. delete moves documents to the Paperless trash; reprocess runs OCR again in
-    the background. Paperless checks every document first: if you may not change one of them
+    the background (the pdf toolset's reprocess_documents does the same, also with remote OCR).
+    Paperless checks every document first: if you may not change one of them
     (blocked lists them), none changes and nothing is sent. Needs change permission on the
     documents, and ownership and the delete permission for delete.
     """  # noqa: D205 -- the summary is one sentence; FastMCP sends the docstring as is

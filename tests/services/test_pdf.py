@@ -5,7 +5,7 @@ The fakes of the "refused" cases are created without `allow_writes`: the fake's 
 """
 
 from dataclasses import replace
-from typing import TYPE_CHECKING, final, override
+from typing import TYPE_CHECKING, Literal, final, override
 
 import pytest
 from fakes.accounts import ADMIN
@@ -19,7 +19,7 @@ from paperless_mcp.domain.errors import (
     UpstreamTimeout,
     Validation,
 )
-from paperless_mcp.domain.pdf import PageSlot
+from paperless_mcp.domain.pdf import PageSlot, StartedTasks
 from paperless_mcp.services.pdf import MAX_DOCUMENTS, PdfService
 from paperless_mcp.services.tasks import TaskService
 
@@ -31,6 +31,12 @@ if TYPE_CHECKING:
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
+WEB = "https://paperless.example"
+REPROCESS_NOTE = (
+    "Paperless does not say which document a reprocess task belongs to (its tasks name none): "
+    "they are the newest reprocess tasks this request started, so they cannot be tied to the "
+    "documents."
+)
 EDITING = frozenset({"view_document", "change_document", "add_document", "delete_document"})
 
 
@@ -56,7 +62,19 @@ class Slow(FakePaperless):
         self.reads: int = 0
         self.read_error: Exception | None = None
         self.failing: str | None = None
+        self.lose_tasks: int = 0
+        self.lookup_problem: Literal["forbidden", "failed"] | None = None
         self.keep_documents: bool = False
+
+    @override
+    def _seen_tasks(self, task_ids: tuple[str, ...], expected: int | None = None) -> StartedTasks:
+        kept = task_ids[: len(task_ids) - self.lose_tasks]
+        started = super()._seen_tasks(kept, len(task_ids) if expected is None else expected)
+        if self.lookup_problem:
+            return StartedTasks(
+                ids=started.ids, expected=started.expected, problem=self.lookup_problem
+            )
+        return started
 
     @override
     async def get_task(self, task_id: str) -> TaskStatus:
@@ -95,7 +113,10 @@ class Setup:
         self.fake: Slow = Slow(self.state, user=user, allow_writes=writes, slow_reads=slow_reads)
         self.clock: Clock = Clock()
         self.service: PdfService = PdfService(
-            self.fake, self.fake, TaskService(self.fake, sleep=self.clock.sleep, clock=self.clock)
+            self.fake,
+            self.fake,
+            TaskService(self.fake, sleep=self.clock.sleep, clock=self.clock),
+            web_url=WEB,
         )
 
     def pdf(self, pages: int, title: str = "Report", **fields: object) -> int:
@@ -213,9 +234,10 @@ async def test_a_user_who_may_not_view_tasks_gets_an_unknown_state_that_says_why
     result = await setup.service.rotate([setup.pdf(1)], 90, wait_seconds=5)
 
     assert (result.state, result.tasks, result.produced_ids) == ("unknown", (), ())
-    assert result.message is not None
-    assert "no task" in result.message
-    assert "may not view tasks" in result.message
+    assert result.message == (
+        "Paperless accepted the request, but the Paperless user may not view tasks, so none "
+        "can be followed."
+    )
     assert (result.wait, result.waited_seconds) == ("not_requested", 0.0)
 
 
@@ -667,7 +689,7 @@ async def test_a_confirmed_reprocess_starts_a_task_per_document_and_produces_no_
     result = await setup.service.reprocess([first, second], confirm=True, wait_seconds=5)
 
     assert (result.state, result.produced_ids, len(result.tasks)) == ("success", (), 2)
-    assert result.message is None
+    assert result.message == REPROCESS_NOTE
     assert setup.state.reprocessed == [first, second]
     assert result.summary == "reprocess 2 documents (local OCR)"
 
@@ -756,7 +778,8 @@ async def test_the_refusal_to_merge_without_confirm_has_the_exact_words() -> Non
     assert raised.value.message == (
         f"Nothing was changed. Confirming would merge document {first} 'Alpha', document {second} "
         f"'Beta' and document {third} 'Gamma' into one new document, in this order, and move the "
-        "originals to the Paperless trash (they can be restored from there)."
+        "originals to the Paperless trash (they can be restored from there); an original's "
+        "archive serial number, if it has one, moves to the new document."
     )
 
 
@@ -858,7 +881,8 @@ async def test_the_confirmations_of_deleting_pages_have_the_exact_words() -> Non
     )
     assert replacing.value.message == (
         f"Nothing was changed. Confirming would delete page 1 of document {document} 'Scan' into "
-        "a new document and move the original to the Paperless trash."
+        "a new document and move the original to the Paperless trash; the original's archive "
+        "serial number, if it has one, moves to the new document."
     )
 
 
@@ -986,7 +1010,8 @@ async def test_removing_a_password_has_exact_refusals_and_summaries() -> None:
         _ = await setup.service.remove_password(locked, "s3cret", output="replace_original")
     assert raised.value.message == (
         f"Nothing was changed. Confirming would remove the password of document {locked} "
-        "'Locked' into a new document and move the original to the Paperless trash."
+        "'Locked' into a new document and move the original to the Paperless trash; the "
+        "original's archive serial number, if it has one, moves to the new document."
     )
     text = setup.pdf(1, mime_type="text/plain")
     with pytest.raises(Validation, match="is not a PDF"):
@@ -1031,12 +1056,12 @@ async def test_reprocessing_passes_the_ocr_choice_on_and_reports_its_operation()
         @override
         async def reprocess_documents(
             self, document_ids: Sequence[int], *, remote_ocr: bool
-        ) -> tuple[str, ...]:
+        ) -> StartedTasks:
             asked.append(remote_ocr)
             return await super().reprocess_documents(document_ids, remote_ocr=remote_ocr)
 
     spy = Spy(setup.state, user=ADMIN[0], allow_writes=True, slow_reads=0)
-    service = PdfService(spy, spy, TaskService(spy))
+    service = PdfService(spy, spy, TaskService(spy), web_url=WEB)
     document = setup.pdf(1)
 
     local = await service.reprocess([document], confirm=True)
@@ -1087,18 +1112,7 @@ async def test_a_task_that_names_no_document_has_no_message() -> None:
     result = await setup.service.reprocess([setup.pdf(1)], confirm=True, wait_seconds=1)
 
     assert result.tasks[0].message is None
-    assert result.message is None
-
-
-async def test_the_message_of_a_result_without_tasks_is_the_exact_text() -> None:
-    setup = Setup(permissions=EDITING)
-
-    result = await setup.service.rotate([setup.pdf(1)], 90)
-
-    assert result.message == (
-        "Paperless accepted the request, but no task could be found for it. The Paperless user "
-        "may not view tasks, or Paperless started none."
-    )
+    assert result.message == REPROCESS_NOTE
 
 
 class Recording(Slow):
@@ -1111,7 +1125,7 @@ class Recording(Slow):
     @override
     async def edit_pdf(
         self, document_id: int, pages: Sequence[PageSlot], *, output: Output
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         self.outputs.append(output)
         return await super().edit_pdf(document_id, pages, output=output)
 
@@ -1119,7 +1133,7 @@ class Recording(Slow):
 async def test_splitting_and_editing_make_new_documents_unless_told_otherwise() -> None:
     setup = Setup()
     spy = Recording(setup.state)
-    service = PdfService(spy, spy, TaskService(spy))
+    service = PdfService(spy, spy, TaskService(spy), web_url=WEB)
     document = setup.pdf(3)
 
     _ = await service.split(document, ["1", "2"])
@@ -1159,3 +1173,160 @@ async def test_the_waited_time_of_several_tasks_is_added_and_kept_to_a_tenth() -
     result = await setup.service.rotate([first, second], 90, wait_seconds=30)
 
     assert result.waited_seconds == 4.7
+
+
+# --- what could not be found, the links, the texts ------------------------------------------
+
+
+async def test_fewer_tasks_than_expected_make_the_state_unknown_and_say_how_many() -> None:
+    setup = Setup()
+    setup.fake.lose_tasks = 1
+    first, second = setup.pdf(1), setup.pdf(1)
+
+    result = await setup.service.rotate([first, second], 90, wait_seconds=1)
+
+    assert (result.state, len(result.tasks)) == ("unknown", 1)
+    assert result.message == (
+        "Paperless accepted the request, but only 1 of the 2 tasks it starts showed up: the "
+        "state covers that one only."
+    )
+    assert len(result.produced_ids) == 1
+
+
+async def test_no_task_at_all_is_told_apart_from_some_missing() -> None:
+    setup = Setup()
+    locked = setup.pdf(1, "Locked")
+
+    result = await setup.service.remove_password(locked, "x")
+
+    assert (result.state, result.tasks) == ("unknown", ())
+    assert result.message == (
+        "Paperless accepted the request, but no task showed up for it (the file may not be "
+        "password protected)."
+    )
+    plain = await setup.service.rotate([setup.pdf(1)], 90)
+    assert plain.state == "success"
+    setup.fake.lose_tasks = 1
+    none = await setup.service.rotate([setup.pdf(1)], 90)
+    assert none.message == "Paperless accepted the request, but no task showed up for it."
+
+
+async def test_a_lookup_that_failed_is_reported_without_an_error() -> None:
+    setup = Setup()
+    setup.fake.lookup_problem = "failed"
+
+    result = await setup.service.rotate([setup.pdf(1)], 90, wait_seconds=1)
+
+    assert result.state == "unknown"
+    assert result.message == "Paperless accepted the request; its tasks could not be read."
+    assert len(result.tasks) == 1  # what was found is still reported
+
+
+async def test_an_incomplete_result_still_names_a_failed_task() -> None:
+    setup = Setup()
+    setup.fake.lose_tasks = 1
+    setup.fake.failing = "boom"
+    first, second = setup.pdf(1), setup.pdf(1)
+
+    result = await setup.service.rotate([first, second], 90, wait_seconds=1)
+
+    assert result.state == "unknown"
+    assert result.message is not None
+    assert result.message.startswith("boom ")
+
+
+async def test_a_result_links_the_sources_and_what_was_made() -> None:
+    setup = Setup()
+    first, second = setup.pdf(1), setup.pdf(1)
+
+    merged = await setup.service.merge([first, second], None)
+    [made] = merged.produced_ids
+
+    assert merged.source_links == (
+        f"{WEB}/documents/{first}/details",
+        f"{WEB}/documents/{second}/details",
+    )
+    assert merged.produced_links == (f"{WEB}/documents/{made}/details",)
+
+
+async def test_a_new_version_links_the_document_that_got_it() -> None:
+    setup = Setup()
+    first, second = setup.pdf(1), setup.pdf(1)
+
+    rotated = await setup.service.rotate([first, second], 90, wait_seconds=1)
+    unlocked = await setup.service.edit(first, [PageSlot(page=1)], output="new_version")
+
+    link = f"{WEB}/documents/{first}/details"
+    assert rotated.produced_links == (link, f"{WEB}/documents/{second}/details")
+    assert unlocked.produced_links == (link,)
+    assert len(rotated.produced_ids) == 2
+
+
+async def test_nothing_produced_links_nothing() -> None:
+    setup = Setup(slow_reads=1000)
+
+    result = await setup.service.rotate([setup.pdf(1)], 90, wait_seconds=1)
+
+    assert (result.produced_ids, result.produced_links) == ((), ())
+
+
+async def test_the_confirmations_say_that_the_serial_number_moves() -> None:
+    setup = Setup(writes=False)
+    first, second, doc = setup.pdf(1), setup.pdf(1), setup.pdf(3)
+    locked = setup.pdf(1, password="x")
+    asn = "archive serial number, if it has one, moves to the new document"
+
+    with pytest.raises(ConfirmationRequired) as merge:
+        _ = await setup.service.merge([first, second], None, delete_originals=True)
+    with pytest.raises(ConfirmationRequired) as edit:
+        _ = await setup.service.edit(doc, [PageSlot(page=1)], output="replace_original")
+    with pytest.raises(ConfirmationRequired) as pages:
+        _ = await setup.service.delete_pages(doc, "1", output="replace_original")
+    with pytest.raises(ConfirmationRequired) as password:
+        _ = await setup.service.remove_password(locked, "x", output="replace_original")
+    with pytest.raises(ConfirmationRequired) as split:
+        _ = await setup.service.split(doc, ["1", "2"], output="replace_original")
+    with pytest.raises(ConfirmationRequired) as two_files:
+        _ = await setup.service.edit(
+            doc, [PageSlot(page=1), PageSlot(page=2, document=1)], output="replace_original"
+        )
+
+    for raised in (merge, edit, pages, password):
+        assert asn in raised.value.message
+    for raised in (split, two_files):
+        assert "serial number" not in raised.value.message
+
+
+async def test_removing_a_password_links_what_it_made() -> None:
+    setup = Setup()
+    first = setup.pdf(1, "One", password="s3cret")
+    second = setup.pdf(1, "Two", password="s3cret")
+
+    as_version = await setup.service.remove_password(first, "s3cret", output="new_version")
+    as_copy = await setup.service.remove_password(second, "s3cret")
+
+    assert as_version.produced_links == (f"{WEB}/documents/{first}/details",)
+    [copy] = as_copy.produced_ids
+    assert as_copy.produced_links == (f"{WEB}/documents/{copy}/details",)
+
+
+async def test_several_failed_tasks_report_the_first_message_once() -> None:
+    setup = Setup()
+    setup.fake.failing = "boom"
+
+    result = await setup.service.rotate([setup.pdf(1), setup.pdf(1)], 90, wait_seconds=1)
+
+    assert (result.state, result.message) == ("failure", "boom")
+
+
+async def test_the_count_of_missing_tasks_is_worded_for_one_or_several_found() -> None:
+    setup = Setup()
+    setup.fake.lose_tasks = 1
+    three = [setup.pdf(1), setup.pdf(1), setup.pdf(1)]
+
+    result = await setup.service.rotate(three, 90)
+
+    assert result.message == (
+        "Paperless accepted the request, but only 2 of the 3 tasks it starts showed up: the "
+        "state covers those only."
+    )

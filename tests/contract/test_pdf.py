@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from contract.conftest import Backend
+    from paperless_mcp.domain.pdf import StartedTasks
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
@@ -35,10 +36,10 @@ SECONDS = 180.0
 EDITING = frozenset({"view_document", "change_document", "add_document"})
 
 
-async def finished(backend: Backend, task_ids: tuple[str, ...]) -> list[int]:
+async def finished(backend: Backend, started: StartedTasks) -> list[int]:
     """Wait for the tasks (read as the admin), track what they made, return those ids."""
     produced: list[int] = []
-    for task_id in task_ids:
+    for task_id in started.ids:
         deadline = time.monotonic() + SECONDS
         while True:
             status = await backend.admin.tasks.get_task(task_id)
@@ -77,7 +78,7 @@ async def test_rotating_adds_a_version_to_each_document_and_names_a_task_for_eac
 
     tasks = await backend.admin.pdf_writes.rotate_documents((first, second), 90)
 
-    assert len(tasks) == 2
+    assert (len(tasks.ids), tasks.expected, tasks.problem) == (2, 2, None)
     produced = await finished(backend, tasks)
     for document, version in zip((first, second), produced, strict=True):
         assert await version_ids(backend, document) == [version, document]
@@ -160,7 +161,7 @@ async def test_an_edit_splits_pages_into_new_documents_and_leaves_the_original(
 
     tasks = await backend.admin.pdf_writes.edit_pdf(document, slots, output="new_document")
 
-    assert len(tasks) == 2
+    assert len(tasks.ids) == 2
     produced = await finished(backend, tasks)
     assert sorted([await pages(backend, n) for n in produced], key=lambda n: n or 0) == [1, 2]
     assert await pages(backend, document) == 3
@@ -274,7 +275,7 @@ async def test_a_file_without_a_password_starts_no_task_and_a_text_file_is_refus
     with pytest.raises(Validation, match="PDF"):
         _ = await writes.remove_password(text, "x", output="new_document")
 
-    assert tasks == ()
+    assert tasks.ids == ()
 
 
 @pytest.mark.contract(REPROCESS)
@@ -283,7 +284,7 @@ async def test_reprocessing_starts_one_task_per_document(backend: Backend) -> No
 
     tasks = await backend.admin.pdf_writes.reprocess_documents((first, second), remote_ocr=False)
 
-    assert len(tasks) == 2
+    assert len(tasks.ids) == 2
     assert await finished(backend, tasks) == []  # reprocessing names no document
 
 
@@ -329,7 +330,7 @@ async def test_a_change_grant_reprocesses_but_rotating_and_editing_need_ownershi
         _ = await writes.edit_pdf(document, (PageSlot(page=1),), output="new_document")
     with pytest.raises(PermissionDenied):
         _ = await writes.remove_password(document, "x", output="new_document")
-    assert await writes.reprocess_documents((document,), remote_ocr=False) == ()
+    assert (await writes.reprocess_documents((document,), remote_ocr=False)).ids == ()
 
 
 @pytest.mark.contract(EDIT)
@@ -342,7 +343,7 @@ async def test_making_new_documents_needs_the_right_to_add_them(backend: Backend
         _ = await changer.pdf_writes.edit_pdf(document, (PageSlot(page=1),), output="new_document")
     tasks = await changer.pdf_writes.edit_pdf(document, (PageSlot(page=1),), output="new_version")
 
-    assert tasks == ()  # this user may not view tasks
+    assert tasks.ids == ()  # this user may not view tasks
     await until_versions(backend, document, 2)
 
 
@@ -356,7 +357,7 @@ async def test_a_user_who_may_not_view_tasks_gets_the_work_done_and_no_task_id(
 
     tasks = await editor.pdf_writes.rotate_documents((document,), 90)
 
-    assert tasks == ()
+    assert (tasks.ids, tasks.expected, tasks.problem) == ((), 1, "forbidden")
     await until_versions(backend, document, 2)
 
 

@@ -74,6 +74,7 @@ from paperless_mcp.domain.instance import (
     InstanceStatistics,
     SystemStatus,
 )
+from paperless_mcp.domain.pdf import StartedTasks
 from paperless_mcp.domain.tasks import TaskState, TaskStatus
 from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyDetail, TaxonomyItem
 from paperless_mcp.domain.trash import TrashedDocument, TrashPage
@@ -1508,9 +1509,12 @@ class FakePaperless:
         if not allowed:
             raise self._denied()
 
-    def _seen_tasks(self, task_ids: tuple[str, ...]) -> tuple[str, ...]:
-        """The task ids the adapter can find: none for a user who may not view tasks."""
-        return task_ids if self.user.has("view_paperlesstask") else ()
+    def _seen_tasks(self, task_ids: tuple[str, ...], expected: int | None = None) -> StartedTasks:
+        """The tasks the adapter can find: none for a user who may not view tasks."""
+        count = len(task_ids) if expected is None else expected
+        if self.user.has("view_paperlesstask"):
+            return StartedTasks(ids=task_ids, expected=count)
+        return StartedTasks(ids=(), expected=count, problem="forbidden")
 
     def _pdf_task(self, task_type: str, produced: tuple[int, ...]) -> str:
         """Record a finished task (the fake works at once) and return its id."""
@@ -1567,7 +1571,7 @@ class FakePaperless:
             self.state.trash.append(document)
 
     @write
-    async def rotate_documents(self, document_ids: Sequence[int], degrees: int) -> tuple[str, ...]:
+    async def rotate_documents(self, document_ids: Sequence[int], degrees: int) -> StartedTasks:
         """`PdfWriter.rotate_documents`: every document gets a new, rotated version.
 
         Order (probed on 3.4.2): the global `change_document` (403), the form (400: a multiple
@@ -1601,7 +1605,7 @@ class FakePaperless:
         *,
         metadata_document_id: int | None,
         delete_originals: bool,
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         """`PdfWriter.merge_documents`: one new document with all the pages, in this order.
 
         Order (probed on 3.4.2): the global `change_document` (403), the ids (400), then the
@@ -1630,7 +1634,7 @@ class FakePaperless:
     @write
     async def edit_pdf(
         self, document_id: int, pages: Sequence[PageSlot], *, output: Output
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         """`PdfWriter.edit_pdf`: the pages, grouped into output files, as new documents or version.
 
         Order (probed on 3.4.2): the global `change_document` (403), the form (400: a non-empty
@@ -1665,12 +1669,12 @@ class FakePaperless:
         )
         if output == "replace_original":
             self._trash_originals([document])
-        return self._seen_tasks(tasks)
+        return self._seen_tasks(tasks, len(files))
 
     @write
     async def remove_password(
         self, document_id: int, password: str, *, output: Output
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         """`PdfWriter.remove_password`: a decrypted copy, as a new document or version.
 
         Probed on 3.4.2: a wrong password is a plain-text 400; a file without a password is
@@ -1689,7 +1693,7 @@ class FakePaperless:
         if not document.mime_type.endswith("pdf"):
             raise wrong_password()
         if document.password is None:
-            return ()
+            return self._seen_tasks((), 1)
         if document.password != password:
             raise wrong_password()
         pages = document.unlocked_pages
@@ -1706,7 +1710,7 @@ class FakePaperless:
     @write
     async def reprocess_documents(
         self, document_ids: Sequence[int], *, remote_ocr: bool
-    ) -> tuple[str, ...]:
+    ) -> StartedTasks:
         """`PdfWriter.reprocess_documents`: one task per document; the fake does no OCR.
 
         Probed on 3.4.2: the global `change_document` (403), the ids (400), a change grant (403).

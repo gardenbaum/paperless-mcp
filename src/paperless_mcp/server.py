@@ -51,8 +51,8 @@ from paperless_mcp.tools import (
     ai,
     bulk,
     core,
-    trash,
     pdf,
+    trash,
     upload,
     upload_stdio,
     versions,
@@ -284,7 +284,7 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                 tasks=tasks,
                 ai=AiService(adapters.ai, taxonomy, web_url=web_url),
                 views=ViewService(adapters.views, adapters.view_writes, taxonomy, documents),
-                pdf=PdfService(adapters.documents, adapters.pdf_writes, tasks),
+                pdf=PdfService(adapters.documents, adapters.pdf_writes, tasks, web_url=web_url),
                 uploads=UploadService(
                     adapters.documents,
                     adapters.document_writes,

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Final
 from paperless_mcp.domain.documents import UploadState  # noqa: TC001 -- used at runtime in a constant
 from paperless_mcp.domain.errors import ConfirmationRequired, Validation, quoted
 from paperless_mcp.domain.pdf import PageSlot, PdfResult, PdfTask
+from paperless_mcp.services.documents import document_link
 from paperless_mcp.services.page_ranges import describe, parse_pages
 from paperless_mcp.services.task_outcome import follow
 from paperless_mcp.services.tasks import MAX_WAIT_SECONDS
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from paperless_mcp.domain.documents import DocumentRecord
-    from paperless_mcp.domain.pdf import Output
+    from paperless_mcp.domain.pdf import Output, StartedTasks
     from paperless_mcp.domain.ports import DocumentReader, PdfWriter
     from paperless_mcp.domain.tasks import Wait
     from paperless_mcp.services.tasks import TaskService
@@ -40,11 +41,23 @@ MAX_PAGES: Final = 500
 PDF: Final = "application/pdf"
 TRASH: Final = "move the original to the Paperless trash"
 FINAL: Final = frozenset({"success", "failure", "revoked"})
-NO_TASK: Final = (
-    "Paperless accepted the request, but no task could be found for it. The Paperless user "
-    "may not view tasks, or Paperless started none{reason}."
+FORBIDDEN: Final = (
+    "Paperless accepted the request, but the Paperless user may not view tasks, so none can be "
+    "followed."
+)
+UNREADABLE: Final = "Paperless accepted the request; its tasks could not be read."
+NONE_FOUND: Final = "Paperless accepted the request, but no task showed up for it{reason}."
+SOME_FOUND: Final = (
+    "Paperless accepted the request, but only {found} of the {expected} tasks it starts showed "
+    "up: the state covers {those} only."
 )
 UNLOCKED_NONE: Final = " (the file may not be password protected)"
+REPROCESS_NOTE: Final = (
+    "Paperless does not say which document a reprocess task belongs to (its tasks name none): "
+    "they are the newest reprocess tasks this request started, so they cannot be tied to the "
+    "documents."
+)
+SERIAL: Final = "archive serial number, if it has one, moves to the new document"
 
 
 def _plural(count: int, noun: str) -> str:
@@ -89,6 +102,7 @@ class _Plan:
         summary: What was asked, for the result.
         what: The same with the document named, for the refusal.
         pages: How many pages the source file has.
+        single: Whether the result is one file, which then takes over the original's serial number.
         verb: What dropping pages is called here: drop, or delete for delete_pages.
     """
 
@@ -96,14 +110,21 @@ class _Plan:
     summary: str
     what: str
     pages: int
+    single: bool = False
     verb: str = "drop"
 
 
 class PdfService:
     """Runs PDF operations for the current user and reports their tasks."""
 
-    def __init__(self, reader: DocumentReader, writer: PdfWriter, tasks: TaskService) -> None:
-        """Read through ``reader``, write through ``writer``, follow tasks through ``tasks``."""
+    def __init__(
+        self, reader: DocumentReader, writer: PdfWriter, tasks: TaskService, *, web_url: str
+    ) -> None:
+        """Read through ``reader``, write through ``writer``, follow tasks through ``tasks``.
+
+        ``web_url`` is the Paperless web UI, for the links of a result.
+        """
+        self._web_url: str = web_url
         self._reader: DocumentReader = reader
         self._writer: PdfWriter = writer
         self._tasks: TaskService = tasks
@@ -126,10 +147,10 @@ class PdfService:
             message = f"{degrees} degrees is not a quarter turn."
             raise Validation(message, hint="Use 90, 180 or 270 (clockwise), or -90.")
         documents = await self._documents(document_ids, pdf=True)
-        task_ids = await self._writer.rotate_documents(document_ids, turn)
+        started = await self._writer.rotate_documents(document_ids, turn)
         summary = f"rotate {_plural(len(documents), 'document')} by {turn} degrees clockwise"
         return await self._result(
-            "rotate", summary, document_ids, task_ids, wait_seconds=wait_seconds
+            "rotate", summary, document_ids, started, wait_seconds=wait_seconds, version=True
         )
 
     async def merge(
@@ -165,17 +186,18 @@ class PdfService:
             if not confirm:
                 effect = (
                     f"merge {_named(documents)} into one new document, in this order, and "
-                    "move the originals to the Paperless trash (they can be restored from there)"
+                    "move the originals to the Paperless trash (they can be restored from there); "
+                    f"an original's {SERIAL}"
                 )
                 raise ConfirmationRequired.for_effect(effect)
             summary += " and move the originals to the Paperless trash"
-        task_ids = await self._writer.merge_documents(
+        started = await self._writer.merge_documents(
             document_ids,
             metadata_document_id=metadata_document_id,
             delete_originals=delete_originals,
         )
         return await self._result(
-            "merge", summary, document_ids, task_ids, wait_seconds=wait_seconds
+            "merge", summary, document_ids, started, wait_seconds=wait_seconds
         )
 
     async def split(
@@ -259,7 +281,8 @@ class PdfService:
             f"delete {describe(deleted)} of document {document_id} {where}",
             f"delete {describe(deleted)} of {_named([document])} {where}",
             count,
-            "delete",
+            single=True,
+            verb="delete",
         )
         slots = [PageSlot(page=page) for page in kept]
         return await self._send_pages(
@@ -314,7 +337,7 @@ class PdfService:
         )
         summary = f"edit document {document_id} {where} ({shape})"
         what = f"edit {_named([document])} {where} ({shape})"
-        plan = _Plan("edit_pdf", summary, what, count)
+        plan = _Plan("edit_pdf", summary, what, count, single=len(files) == 1)
         return await self._send_pages(
             document, list(pages), plan, output=output, confirm=confirm, wait_seconds=wait_seconds
         )
@@ -350,15 +373,16 @@ class PdfService:
         }[output]
         summary = f"remove the password of document {document_id} {where}"
         if output == "replace_original" and not confirm:
-            what = f"remove the password of {_named([document])} {where}"
+            what = f"remove the password of {_named([document])} {where}; the original's {SERIAL}"
             raise ConfirmationRequired.for_effect(what)
-        task_ids = await self._writer.remove_password(document_id, password, output=output)
+        started = await self._writer.remove_password(document_id, password, output=output)
         return await self._result(
             "remove_password",
             summary,
             [document_id],
-            task_ids,
+            started,
             wait_seconds=wait_seconds,
+            version=output == "new_version",
             no_task=UNLOCKED_NONE,
         )
 
@@ -385,11 +409,16 @@ class PdfService:
                 "and the extracted text are replaced, so manual changes to the text are lost)"
             )
             raise ConfirmationRequired.for_effect(effect)
-        task_ids = await self._writer.reprocess_documents(document_ids, remote_ocr=remote_ocr)
+        started = await self._writer.reprocess_documents(document_ids, remote_ocr=remote_ocr)
         engine = "remote OCR" if remote_ocr else "local OCR"
         summary = f"reprocess {_plural(len(documents), 'document')} ({engine})"
         return await self._result(
-            "reprocess", summary, document_ids, task_ids, wait_seconds=wait_seconds
+            "reprocess",
+            summary,
+            document_ids,
+            started,
+            wait_seconds=wait_seconds,
+            note=REPROCESS_NOTE,
         )
 
     async def _documents(self, document_ids: Sequence[int], *, pdf: bool) -> list[DocumentRecord]:
@@ -447,6 +476,8 @@ class PdfService:
         if (trashes or drops) and not confirm:
             if trashes:
                 effect = f"{plan.what} and {TRASH}"
+                if plan.single:
+                    effect += f"; the original's {SERIAL}"
             else:
                 effect = (
                     f"{plan.verb} {describe(dropped)} of {_named([document])}: the document then "
@@ -454,10 +485,15 @@ class PdfService:
                     "stays until that version is deleted"
                 )
             raise ConfirmationRequired.for_effect(effect)
-        task_ids = await self._writer.edit_pdf(document.id, slots, output=output)
+        started = await self._writer.edit_pdf(document.id, slots, output=output)
         summary = f"{plan.summary} and {TRASH}" if trashes else plan.summary
         return await self._result(
-            plan.operation, summary, [document.id], task_ids, wait_seconds=wait_seconds
+            plan.operation,
+            summary,
+            [document.id],
+            started,
+            wait_seconds=wait_seconds,
+            version=output == "new_version",
         )
 
     async def _result(  # noqa: PLR0913 -- the pieces of one result
@@ -465,21 +501,25 @@ class PdfService:
         operation: str,
         summary: str,
         sources: Sequence[int],
-        task_ids: Sequence[str],
+        started: StartedTasks,
         *,
         wait_seconds: float,
+        version: bool = False,
         no_task: str = "",
+        note: str = "",
     ) -> PdfResult:
-        """Follow the tasks for up to ``wait_seconds`` altogether and report them."""
+        """Follow the tasks for up to ``wait_seconds`` altogether and report them.
+
+        ``version``: the result is a new version of the source (the produced ids are version ids,
+        so the links are the sources'). ``no_task`` explains why a request may have no task,
+        ``note`` is added to the message.
+        """
         bound = min(max(wait_seconds, 0), MAX_WAIT_SECONDS)
         tasks: list[PdfTask] = []
         waited = 0.0
-        for task_id in task_ids:
+        for task_id in started.ids:
             outcome = await follow(
-                self._tasks,
-                task_id,
-                max(bound - waited, 0),
-                accepted="the request",
+                self._tasks, task_id, max(bound - waited, 0), accepted="the request"
             )
             waited += outcome.waited_seconds
             tasks.append(
@@ -491,20 +531,44 @@ class PdfService:
                 )
             )
         states: list[UploadState] = [task.state for task in tasks]
-        message = next((task.message for task in tasks if task.message), None)
-        if not tasks:
-            message = NO_TASK.format(reason=no_task)
+        complete = started.problem is None and len(tasks) == started.expected
+        notes = [task.message for task in tasks if task.message][:1]
+        if started.problem == "forbidden":
+            notes.append(FORBIDDEN)
+        elif started.problem == "failed":
+            notes.append(UNREADABLE)
+        elif not tasks:
+            notes.append(NONE_FOUND.format(reason=no_task))
+        elif not complete:
+            those = "that one" if len(tasks) == 1 else "those"
+            found = len(tasks)
+            notes.append(SOME_FOUND.format(found=found, expected=started.expected, those=those))
+        if note:
+            notes.append(note)
         wait: Wait = "not_requested"
         if tasks and bound > 0:
             wait = "finished" if all(s in FINAL for s in states) else "timed_out"
+        produced = tuple(n for task in tasks for n in task.document_ids)
+        links = tuple(document_link(self._web_url, n) for n in sources)
         return PdfResult(
             operation=operation,
             summary=summary,
             source_document_ids=tuple(sources),
-            state=_aggregate(states) if tasks else "unknown",
-            message=message,
+            source_links=links,
+            state=_aggregate(states) if complete else "unknown",
+            message=" ".join(notes) or None,
             tasks=tuple(tasks),
-            produced_ids=tuple(n for task in tasks for n in task.document_ids),
+            produced_ids=produced,
+            produced_links=self._produced_links(sources, produced, version=version),
             wait=wait,
             waited_seconds=round(waited, 1),
         )
+
+    def _produced_links(
+        self, sources: Sequence[int], produced: Sequence[int], *, version: bool
+    ) -> tuple[str, ...]:
+        """Links to what was made; a new version is made on its source, which gets the link."""
+        if not produced:
+            return ()
+        numbers = sources if version else produced
+        return tuple(document_link(self._web_url, n) for n in numbers[: len(produced)])

@@ -550,15 +550,15 @@ reason = "httpx2 upper-cases the method when it builds the request, so \"post\" 
 
 [[equivalent]]
 mutant = "paperless_mcp.services.pdf.xǁPdfServiceǁreprocess__mutmut_6"
-function_hash = "06be08b1c645"
+function_hash = "93c62a1f2bbe"
 reason = "pdf=None is falsy like pdf=False: reprocessing takes any file type, and `_documents` only tests `pdf` for truth."
 
 [[equivalent]]
-mutant = "paperless_mcp.services.pdf.xǁPdfServiceǁ_result__mutmut_96"
-function_hash = "66d20e8868f8"
+mutant = "paperless_mcp.services.pdf.xǁPdfServiceǁ_result__mutmut_147"
+function_hash = "11de0becaafb"
 reason = "waited is a sum of values that TaskService already rounded to a tenth, so its float error is far below a hundredth: rounding to two decimals gives the same value as rounding to one."
 
 [[equivalent]]
-mutant = "paperless_mcp.paperless.pdf.xǁPaperlessPdfWriterǁ_run__mutmut_12"
-function_hash = "85b010d3a2b8"
+mutant = "paperless_mcp.paperless.pdf.xǁPaperlessPdfWriterǁ_run__mutmut_17"
+function_hash = "6c12d6d6296b"
 reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."

@@ -524,7 +524,8 @@
         linking A to B also changes B (you need change permission there), so also_changed lists
         those documents; a shorter list does not unlink the old target (Paperless 3.4.2), removing
         the field does. delete moves documents to the Paperless trash; reprocess runs OCR again in
-        the background. Paperless checks every document first: if you may not change one of them
+        the background (the pdf toolset's reprocess_documents does the same, also with remote OCR).
+        Paperless checks every document first: if you may not change one of them
         (blocked lists them), none changes and nothing is sent. Needs change permission on the
         documents, and ownership and the delete permission for delete.
       ''',
@@ -2121,7 +2122,7 @@
         needed. Two steps: call without confirm first. Nothing is deleted and the error names the
         pages and what would happen, with confirm=true to pass. Page ranges are checked against the
         page count first. Needs the permission to change documents (and to add them for a new
-        document) and a change grant on the document.
+        document) and ownership of the document (or no owner; a change grant is not enough).
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -2188,10 +2189,24 @@
             }),
             'type': 'array',
           }),
+          'produced_links': dict({
+            'description': 'Links to the produced documents; for a new version the link of the document that got it.',
+            'items': dict({
+              'type': 'string',
+            }),
+            'type': 'array',
+          }),
           'source_document_ids': dict({
             'description': 'The documents the operation worked on.',
             'items': dict({
               'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'source_links': dict({
+            'description': 'Links to the source documents in the Paperless web UI.',
+            'items': dict({
+              'type': 'string',
             }),
             'type': 'array',
           }),
@@ -2212,7 +2227,7 @@
                 'type': 'string',
               }),
             ]),
-            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when no task could be found or read: Paperless accepted the request all the same, and the user may not view tasks or the work is not yet visible.',
+            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when not all expected tasks could be found or read: Paperless accepted the request all the same (the user may not view tasks, or the work is not yet visible); see message.',
           }),
           'summary': dict({
             'description': 'What Paperless was asked to do, in words.',
@@ -2257,7 +2272,7 @@
                       'type': 'string',
                     }),
                   ]),
-                  'description': 'pending, started, success, failure, revoked.',
+                  'description': 'pending, started, success, failure, revoked, or unknown when the task could not be read.',
                 }),
                 'task_id': dict({
                   'type': 'string',
@@ -2291,8 +2306,10 @@
           'source_document_ids',
           'state',
           'message',
+          'source_links',
           'tasks',
           'produced_ids',
+          'produced_links',
           'wait',
           'waited_seconds',
         ]),
@@ -2565,8 +2582,8 @@
         does replace_original (new documents, and the original moves to the Paperless trash). Two
         steps for those: call without confirm first. Nothing is changed and the error says what
         would happen, with confirm=true to pass. Page numbers are checked against the page count
-        first. Needs the permission to change documents (and to add them for new documents) and a
-        change grant on the document.
+        first. Needs the permission to change documents (and to add them for new documents) and
+        ownership of the document (or no owner; a change grant is not enough).
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -2666,10 +2683,24 @@
             }),
             'type': 'array',
           }),
+          'produced_links': dict({
+            'description': 'Links to the produced documents; for a new version the link of the document that got it.',
+            'items': dict({
+              'type': 'string',
+            }),
+            'type': 'array',
+          }),
           'source_document_ids': dict({
             'description': 'The documents the operation worked on.',
             'items': dict({
               'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'source_links': dict({
+            'description': 'Links to the source documents in the Paperless web UI.',
+            'items': dict({
+              'type': 'string',
             }),
             'type': 'array',
           }),
@@ -2690,7 +2721,7 @@
                 'type': 'string',
               }),
             ]),
-            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when no task could be found or read: Paperless accepted the request all the same, and the user may not view tasks or the work is not yet visible.',
+            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when not all expected tasks could be found or read: Paperless accepted the request all the same (the user may not view tasks, or the work is not yet visible); see message.',
           }),
           'summary': dict({
             'description': 'What Paperless was asked to do, in words.',
@@ -2735,7 +2766,7 @@
                       'type': 'string',
                     }),
                   ]),
-                  'description': 'pending, started, success, failure, revoked.',
+                  'description': 'pending, started, success, failure, revoked, or unknown when the task could not be read.',
                 }),
                 'task_id': dict({
                   'type': 'string',
@@ -2769,8 +2800,10 @@
           'source_document_ids',
           'state',
           'message',
+          'source_links',
           'tasks',
           'produced_ids',
+          'produced_links',
           'wait',
           'waited_seconds',
         ]),
@@ -5107,7 +5140,7 @@
         'readOnlyHint': False,
         'title': 'Merge documents',
       }),
-      'description': "Merge PDF documents, in the order given, into one new document. The new document takes the metadata (title with ' (merged)', tags, correspondent, ...) of metadata_document_id if given. The originals stay unless delete_originals is true: they then move to the Paperless trash, from where they can be restored, which needs confirm. Two steps for that: call without confirm first; nothing is merged and the error names the documents and what would happen, with confirm=true to pass. Paperless does the work later, in background tasks: the result lists them (state, produced_ids: the new documents, or for a new version its id) and with wait_seconds waits for them. Needs the permission to change documents and a change grant on (or ownership of) every document; a new document also needs the permission to add documents, and trashing an original ownership and the permission to delete documents. Only PDF files.",
+      'description': "Merge PDF documents, in the order given, into one new document. The new document takes the metadata (title with ' (merged)', tags, correspondent, ...) of metadata_document_id if given. The originals stay unless delete_originals is true: they then move to the Paperless trash, from where they can be restored, which needs confirm. Two steps for that: call without confirm first; nothing is merged and the error names the documents and what would happen, with confirm=true to pass. Paperless does the work later, in background tasks: the result lists the ones it could find (state, produced_ids: the new documents, or for a new version its id) and with wait_seconds waits for them. Needs the permission to change and to add documents and a change grant on (or ownership of) every document; delete_originals also needs ownership of them and the permission to delete documents. Only PDF files.",
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
@@ -5180,10 +5213,24 @@
             }),
             'type': 'array',
           }),
+          'produced_links': dict({
+            'description': 'Links to the produced documents; for a new version the link of the document that got it.',
+            'items': dict({
+              'type': 'string',
+            }),
+            'type': 'array',
+          }),
           'source_document_ids': dict({
             'description': 'The documents the operation worked on.',
             'items': dict({
               'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'source_links': dict({
+            'description': 'Links to the source documents in the Paperless web UI.',
+            'items': dict({
+              'type': 'string',
             }),
             'type': 'array',
           }),
@@ -5204,7 +5251,7 @@
                 'type': 'string',
               }),
             ]),
-            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when no task could be found or read: Paperless accepted the request all the same, and the user may not view tasks or the work is not yet visible.',
+            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when not all expected tasks could be found or read: Paperless accepted the request all the same (the user may not view tasks, or the work is not yet visible); see message.',
           }),
           'summary': dict({
             'description': 'What Paperless was asked to do, in words.',
@@ -5249,7 +5296,7 @@
                       'type': 'string',
                     }),
                   ]),
-                  'description': 'pending, started, success, failure, revoked.',
+                  'description': 'pending, started, success, failure, revoked, or unknown when the task could not be read.',
                 }),
                 'task_id': dict({
                   'type': 'string',
@@ -5283,8 +5330,10 @@
           'source_document_ids',
           'state',
           'message',
+          'source_links',
           'tasks',
           'produced_ids',
+          'produced_links',
           'wait',
           'waited_seconds',
         ]),
@@ -5477,7 +5526,9 @@
         new_version adds it to the same document (the locked file stays as an older version);
         replace_original makes a new document and moves the locked original to the Paperless trash,
         which needs confirm (call without it first: nothing changes and the error says what would
-        happen). A wrong password is an error; a file without a password starts no task.
+        happen). A wrong password is an error; a file without a password starts no task. Needs the
+        permission to change documents and ownership of the document (or no owner; a change grant is
+        not enough), and to add documents unless output is new_version.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -5545,10 +5596,24 @@
             }),
             'type': 'array',
           }),
+          'produced_links': dict({
+            'description': 'Links to the produced documents; for a new version the link of the document that got it.',
+            'items': dict({
+              'type': 'string',
+            }),
+            'type': 'array',
+          }),
           'source_document_ids': dict({
             'description': 'The documents the operation worked on.',
             'items': dict({
               'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'source_links': dict({
+            'description': 'Links to the source documents in the Paperless web UI.',
+            'items': dict({
+              'type': 'string',
             }),
             'type': 'array',
           }),
@@ -5569,7 +5634,7 @@
                 'type': 'string',
               }),
             ]),
-            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when no task could be found or read: Paperless accepted the request all the same, and the user may not view tasks or the work is not yet visible.',
+            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when not all expected tasks could be found or read: Paperless accepted the request all the same (the user may not view tasks, or the work is not yet visible); see message.',
           }),
           'summary': dict({
             'description': 'What Paperless was asked to do, in words.',
@@ -5614,7 +5679,7 @@
                       'type': 'string',
                     }),
                   ]),
-                  'description': 'pending, started, success, failure, revoked.',
+                  'description': 'pending, started, success, failure, revoked, or unknown when the task could not be read.',
                 }),
                 'task_id': dict({
                   'type': 'string',
@@ -5648,8 +5713,10 @@
           'source_document_ids',
           'state',
           'message',
+          'source_links',
           'tasks',
           'produced_ids',
+          'produced_links',
           'wait',
           'waited_seconds',
         ]),
@@ -5677,10 +5744,12 @@
         
         The archived PDF and the extracted text are replaced by the new ones, so manual changes to
         the text are lost. Two steps: call without confirm first. Nothing is reprocessed and the
-        error names the documents and what would happen, with confirm=true to pass. The same as
-        the reprocess operation of bulk_edit_documents (if that toolset is on), but through the
-        dedicated Paperless endpoint, which returns the tasks. Needs the permission to change
-        documents and a change grant on each.
+        error names the documents and what would happen, with confirm=true to pass. Use this for
+        plain reprocessing, also with remote_ocr; the reprocess operation of bulk_edit_documents (if
+        that toolset is on) does the same through Paperless's deprecated bulk form and adds a dry_run
+        preview. Paperless names no document for a reprocess task, so the tasks in the result cannot
+        be tied to the documents. Needs the permission to change documents and a change grant on (or
+        ownership of) each.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -5742,10 +5811,24 @@
             }),
             'type': 'array',
           }),
+          'produced_links': dict({
+            'description': 'Links to the produced documents; for a new version the link of the document that got it.',
+            'items': dict({
+              'type': 'string',
+            }),
+            'type': 'array',
+          }),
           'source_document_ids': dict({
             'description': 'The documents the operation worked on.',
             'items': dict({
               'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'source_links': dict({
+            'description': 'Links to the source documents in the Paperless web UI.',
+            'items': dict({
+              'type': 'string',
             }),
             'type': 'array',
           }),
@@ -5766,7 +5849,7 @@
                 'type': 'string',
               }),
             ]),
-            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when no task could be found or read: Paperless accepted the request all the same, and the user may not view tasks or the work is not yet visible.',
+            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when not all expected tasks could be found or read: Paperless accepted the request all the same (the user may not view tasks, or the work is not yet visible); see message.',
           }),
           'summary': dict({
             'description': 'What Paperless was asked to do, in words.',
@@ -5811,7 +5894,7 @@
                       'type': 'string',
                     }),
                   ]),
-                  'description': 'pending, started, success, failure, revoked.',
+                  'description': 'pending, started, success, failure, revoked, or unknown when the task could not be read.',
                 }),
                 'task_id': dict({
                   'type': 'string',
@@ -5845,8 +5928,10 @@
           'source_document_ids',
           'state',
           'message',
+          'source_links',
           'tasks',
           'produced_ids',
+          'produced_links',
           'wait',
           'waited_seconds',
         ]),
@@ -5978,6 +6063,8 @@
         
         Each document gets the rotated file as a new version and the older version stays, so
         nothing is lost and no confirm is needed. The document keeps its id, title and metadata.
+        Needs the permission to change documents and ownership of every document (or no owner): a
+        change grant is not enough.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -6039,10 +6126,24 @@
             }),
             'type': 'array',
           }),
+          'produced_links': dict({
+            'description': 'Links to the produced documents; for a new version the link of the document that got it.',
+            'items': dict({
+              'type': 'string',
+            }),
+            'type': 'array',
+          }),
           'source_document_ids': dict({
             'description': 'The documents the operation worked on.',
             'items': dict({
               'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'source_links': dict({
+            'description': 'Links to the source documents in the Paperless web UI.',
+            'items': dict({
+              'type': 'string',
             }),
             'type': 'array',
           }),
@@ -6063,7 +6164,7 @@
                 'type': 'string',
               }),
             ]),
-            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when no task could be found or read: Paperless accepted the request all the same, and the user may not view tasks or the work is not yet visible.',
+            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when not all expected tasks could be found or read: Paperless accepted the request all the same (the user may not view tasks, or the work is not yet visible); see message.',
           }),
           'summary': dict({
             'description': 'What Paperless was asked to do, in words.',
@@ -6108,7 +6209,7 @@
                       'type': 'string',
                     }),
                   ]),
-                  'description': 'pending, started, success, failure, revoked.',
+                  'description': 'pending, started, success, failure, revoked, or unknown when the task could not be read.',
                 }),
                 'task_id': dict({
                   'type': 'string',
@@ -6142,8 +6243,10 @@
           'source_document_ids',
           'state',
           'message',
+          'source_links',
           'tasks',
           'produced_ids',
+          'produced_links',
           'wait',
           'waited_seconds',
         ]),
@@ -7120,7 +7223,8 @@
         restored, which needs confirm. Two steps for that: call without confirm first; nothing is
         split and the error names the document and what would happen, with confirm=true to pass. Page
         ranges are checked against the page count first. Needs the permission to change and to add
-        documents, and a change grant on the document.
+        documents and ownership of the document (or no owner; a change grant is not enough), and for
+        replace_original the permission to delete documents.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -7191,10 +7295,24 @@
             }),
             'type': 'array',
           }),
+          'produced_links': dict({
+            'description': 'Links to the produced documents; for a new version the link of the document that got it.',
+            'items': dict({
+              'type': 'string',
+            }),
+            'type': 'array',
+          }),
           'source_document_ids': dict({
             'description': 'The documents the operation worked on.',
             'items': dict({
               'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'source_links': dict({
+            'description': 'Links to the source documents in the Paperless web UI.',
+            'items': dict({
+              'type': 'string',
             }),
             'type': 'array',
           }),
@@ -7215,7 +7333,7 @@
                 'type': 'string',
               }),
             ]),
-            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when no task could be found or read: Paperless accepted the request all the same, and the user may not view tasks or the work is not yet visible.',
+            'description': 'The tasks together: failure or revoked if one did, else started or pending if one still runs, else success. unknown when not all expected tasks could be found or read: Paperless accepted the request all the same (the user may not view tasks, or the work is not yet visible); see message.',
           }),
           'summary': dict({
             'description': 'What Paperless was asked to do, in words.',
@@ -7260,7 +7378,7 @@
                       'type': 'string',
                     }),
                   ]),
-                  'description': 'pending, started, success, failure, revoked.',
+                  'description': 'pending, started, success, failure, revoked, or unknown when the task could not be read.',
                 }),
                 'task_id': dict({
                   'type': 'string',
@@ -7294,8 +7412,10 @@
           'source_document_ids',
           'state',
           'message',
+          'source_links',
           'tasks',
           'produced_ids',
+          'produced_links',
           'wait',
           'waited_seconds',
         ]),

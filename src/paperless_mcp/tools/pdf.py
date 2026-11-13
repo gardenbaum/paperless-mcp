@@ -45,13 +45,23 @@ type Where = Annotated[
     ),
 ]
 
-COMMON = (
-    "Paperless does the work later, in background tasks: the result lists them (state, "
-    "produced_ids: the new documents, or for a new version its id) and with wait_seconds waits "
-    "for them. Needs the permission to change documents and a change grant on (or ownership "
-    "of) every document; a new document also needs the permission to add documents, and "
-    "trashing an original ownership and the permission to delete documents. Only PDF files."
+TASKS = (
+    "Paperless does the work later, in background tasks: the result lists the ones it could "
+    "find (state, produced_ids: the new documents, or for a new version its id) and with "
+    "wait_seconds waits for them. "
 )
+OWNERS = (
+    "Needs the permission to change documents and ownership of every document (or no owner): "
+    "a change grant is not enough. A new document also needs the permission to add documents, "
+    "and trashing an original the permission to delete documents. Only PDF files."
+)
+MERGERS = (
+    "Needs the permission to change and to add documents and a change grant on (or ownership "
+    "of) every document; delete_originals also needs ownership of them and the permission to "
+    "delete documents. Only PDF files."
+)
+COMMON = TASKS + OWNERS
+MERGE_NEEDS = TASKS + MERGERS
 
 
 @provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["rotate_documents"])
@@ -76,6 +86,8 @@ async def rotate_documents(
 
     Each document gets the rotated file as a new version and the older version stays, so
     nothing is lost and no confirm is needed. The document keeps its id, title and metadata.
+    Needs the permission to change documents and ownership of every document (or no owner): a
+    change grant is not enough.
     """
     return await services(ctx).pdf.rotate(document_ids, degrees, wait_seconds=wait_seconds)
 
@@ -93,7 +105,7 @@ MERGE = (
 @provider.tool(
     tags={TOOLSET},
     annotations=ANNOTATIONS["merge_documents"],
-    description=MERGE + COMMON,
+    description=MERGE + MERGE_NEEDS,
 )
 @boundary
 async def merge_documents(  # noqa: PLR0913 -- the documents and the options of the merge
@@ -164,7 +176,8 @@ async def split_document(  # noqa: PLR0913 -- the document and the options of th
     restored, which needs confirm. Two steps for that: call without confirm first; nothing is
     split and the error names the document and what would happen, with confirm=true to pass. Page
     ranges are checked against the page count first. Needs the permission to change and to add
-    documents, and a change grant on the document.
+    documents and ownership of the document (or no owner; a change grant is not enough), and for
+    replace_original the permission to delete documents.
     """
     return await services(ctx).pdf.split(
         document_id, parts, output=output, confirm=confirm, wait_seconds=wait_seconds
@@ -199,7 +212,7 @@ async def delete_pages(  # noqa: PLR0913 -- the document and the options of the 
     needed. Two steps: call without confirm first. Nothing is deleted and the error names the
     pages and what would happen, with confirm=true to pass. Page ranges are checked against the
     page count first. Needs the permission to change documents (and to add them for a new
-    document) and a change grant on the document.
+    document) and ownership of the document (or no owner; a change grant is not enough).
     """
     return await services(ctx).pdf.delete_pages(
         document_id, pages, output=output, confirm=confirm, wait_seconds=wait_seconds
@@ -237,8 +250,8 @@ async def edit_pdf(  # noqa: PLR0913 -- the document and the options of the edit
     does replace_original (new documents, and the original moves to the Paperless trash). Two
     steps for those: call without confirm first. Nothing is changed and the error says what
     would happen, with confirm=true to pass. Page numbers are checked against the page count
-    first. Needs the permission to change documents (and to add them for new documents) and a
-    change grant on the document.
+    first. Needs the permission to change documents (and to add them for new documents) and
+    ownership of the document (or no owner; a change grant is not enough).
     """
     return await services(ctx).pdf.edit(
         document_id, pages, output=output, confirm=confirm, wait_seconds=wait_seconds
@@ -269,7 +282,9 @@ async def remove_document_password(  # noqa: PLR0913 -- the document, the passwo
     new_version adds it to the same document (the locked file stays as an older version);
     replace_original makes a new document and moves the locked original to the Paperless trash,
     which needs confirm (call without it first: nothing changes and the error says what would
-    happen). A wrong password is an error; a file without a password starts no task.
+    happen). A wrong password is an error; a file without a password starts no task. Needs the
+    permission to change documents and ownership of the document (or no owner; a change grant is
+    not enough), and to add documents unless output is new_version.
     """
     return await services(ctx).pdf.remove_password(
         document_id, password, output=output, confirm=confirm, wait_seconds=wait_seconds
@@ -299,10 +314,12 @@ async def reprocess_documents(
 
     The archived PDF and the extracted text are replaced by the new ones, so manual changes to
     the text are lost. Two steps: call without confirm first. Nothing is reprocessed and the
-    error names the documents and what would happen, with confirm=true to pass. The same as
-    the reprocess operation of bulk_edit_documents (if that toolset is on), but through the
-    dedicated Paperless endpoint, which returns the tasks. Needs the permission to change
-    documents and a change grant on each.
+    error names the documents and what would happen, with confirm=true to pass. Use this for
+    plain reprocessing, also with remote_ocr; the reprocess operation of bulk_edit_documents (if
+    that toolset is on) does the same through Paperless's deprecated bulk form and adds a dry_run
+    preview. Paperless names no document for a reprocess task, so the tasks in the result cannot
+    be tied to the documents. Needs the permission to change documents and a change grant on (or
+    ownership of) each.
     """
     return await services(ctx).pdf.reprocess(
         document_ids, remote_ocr=remote_ocr, confirm=confirm, wait_seconds=wait_seconds

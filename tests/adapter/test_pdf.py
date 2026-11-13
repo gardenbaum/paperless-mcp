@@ -4,14 +4,17 @@ Every PDF endpoint answers `{"result": "OK"}` and names no task; the adapter fin
 the task list. The rows below are shaped like the ones recorded from 3.4.2.
 """
 
+import asyncio
 import json
 from typing import TYPE_CHECKING
 
 import httpx2
 import pytest
 
+from adapter.test_instance import UI_SETTINGS
 from paperless_mcp.domain.errors import PermissionDenied, UpstreamUnavailable, Validation
-from paperless_mcp.domain.pdf import PageSlot
+from paperless_mcp.domain.pdf import PageSlot, StartedTasks
+from paperless_mcp.paperless.client import RetryPolicy
 from paperless_mcp.paperless.pdf import PaperlessPdfWriter
 
 if TYPE_CHECKING:
@@ -26,7 +29,12 @@ type Json = dict[str, object]
 OK: Json = {"result": "OK"}
 
 
-def row(number: int, task_type: str = "consume_file", filename: str | None = None) -> Json:
+def row(
+    number: int,
+    task_type: str = "consume_file",
+    filename: str | None = None,
+    owner: int | None = 2,
+) -> Json:
     """A task as `/api/tasks/` lists it on 3.4.2; the task id is derived from the row id."""
     return {
         "id": number,
@@ -46,7 +54,7 @@ def row(number: int, task_type: str = "consume_file", filename: str | None = Non
         "result_data": None,
         "related_document_ids": [],
         "acknowledged": False,
-        "owner": 2,
+        "owner": owner if task_type == "consume_file" else None,
     }
 
 
@@ -62,7 +70,7 @@ class Paperless:
     body instead.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- one knob per way the fake Paperless misbehaves
         self,
         before: list[Json],
         after: list[Json],
@@ -70,7 +78,17 @@ class Paperless:
         hidden_polls: int = 0,
         during: list[Json] | None = None,
         refuse: tuple[int, str] | None = None,
+        tasks_status: int = 200,
+        baseline_status: int = 200,
+        settings_status: int = 200,
+        unfiltered: bool = False,
+        fail_late: bool = False,
     ) -> None:
+        self.fail_late: bool = fail_late
+        self.baseline_status: int = baseline_status
+        self.unfiltered: bool = unfiltered
+        self.tasks_status: int = tasks_status
+        self.settings_status: int = settings_status
         self.before: list[Json] = before
         self.after: list[Json] = after
         self.during: list[Json] = before if during is None else during
@@ -88,14 +106,33 @@ class Paperless:
                 status, text = self.refuse
                 return httpx2.Response(status, text=text)
             return httpx2.Response(200, json=OK)
-        rows = self.during if self._posted and self.hidden_polls > 0 else self.after
-        if not self._posted:
-            rows = self.before
+        if request.url.path == "/api/ui_settings/":
+            if self.settings_status != 200:
+                return httpx2.Response(self.settings_status, json={"detail": "no"})
+            return httpx2.Response(200, json=UI_SETTINGS)
+        return self._tasks(request)
+
+    def _tasks(self, request: httpx2.Request) -> httpx2.Response:
+        """The task list: the rows by phase of the request, filtered like Paperless does."""
+        if self.tasks_status != 200 and (self._posted or self.tasks_status == 403):
+            return httpx2.Response(self.tasks_status, json={"detail": "no"})
+        if not self._posted and self.baseline_status != 200:
+            return httpx2.Response(self.baseline_status, json={"detail": "no"})
+        if self._posted and self.fail_late and self.hidden_polls == 0:
+            return httpx2.Response(503, json={"detail": "busy"})
+        rows = self.after if self._posted else self.before
         if self._posted and self.hidden_polls > 0:
+            rows = self.during
             self.hidden_polls -= 1
+        params = request.url.params
+        if self.unfiltered:
+            params = httpx2.QueryParams({"page_size": params["page_size"]})
+        if "task_type" in params:
+            rows = [r for r in rows if r["task_type"] == params["task_type"]]
+        if "owner" in params:
+            rows = [r for r in rows if str(r["owner"]) == params["owner"]]
         ordered = sorted(rows, key=lambda r: -int(str(r["id"])))
-        size = int(request.url.params["page_size"])
-        page = ordered[:size]
+        page = ordered[: int(params["page_size"])]
         return httpx2.Response(
             200, json={"count": len(rows), "next": None, "previous": None, "results": page}
         )
@@ -153,7 +190,7 @@ async def test_a_rotation_posts_the_documents_and_returns_the_tasks_made_for_the
 
     tasks = await writer(make_client, server).rotate_documents((4, 7), -90)
 
-    assert tasks == (task_id(12), task_id(13))
+    assert tasks.ids == (task_id(12), task_id(13))
     assert server.posts == [
         ("POST", "/api/documents/rotate/", {}, {"documents": [4, 7], "degrees": -90})
     ]
@@ -167,8 +204,17 @@ async def test_the_task_list_is_read_before_the_request_to_tell_new_tasks_from_o
     _ = await writer(make_client, server).rotate_documents((7,), 90)
 
     methods = [(method, path) for method, path, _, _ in server.requests]
-    assert methods[:2] == [("GET", "/api/tasks/"), ("POST", "/api/documents/rotate/")]
-    assert server.requests[0][2] == {"ordering": "-id", "page_size": "1"}
+    assert methods[:3] == [
+        ("GET", "/api/ui_settings/"),
+        ("GET", "/api/tasks/"),
+        ("POST", "/api/documents/rotate/"),
+    ]
+    assert server.requests[1][2] == {
+        "task_type": "consume_file",
+        "owner": "2",
+        "ordering": "-date_created",
+        "page_size": "1",
+    }
 
 
 async def test_old_tasks_of_the_same_kind_are_not_taken_for_new_ones(
@@ -179,7 +225,7 @@ async def test_old_tasks_of_the_same_kind_are_not_taken_for_new_ones(
 
     tasks = await writer(make_client, server).rotate_documents((7,), 90)
 
-    assert tasks == (task_id(12),)
+    assert tasks.ids == (task_id(12),)
 
 
 async def test_tasks_that_show_up_late_are_waited_for_until_all_are_there(
@@ -194,7 +240,7 @@ async def test_tasks_that_show_up_late_are_waited_for_until_all_are_there(
 
     tasks = await writer(make_client, server, clock).rotate_documents((4, 7), 90)
 
-    assert tasks == (task_id(12), task_id(13))
+    assert tasks.ids == (task_id(12), task_id(13))
     assert clock.sleeps == [0.25, 0.25]  # two reads saw nothing yet; it stops at the third
 
 
@@ -206,29 +252,20 @@ async def test_a_task_that_never_shows_up_ends_the_wait_after_the_bound(
 
     tasks = await writer(make_client, server, clock).rotate_documents((4, 7), 90)
 
-    assert tasks == (task_id(12),)  # what was found; the other task never appeared
+    assert tasks.ids == (task_id(12),)  # what was found; the other task never appeared
     assert clock.sleeps == [0.25, 0.25, 0.25, 0.25]  # a bound of one second, in quarters
 
 
 async def test_a_user_who_may_not_view_tasks_still_gets_the_operation_done(
     make_client: ClientFactory,
 ) -> None:
-    def deny_tasks(request: httpx2.Request) -> httpx2.Response:
-        if request.method == "GET":
-            return httpx2.Response(403, json={"detail": "You do not have permission."})
-        return httpx2.Response(200, json=OK)
-
     clock = Clock()
-    server = deny_tasks
-    tasks = await PaperlessPdfWriter(
-        make_client(server),
-        settle_seconds=1.0,
-        poll_seconds=0.25,
-        sleep=clock.sleep,
-        clock=clock.time,
-    ).rotate_documents((7,), 90)
+    server = Paperless(OLD, OLD, tasks_status=403)
 
-    assert tasks == ()
+    tasks = await writer(make_client, server, clock).rotate_documents((7,), 90)
+
+    assert (tasks.ids, tasks.expected, tasks.problem) == ((), 1, "forbidden")
+    assert len(server.posts) == 1
     assert clock.sleeps == []  # nothing to wait for
 
 
@@ -241,7 +278,7 @@ async def test_merging_names_the_metadata_document_and_the_deletion_of_the_origi
         (5, 9), metadata_document_id=9, delete_originals=True
     )
 
-    assert tasks == (task_id(12),)
+    assert tasks.ids == (task_id(12),)
     assert server.posts == [
         (
             "POST",
@@ -259,7 +296,7 @@ async def test_merging_without_a_metadata_document_sends_none(make_client: Clien
         (9, 5), metadata_document_id=None, delete_originals=False
     )
 
-    assert tasks == (task_id(12),)  # the merged file is named after the documents, in any order
+    assert tasks.ids == (task_id(12),)  # the merged file is named after the documents, in order
     assert server.posts[0][3] == {
         "documents": [9, 5],
         "metadata_document_id": None,
@@ -279,7 +316,7 @@ async def test_a_delete_of_originals_adds_a_task_that_is_not_reported(
         (5, 9), metadata_document_id=None, delete_originals=True
     )
 
-    assert tasks == (task_id(12),)
+    assert tasks.ids == (task_id(12),)
 
 
 PAGES = (PageSlot(page=2), PageSlot(page=1, rotate=90), PageSlot(page=3, document=1))
@@ -299,7 +336,7 @@ async def test_an_edit_into_new_documents_sends_the_pages_and_finds_one_task_per
 
     tasks = await writer(make_client, server).edit_pdf(8, PAGES, output="new_document")
 
-    assert tasks == (task_id(12), task_id(13))
+    assert tasks.ids == (task_id(12), task_id(13))
     assert server.posts == [
         (
             "POST",
@@ -324,7 +361,7 @@ async def test_an_edit_as_a_new_version_finds_the_edited_file(make_client: Clien
 
     tasks = await writer(make_client, server).edit_pdf(8, (PageSlot(page=1),), output="new_version")
 
-    assert tasks == (task_id(12),)
+    assert tasks.ids == (task_id(12),)
     body = server.posts[0][3]
     assert isinstance(body, dict)
     assert (body["update_document"], body["delete_original"]) == (True, False)
@@ -339,7 +376,7 @@ async def test_an_edit_that_replaces_the_original_asks_for_its_deletion(
         8, (PageSlot(page=1),), output="replace_original"
     )
 
-    assert tasks == (task_id(12),)
+    assert tasks.ids == (task_id(12),)
     body = server.posts[0][3]
     assert isinstance(body, dict)
     assert (body["update_document"], body["delete_original"]) == (False, True)
@@ -360,7 +397,7 @@ async def test_removing_a_password_sends_it_with_where_the_copy_goes(
 
     tasks = await writer(make_client, server).remove_password(8, "s3cret", output=output)  # pyright: ignore[reportArgumentType] -- the parameter is the literal under test
 
-    assert tasks == (task_id(12),)
+    assert tasks.ids == (task_id(12),)
     assert server.posts == [
         (
             "POST",
@@ -384,7 +421,7 @@ async def test_a_file_without_a_password_starts_no_task_and_ends_the_wait_after_
 
     tasks = await writer(make_client, server, clock).remove_password(8, "x", output="new_document")
 
-    assert tasks == ()
+    assert tasks.ids == ()
     assert sum(clock.sleeps) == 1.0
 
 
@@ -396,7 +433,7 @@ async def test_reprocessing_finds_one_task_per_document(make_client: ClientFacto
 
     tasks = await writer(make_client, server).reprocess_documents((4, 7), remote_ocr=True)
 
-    assert tasks == (task_id(12), task_id(13))
+    assert tasks.ids == (task_id(12), task_id(13))
     assert server.posts == [
         (
             "POST",
@@ -422,7 +459,7 @@ async def test_paperless_refusals_become_domain_errors_and_nothing_is_polled(
     with pytest.raises(error, match=message):
         _ = await writer(make_client, server).rotate_documents((4,), 90)
 
-    assert [method for method, _, _, _ in server.requests] == ["GET", "POST"]
+    assert [method for method, _, _, _ in server.requests] == ["GET", "GET", "POST"]
 
 
 async def test_the_request_is_sent_once_even_when_paperless_is_busy(
@@ -458,7 +495,7 @@ async def test_an_edit_paperless_cannot_perform_says_the_file_may_not_be_a_pdf(
         )
 
 
-type Call = Callable[[PaperlessPdfWriter], Awaitable[tuple[str, ...]]]
+type Call = Callable[[PaperlessPdfWriter], Awaitable[StartedTasks]]
 
 EDIT_PAGES = (PageSlot(page=1), PageSlot(page=2, document=1))
 EVERY_OPERATION: list[tuple[str, Call, list[Json]]] = [
@@ -508,7 +545,7 @@ async def test_every_operation_stops_looking_as_soon_as_all_its_tasks_are_there(
 
     tasks = await call(writer(make_client, server, clock))
 
-    assert tasks == tuple(task_id(int(str(r["id"]))) for r in made)
+    assert tasks.ids == tuple(task_id(int(str(r["id"]))) for r in made)
     assert clock.sleeps == []
 
 
@@ -532,7 +569,7 @@ async def test_only_the_tasks_of_the_documents_and_files_asked_for_are_taken(
         8, (PageSlot(page=1),), output="new_document"
     )
 
-    assert tasks == (task_id(19),)
+    assert tasks.ids == (task_id(19),)
 
 
 async def test_only_the_merged_file_of_exactly_these_documents_is_taken(
@@ -544,7 +581,8 @@ async def test_only_the_merged_file_of_exactly_these_documents_is_taken(
         row(14, "consume_file", "5_9_7_merged.pdf"),  # more documents
         row(15, "consume_file", "5_9.pdf"),  # not a merge
         row(16, "consume_file", "merged.pdf"),
-        row(17, "consume_file", "5_9_merged.pdf"),  # the one
+        row(16, "consume_file", "5_9_merged.pdf"),  # another order
+        row(17, "consume_file", "9_5_merged.pdf"),  # the one
     ]
     server = Paperless(OLD, [*OLD, *other])
 
@@ -552,7 +590,7 @@ async def test_only_the_merged_file_of_exactly_these_documents_is_taken(
         (9, 5), metadata_document_id=None, delete_originals=False
     )
 
-    assert tasks == (task_id(17),)
+    assert tasks.ids == (task_id(17),)
 
 
 async def test_the_unprotected_file_of_this_document_only_is_taken(
@@ -567,7 +605,7 @@ async def test_the_unprotected_file_of_this_document_only_is_taken(
 
     tasks = await writer(make_client, server).remove_password(8, "x", output="new_version")
 
-    assert tasks == (task_id(14),)
+    assert tasks.ids == (task_id(14),)
 
 
 async def test_an_empty_task_list_makes_every_new_task_new(make_client: ClientFactory) -> None:
@@ -575,7 +613,7 @@ async def test_an_empty_task_list_makes_every_new_task_new(make_client: ClientFa
 
     tasks = await writer(make_client, server).rotate_documents((7,), 90)
 
-    assert tasks == (task_id(1),)
+    assert tasks.ids == (task_id(1),)
 
 
 async def test_the_lookup_asks_for_the_newest_hundred_tasks(make_client: ClientFactory) -> None:
@@ -583,10 +621,11 @@ async def test_the_lookup_asks_for_the_newest_hundred_tasks(make_client: ClientF
 
     _ = await writer(make_client, server).rotate_documents((7,), 90)
 
-    gets = [params for method, _, params, _ in server.requests if method == "GET"]
+    gets = [params for _, path, params, _ in server.requests if path == "/api/tasks/"]
+    base = {"task_type": "consume_file", "owner": "2", "ordering": "-date_created"}
     assert gets == [
-        {"ordering": "-id", "page_size": "1"},
-        {"ordering": "-id", "page_size": "100"},
+        {**base, "page_size": "1"},
+        {**base, "date_created_after": "2026-11-13T17:25:36.540908Z", "page_size": "100"},
     ]
 
 
@@ -626,9 +665,11 @@ async def test_the_refusals_have_the_exact_words(make_client: ClientFactory) -> 
         _ = await writer(make_client, plain).remove_password(8, "x", output="new_document")
 
     hint = (
-        "Changing a PDF needs the permission to change documents and a change grant on (or "
-        "ownership of) every document; a new document needs the permission to add documents, "
-        "and deleting an original also needs ownership and the permission to delete."
+        "Rotating, splitting, deleting pages, editing and removing a password need the "
+        "permission to change documents and ownership of every document (or no owner): a "
+        "change grant is not enough. Merging and reprocessing accept a change grant. A new "
+        "document needs the permission to add documents, and deleting an original also needs "
+        "ownership and the permission to delete."
     )
     assert (permission.value.message, permission.value.hint) == (
         "The Paperless user may not change these documents.",
@@ -659,5 +700,173 @@ async def test_the_files_of_an_edit_that_show_up_one_by_one_are_all_waited_for(
         8, (PageSlot(page=1), PageSlot(page=2, document=1)), output="new_document"
     )
 
-    assert tasks == (task_id(12), task_id(13))
+    assert tasks.ids == (task_id(12), task_id(13))
     assert clock.sleeps == [0.25]
+
+
+async def test_matches_are_capped_at_the_expected_number_oldest_first(
+    make_client: ClientFactory,
+) -> None:
+    """Tasks of another request for the same file must not be taken for this one's."""
+    server = Paperless(
+        OLD,
+        [
+            *OLD,
+            row(12, "consume_file", "7_rotated.pdf"),
+            row(13, "consume_file", "7_rotated.pdf"),
+            row(14, "consume_file", "7_rotated.pdf"),
+        ],
+    )
+
+    tasks = await writer(make_client, server).rotate_documents((7,), 90)
+
+    assert (tasks.ids, tasks.expected, tasks.problem) == ((task_id(12),), 1, None)
+
+
+async def test_a_task_of_another_user_is_not_taken_even_if_the_server_ignores_the_filter(
+    make_client: ClientFactory,
+) -> None:
+    server = Paperless(
+        OLD,
+        [
+            *OLD,
+            row(12, "consume_file", "7_rotated.pdf", owner=3),
+            row(13, "consume_file", "7_rotated.pdf", owner=None),
+            row(14, "consume_file", "7_rotated.pdf", owner=2),
+        ],
+        unfiltered=True,
+    )
+
+    tasks = await writer(make_client, server).rotate_documents((7,), 90)
+
+    assert tasks.ids == (task_id(14),)
+
+
+async def test_without_the_user_the_owner_is_not_filtered(make_client: ClientFactory) -> None:
+    for status in (403, 503):
+        server = Paperless(
+            OLD, [*OLD, row(12, "consume_file", "7_rotated.pdf", owner=3)], settings_status=status
+        )
+
+        tasks = await PaperlessPdfWriter(
+            make_client(server, retry=RetryPolicy(attempts=1)),
+            settle_seconds=1.0,
+            poll_seconds=0.25,
+            sleep=Clock().sleep,
+            clock=Clock().time,
+        ).rotate_documents((7,), 90)
+
+        assert tasks.ids == (task_id(12),), status
+        assert all(
+            "owner" not in params for _, path, params, _ in server.requests if path == "/api/tasks/"
+        )
+
+
+async def test_fewer_tasks_than_expected_are_reported_with_what_was_expected(
+    make_client: ClientFactory,
+) -> None:
+    server = Paperless(OLD, [*OLD, row(12, "consume_file", "7_rotated.pdf")])
+
+    tasks = await writer(make_client, server).rotate_documents((7, 9), 90)
+
+    assert (tasks.ids, tasks.expected, tasks.problem) == ((task_id(12),), 2, None)
+
+
+async def test_parallel_operations_do_not_share_a_mark(make_client: ClientFactory) -> None:
+    server = Paperless(OLD, [*OLD, row(12, "consume_file", "7_rotated.pdf")])
+    pdf_writer = writer(make_client, server)
+
+    _ = await asyncio.gather(
+        pdf_writer.rotate_documents((7,), 90), pdf_writer.rotate_documents((7,), 90)
+    )
+
+    sequence = [(m, p) for m, p, _, _ in server.requests]
+    one = [("GET", "/api/ui_settings/"), ("GET", "/api/tasks/"), ("POST", "/api/documents/rotate/")]
+    # Each call reads the user, marks, posts and looks up before the next one starts.
+    assert sequence[:3] == one
+    first_post = sequence.index(("POST", "/api/documents/rotate/"))
+    second_start = sequence.index(("GET", "/api/ui_settings/"), 1)
+    assert second_start > first_post
+    assert all(step == ("GET", "/api/tasks/") for step in sequence[first_post + 1 : second_start])
+
+
+async def test_a_failing_lookup_after_the_request_is_flagged_not_raised(
+    make_client: ClientFactory,
+) -> None:
+    status = 503
+    server = Paperless(OLD, OLD, tasks_status=status)
+    pdf_writer = PaperlessPdfWriter(
+        make_client(server, retry=RetryPolicy(attempts=1)),
+        settle_seconds=1.0,
+        poll_seconds=0.25,
+        sleep=Clock().sleep,
+        clock=Clock().time,
+    )
+
+    tasks = await pdf_writer.rotate_documents((7,), 90)
+
+    assert (tasks.ids, tasks.expected, tasks.problem) == ((), 1, "failed")
+    assert len(server.posts) == 1
+
+
+async def test_a_lookup_that_fails_later_keeps_what_was_found(make_client: ClientFactory) -> None:
+    server = Paperless(
+        OLD,
+        [*OLD, row(12, "consume_file", "7_rotated.pdf"), row(13, "consume_file", "9_rotated.pdf")],
+        hidden_polls=1,
+        during=[*OLD, row(12, "consume_file", "7_rotated.pdf")],
+        fail_late=True,
+    )
+    pdf_writer = PaperlessPdfWriter(
+        make_client(server, retry=RetryPolicy(attempts=1)),
+        settle_seconds=1.0,
+        poll_seconds=0.25,
+        sleep=Clock().sleep,
+        clock=Clock().time,
+    )
+
+    tasks = await pdf_writer.rotate_documents((7, 9), 90)
+
+    assert (tasks.ids, tasks.problem) == ((task_id(12),), "failed")
+
+
+async def test_a_failing_mark_does_not_stop_the_request(make_client: ClientFactory) -> None:
+    server = Paperless(OLD, OLD, baseline_status=503)
+    pdf_writer = PaperlessPdfWriter(
+        make_client(server, retry=RetryPolicy(attempts=1)),
+        settle_seconds=1.0,
+        poll_seconds=0.25,
+        sleep=Clock().sleep,
+        clock=Clock().time,
+    )
+
+    tasks = await pdf_writer.rotate_documents((7,), 90)
+
+    assert (tasks.ids, tasks.problem) == ((), "failed")
+    assert len(server.posts) == 1
+
+
+async def test_a_long_list_of_documents_is_matched_by_the_truncated_merged_name(
+    make_client: ClientFactory,
+) -> None:
+    ids = tuple(range(10_000, 10_017))
+    name = "_".join(str(n) for n in ids)[:100] + "_merged.pdf"
+    other = "_".join(str(n) for n in ids) + "_merged.pdf"
+    server = Paperless(OLD, [*OLD, row(12, "consume_file", other), row(13, "consume_file", name)])
+
+    tasks = await writer(make_client, server).merge_documents(
+        ids, metadata_document_id=None, delete_originals=False
+    )
+
+    assert tasks.ids == (task_id(13),)
+
+
+async def test_a_rotation_does_not_take_an_older_task_of_another_document(
+    make_client: ClientFactory,
+) -> None:
+    other = [row(12, "consume_file", "99_rotated.pdf"), row(13, "consume_file", "7_rotated.pdf")]
+    server = Paperless(OLD, [*OLD, *other])
+
+    tasks = await writer(make_client, server).rotate_documents((7,), 90)
+
+    assert tasks.ids == (task_id(13),)
