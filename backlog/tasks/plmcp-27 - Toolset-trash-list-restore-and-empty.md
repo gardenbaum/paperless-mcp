@@ -1,11 +1,11 @@
 ---
 id: PLMCP-27
 title: 'Toolset trash: list, restore and empty'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:26:00Z'
-updated_date: '2026-11-13T18:33:00Z'
+updated_date: '2026-11-13T18:34:00Z'
 labels: []
 milestone: m-3
 dependencies:
@@ -24,17 +24,17 @@ Deleted documents go to the trash; restoring must be easy and emptying must neve
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 list_trash, restore_from_trash and empty_trash exist
-- [ ] #2 empty_trash requires explicit ids or all=true, and confirm in both cases; it never defaults to everything
-- [ ] #3 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
-- [ ] #4 FakePaperless and the contract suite cover every new port method
+- [x] #1 list_trash, restore_from_trash and empty_trash exist
+- [x] #2 empty_trash requires explicit ids or all=true, and confirm in both cases; it never defaults to everything
+- [x] #3 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
+- [x] #4 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -63,4 +63,12 @@ Gates so far: just check exits 0 (100% diff coverage). just mutation exits 0: fu
 Final: full e2e rerun after the stdio test fix: 378 passed, 6 skipped (AI), 1 failed: test_more_like_finds_other_documents[live] (empty more-like result on the shared stack, stale search index; unrelated to trash). Committed as 2b2dda9 on plmcp-27-trash; not pushed.
 
 Fix round after review (rebased onto origin/main 8727918, union-merged with views; snapshot regenerated from main's, diff vs main is additions only). I1: e2e all=true refusal reads the trash count first and asserts the matching refusal (the max_all Validation above 1000, else the ALL ConfirmationRequired), then that nothing changed. I2: TrashService takes web_url; restored entries (RestoredEntry) carry web_url (a version links its document); list_trash carries web_url of the web UI's /trash page (the 3.4.2 frontend has the route 'trash'; entries have no per-entry page, so no per-entry link). M1: all=true reads the trash in one request (page_size = max_all+1) so count and ids agree, entries deduplicated by id (test with a reader that repeats an entry); _entries already collects into a dict by id. M2: description, refusal and success message say all=true empties what the trash holds when confirmed and steer to document_ids. M3: the fake orders by created desc, id desc (observed tie order) and service tests no longer pin an order. M4: contract tests for an emptied document taking its earlier trashed versions along, and an unowned entry visible to a non-owner; empty_trash docstring says so. M5: _counted in the ALL head and message, qualifier kept, list_trash says a superuser sees every entry. M7: both tools take ids ge=1, empty_trash also min/max length 100 (the empty-list service check stays for service callers). Mutation: full 100.0%, trash survivors only the 3 listed equivalents (hashes updated). e2e full: 408 passed, 6 skipped, 1 failed: the known test_more_like_finds_other_documents[live] (PLMCP-40).
+
+Controller: review fix round accepted (I1, I2, M1-M5, M7). DoD #1 left unchecked: the E2E test, the M4 contract additions and the fake ordering change were written together with the code. Gates on 6e53a95 (rebased onto 8727918): just check 0 (100% diff), just mutation 100.0%, e2e 408 passed, 1 failed (test_more_like_finds_other_documents[live], PLMCP-40).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adds the opt-in trash toolset: list_trash (read-only, links the web UI trash page), restore_from_trash (1-100 ids, all must be in the trash; restored entries carry web_url; versions re-attach to their document) and empty_trash, which needs explicit ids or all=true plus confirm and never sends a request without ids, since Paperless empties everything for a POST without documents. all=true reads the trash in one request, stops at 1000 entries and empties what the trash holds at the confirmed call. The fake models trashed versions, restore and emptying, ordered like 3.4.2. Schema guard: one WRONG_RESPONSE_SCHEMAS entry for the text/html 403 of POST /api/trash/. Default profile unchanged (18 tools); the surface snapshot only gains trash tools in the all and read-only profiles.
+<!-- SECTION:FINAL_SUMMARY:END -->
