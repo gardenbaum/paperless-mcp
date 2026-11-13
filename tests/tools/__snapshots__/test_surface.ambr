@@ -1276,6 +1276,249 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Create saved view',
+      }),
+      'description': '''
+        Create a saved view: a named document filter that run_saved_view can run.
+        
+        rules is a list of {rule, value}; a document must match all of them. Names in values are looked
+        up like in search_documents. The rules are checked as run_saved_view would read them, and the
+        call fails, naming the rule type, if one cannot be run. A view without rules matches every
+        document. The view belongs to the user. Returns it as stored.
+        
+        Rule types, by label or number (a taxonomy value is a name or an id, one rule per value):
+        - Tags: has tag 6 (all of them), has tags in 22 (at least one), does not have tag 17, has any tag
+          7 (true: tagged, false: untagged).
+        - Correspondent is 3, document type is 4, storage path is 25: a name or id, no value for none
+          assigned, -1 for any assigned. Has correspondent in 26, does not have correspondent in 27, and
+          the same for document types (28, 29) and storage paths (30, 31).
+        - Owner is 32, has owner in 33, does not have owner in 35 (a user name or id), does not have
+          owner 34 (true), is shared by me 37 (your user id).
+        - Searches, at most one of them except that a title or text search may come with a fulltext
+          query: title contains 0, simple title search 48 (title), title or content contains 19, simple
+          text search 49 (title and content), fulltext query 20 (the query syntax of search_documents),
+          more like this 21 (a document id).
+        - Other text: content contains 1, mime type is 47 (application/pdf), custom field value contains
+          36.
+        - Numbers: ASN is 2, ASN greater than 23, ASN less than 24, does not have ASN 18 (true), created
+          year 10, created month 11, created day 12.
+        - Dates (YYYY-MM-DD): created before 8, created after 9, created from 44, created to 43 (from and
+          to include the day), added before 13, added after 14, added from 46, added to 45, modified
+          before 15, modified after 16.
+        - Flags (true or false): is in inbox 5, has duplicates 50, does not have custom field 41 (true:
+          has some custom field, false: none; the label is Paperless's).
+        - Custom fields (names or ids): has custom fields 38 (all of them), has custom field in 39 (at
+          least one), does not have custom field in 40, custom fields query 42 (a custom_field_query as
+          JSON, as in search_documents).
+        Except for tags, 'in' and 'not in' types and custom fields, a view may hold each type once.
+  
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'name': dict({
+            'description': 'A name not yet taken.',
+            'maxLength': 128,
+            'minLength': 1,
+            'type': 'string',
+          }),
+          'page_size': dict({
+            'anyOf': list([
+              dict({
+                'minimum': 1,
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'The page size the Paperless web UI uses for the view.',
+          }),
+          'rules': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'A filter rule as a caller writes it: the type by number or label, the value by id or name.',
+                  'properties': dict({
+                    'rule': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'integer',
+                        }),
+                        dict({
+                          'type': 'string',
+                        }),
+                      ]),
+                      'description': "The rule type: its number (0 to 50) or its label, e.g. 'has tag'.",
+                    }),
+                    'value': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'integer',
+                        }),
+                        dict({
+                          'type': 'boolean',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'default': None,
+                      'description': 'The value: a name or id for tags, correspondents, document types, storage paths, custom fields and owners; a date (YYYY-MM-DD); a number; true or false; or text, as the rule type needs. Null where it needs none.',
+                    }),
+                  }),
+                  'required': list([
+                    'rule',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Filter rules, all of which must match; see the tool description.',
+          }),
+          'sort_field': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Sort by created, added, modified, title, archive_serial_number, correspondent__name, document_type__name, owner, num_notes, page_count or custom_field_<id>.',
+          }),
+          'sort_reverse': dict({
+            'default': False,
+            'description': 'Sort descending.',
+            'type': 'boolean',
+          }),
+        }),
+        'required': list([
+          'name',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'create_saved_view',
+      'outputSchema': dict({
+        'description': 'A saved view as tools show it.',
+        'properties': dict({
+          'can_change': dict({
+            'description': 'Whether the current user may change it.',
+            'type': 'boolean',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'name': dict({
+            'type': 'string',
+          }),
+          'owner': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'User id of the owner; null: shared by all.',
+          }),
+          'page_size': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The page size of the web UI, if set.',
+          }),
+          'rules': dict({
+            'items': dict({
+              'description': 'A filter rule with the label of its type.',
+              'properties': dict({
+                'name': dict({
+                  'description': "The label of the rule type, e.g. 'has tag'.",
+                  'type': 'string',
+                }),
+                'rule_type': dict({
+                  'type': 'integer',
+                }),
+                'value': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'The value as stored, usually an id.',
+                }),
+              }),
+              'required': list([
+                'rule_type',
+                'name',
+                'value',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'sort_field': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The field it sorts by, null: default.',
+          }),
+          'sort_reverse': dict({
+            'description': 'Descending when sort_field is set.',
+            'type': 'boolean',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'sort_field',
+          'sort_reverse',
+          'page_size',
+          'owner',
+          'can_change',
+          'rules',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Create saved view',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'core',
           ]),
         }),
@@ -1852,6 +2095,77 @@
         'type': 'object',
       }),
       'title': 'Delete note',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Delete saved view',
+      }),
+      'description': '''
+        Delete a saved view for good: it has no trash. No document is touched.
+        
+        Without confirm it deletes nothing and fails with an error that says the effect (the rules
+        and sort order that are lost); describe that to the user and call again with confirm=true once
+        they agree.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'view': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'The saved view: its name or id.',
+          }),
+        }),
+        'required': list([
+          'view',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'delete_saved_view',
+      'outputSchema': dict({
+        'description': 'The outcome of a confirmed delete_saved_view.',
+        'properties': dict({
+          'id': dict({
+            'type': 'integer',
+          }),
+          'message': dict({
+            'description': 'What was deleted.',
+            'type': 'string',
+          }),
+          'name': dict({
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'message',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Delete saved view',
     }),
     dict({
       '_meta': dict({
@@ -3427,6 +3741,144 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get saved view',
+      }),
+      'description': '''
+        Read one saved view with its filter rules, sort order and page size.
+        
+        The view matches by exact name, then ignoring case and accents, or by id; an unknown or
+        ambiguous name is an error that lists the closest names or candidates.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'view': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'The saved view: its name or id.',
+          }),
+        }),
+        'required': list([
+          'view',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'get_saved_view',
+      'outputSchema': dict({
+        'description': 'A saved view as tools show it.',
+        'properties': dict({
+          'can_change': dict({
+            'description': 'Whether the current user may change it.',
+            'type': 'boolean',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'name': dict({
+            'type': 'string',
+          }),
+          'owner': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'User id of the owner; null: shared by all.',
+          }),
+          'page_size': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The page size of the web UI, if set.',
+          }),
+          'rules': dict({
+            'items': dict({
+              'description': 'A filter rule with the label of its type.',
+              'properties': dict({
+                'name': dict({
+                  'description': "The label of the rule type, e.g. 'has tag'.",
+                  'type': 'string',
+                }),
+                'rule_type': dict({
+                  'type': 'integer',
+                }),
+                'value': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'The value as stored, usually an id.',
+                }),
+              }),
+              'required': list([
+                'rule_type',
+                'name',
+                'value',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'sort_field': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The field it sorts by, null: default.',
+          }),
+          'sort_reverse': dict({
+            'description': 'Descending when sort_field is set.',
+            'type': 'boolean',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'sort_field',
+          'sort_reverse',
+          'page_size',
+          'owner',
+          'can_change',
+          'rules',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get saved view',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'core',
           ]),
         }),
@@ -3660,6 +4112,147 @@
         'type': 'object',
       }),
       'title': 'List document versions',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List saved views',
+      }),
+      'description': '''
+        List the saved views the current user may see, with their filter rules.
+        
+        A saved view is a named document filter with a sort order, kept in Paperless. Each rule shows
+        its type number, its label and its value (usually an id: see list_taxonomy to look names up).
+        Run a view with run_saved_view. Needs the view permission for saved views in Paperless.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+        }),
+        'type': 'object',
+      }),
+      'name': 'list_saved_views',
+      'outputSchema': dict({
+        'description': 'The saved views the user may see.',
+        'properties': dict({
+          'count': dict({
+            'type': 'integer',
+          }),
+          'views': dict({
+            'items': dict({
+              'description': 'A saved view as tools show it.',
+              'properties': dict({
+                'can_change': dict({
+                  'description': 'Whether the current user may change it.',
+                  'type': 'boolean',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'type': 'string',
+                }),
+                'owner': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'User id of the owner; null: shared by all.',
+                }),
+                'page_size': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'The page size of the web UI, if set.',
+                }),
+                'rules': dict({
+                  'items': dict({
+                    'description': 'A filter rule with the label of its type.',
+                    'properties': dict({
+                      'name': dict({
+                        'description': "The label of the rule type, e.g. 'has tag'.",
+                        'type': 'string',
+                      }),
+                      'rule_type': dict({
+                        'type': 'integer',
+                      }),
+                      'value': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                        'description': 'The value as stored, usually an id.',
+                      }),
+                    }),
+                    'required': list([
+                      'rule_type',
+                      'name',
+                      'value',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'sort_field': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'The field it sorts by, null: default.',
+                }),
+                'sort_reverse': dict({
+                  'description': 'Descending when sort_field is set.',
+                  'type': 'boolean',
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+                'sort_field',
+                'sort_reverse',
+                'page_size',
+                'owner',
+                'can_change',
+                'rules',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+        }),
+        'required': list([
+          'count',
+          'views',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List saved views',
     }),
     dict({
       '_meta': dict({
@@ -4011,6 +4604,291 @@
         'type': 'object',
       }),
       'title': 'Merge documents as versions',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Run saved view',
+      }),
+      'description': '''
+        Find the documents of a saved view, as the Paperless web UI lists them.
+        
+        The filter rules of the view become the same filters search_documents takes, and the view's
+        sort order applies; the rows and paging are those of search_documents. A rule that cannot be
+        run (an unknown type, a value that does not fit) is an error naming the rule type; fix the
+        view with update_saved_view. count is the total; pass next_page as page to see more. The
+        page size of the view is a setting of the web UI and is not used.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'page': dict({
+            'default': 1,
+            'description': 'Page number, from 1.',
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'page_size': dict({
+            'default': 25,
+            'description': 'Documents per page, at most 100.',
+            'maximum': 100,
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'view': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'The saved view: its name or id.',
+          }),
+        }),
+        'required': list([
+          'view',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'run_saved_view',
+      'outputSchema': dict({
+        'description': 'One page of a document search.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many documents match in total.',
+            'type': 'integer',
+          }),
+          'documents': dict({
+            'items': dict({
+              'description': 'A document as a compact search row, without its content.',
+              'properties': dict({
+                'added': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'correspondent': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'created': dict({
+                  'format': 'date',
+                  'type': 'string',
+                }),
+                'custom_fields': dict({
+                  'items': dict({
+                    'description': 'A custom field\'s value, readable: select labels, "EUR 12.50", document ids.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'value': dict({
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                      'value',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'document_type': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'highlights': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Full-text search only: matching excerpt, terms marked with <b>.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'storage_path': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'tags': dict({
+                  'items': dict({
+                    'description': 'An object a document refers to; name is null if the user may not see it.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'created',
+                'added',
+                'correspondent',
+                'document_type',
+                'storage_path',
+                'tags',
+                'custom_fields',
+                'web_url',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'next_page': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The next page, null on the last one.',
+          }),
+          'page': dict({
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'count',
+          'page',
+          'next_page',
+          'documents',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Run saved view',
     }),
     dict({
       '_meta': dict({
@@ -5656,6 +6534,282 @@
         'type': 'object',
       }),
       'title': 'Update document',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Update saved view',
+      }),
+      'description': '''
+        Change a saved view; only the settings you name change.
+        
+        rules replaces all the rules of the view (pass the whole new list; an empty list removes them),
+        in the form of create_saved_view. The change is checked as run_saved_view would read it. Returns
+        the view as stored.
+        
+        Rule types, by label or number (a taxonomy value is a name or an id, one rule per value):
+        - Tags: has tag 6 (all of them), has tags in 22 (at least one), does not have tag 17, has any tag
+          7 (true: tagged, false: untagged).
+        - Correspondent is 3, document type is 4, storage path is 25: a name or id, no value for none
+          assigned, -1 for any assigned. Has correspondent in 26, does not have correspondent in 27, and
+          the same for document types (28, 29) and storage paths (30, 31).
+        - Owner is 32, has owner in 33, does not have owner in 35 (a user name or id), does not have
+          owner 34 (true), is shared by me 37 (your user id).
+        - Searches, at most one of them except that a title or text search may come with a fulltext
+          query: title contains 0, simple title search 48 (title), title or content contains 19, simple
+          text search 49 (title and content), fulltext query 20 (the query syntax of search_documents),
+          more like this 21 (a document id).
+        - Other text: content contains 1, mime type is 47 (application/pdf), custom field value contains
+          36.
+        - Numbers: ASN is 2, ASN greater than 23, ASN less than 24, does not have ASN 18 (true), created
+          year 10, created month 11, created day 12.
+        - Dates (YYYY-MM-DD): created before 8, created after 9, created from 44, created to 43 (from and
+          to include the day), added before 13, added after 14, added from 46, added to 45, modified
+          before 15, modified after 16.
+        - Flags (true or false): is in inbox 5, has duplicates 50, does not have custom field 41 (true:
+          has some custom field, false: none; the label is Paperless's).
+        - Custom fields (names or ids): has custom fields 38 (all of them), has custom field in 39 (at
+          least one), does not have custom field in 40, custom fields query 42 (a custom_field_query as
+          JSON, as in search_documents).
+        Except for tags, 'in' and 'not in' types and custom fields, a view may hold each type once.
+  
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'clear_page_size': dict({
+            'default': False,
+            'description': 'Remove the page size.',
+            'type': 'boolean',
+          }),
+          'clear_sort': dict({
+            'default': False,
+            'description': 'Remove the sort field.',
+            'type': 'boolean',
+          }),
+          'name': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'A new name, not yet taken.',
+          }),
+          'page_size': dict({
+            'anyOf': list([
+              dict({
+                'minimum': 1,
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'The page size the Paperless web UI uses for the view.',
+          }),
+          'rules': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'A filter rule as a caller writes it: the type by number or label, the value by id or name.',
+                  'properties': dict({
+                    'rule': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'integer',
+                        }),
+                        dict({
+                          'type': 'string',
+                        }),
+                      ]),
+                      'description': "The rule type: its number (0 to 50) or its label, e.g. 'has tag'.",
+                    }),
+                    'value': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'integer',
+                        }),
+                        dict({
+                          'type': 'boolean',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'default': None,
+                      'description': 'The value: a name or id for tags, correspondents, document types, storage paths, custom fields and owners; a date (YYYY-MM-DD); a number; true or false; or text, as the rule type needs. Null where it needs none.',
+                    }),
+                  }),
+                  'required': list([
+                    'rule',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Filter rules, all of which must match; see the tool description.',
+          }),
+          'sort_field': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Sort by created, added, modified, title, archive_serial_number, correspondent__name, document_type__name, owner, num_notes, page_count or custom_field_<id>.',
+          }),
+          'sort_reverse': dict({
+            'anyOf': list([
+              dict({
+                'type': 'boolean',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Sort descending or not.',
+          }),
+          'view': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'The saved view: its name or id.',
+          }),
+        }),
+        'required': list([
+          'view',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'update_saved_view',
+      'outputSchema': dict({
+        'description': 'A saved view as tools show it.',
+        'properties': dict({
+          'can_change': dict({
+            'description': 'Whether the current user may change it.',
+            'type': 'boolean',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'name': dict({
+            'type': 'string',
+          }),
+          'owner': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'User id of the owner; null: shared by all.',
+          }),
+          'page_size': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The page size of the web UI, if set.',
+          }),
+          'rules': dict({
+            'items': dict({
+              'description': 'A filter rule with the label of its type.',
+              'properties': dict({
+                'name': dict({
+                  'description': "The label of the rule type, e.g. 'has tag'.",
+                  'type': 'string',
+                }),
+                'rule_type': dict({
+                  'type': 'integer',
+                }),
+                'value': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'The value as stored, usually an id.',
+                }),
+              }),
+              'required': list([
+                'rule_type',
+                'name',
+                'value',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'sort_field': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The field it sorts by, null: default.',
+          }),
+          'sort_reverse': dict({
+            'description': 'Descending when sort_field is set.',
+            'type': 'boolean',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'sort_field',
+          'sort_reverse',
+          'page_size',
+          'owner',
+          'can_change',
+          'rules',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Update saved view',
     }),
     dict({
       '_meta': dict({
@@ -12825,6 +13979,144 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Get saved view',
+      }),
+      'description': '''
+        Read one saved view with its filter rules, sort order and page size.
+        
+        The view matches by exact name, then ignoring case and accents, or by id; an unknown or
+        ambiguous name is an error that lists the closest names or candidates.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'view': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'The saved view: its name or id.',
+          }),
+        }),
+        'required': list([
+          'view',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'get_saved_view',
+      'outputSchema': dict({
+        'description': 'A saved view as tools show it.',
+        'properties': dict({
+          'can_change': dict({
+            'description': 'Whether the current user may change it.',
+            'type': 'boolean',
+          }),
+          'id': dict({
+            'type': 'integer',
+          }),
+          'name': dict({
+            'type': 'string',
+          }),
+          'owner': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'User id of the owner; null: shared by all.',
+          }),
+          'page_size': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The page size of the web UI, if set.',
+          }),
+          'rules': dict({
+            'items': dict({
+              'description': 'A filter rule with the label of its type.',
+              'properties': dict({
+                'name': dict({
+                  'description': "The label of the rule type, e.g. 'has tag'.",
+                  'type': 'string',
+                }),
+                'rule_type': dict({
+                  'type': 'integer',
+                }),
+                'value': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'The value as stored, usually an id.',
+                }),
+              }),
+              'required': list([
+                'rule_type',
+                'name',
+                'value',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'sort_field': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The field it sorts by, null: default.',
+          }),
+          'sort_reverse': dict({
+            'description': 'Descending when sort_field is set.',
+            'type': 'boolean',
+          }),
+        }),
+        'required': list([
+          'id',
+          'name',
+          'sort_field',
+          'sort_reverse',
+          'page_size',
+          'owner',
+          'can_change',
+          'rules',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Get saved view',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'core',
           ]),
         }),
@@ -13063,6 +14355,147 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List saved views',
+      }),
+      'description': '''
+        List the saved views the current user may see, with their filter rules.
+        
+        A saved view is a named document filter with a sort order, kept in Paperless. Each rule shows
+        its type number, its label and its value (usually an id: see list_taxonomy to look names up).
+        Run a view with run_saved_view. Needs the view permission for saved views in Paperless.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+        }),
+        'type': 'object',
+      }),
+      'name': 'list_saved_views',
+      'outputSchema': dict({
+        'description': 'The saved views the user may see.',
+        'properties': dict({
+          'count': dict({
+            'type': 'integer',
+          }),
+          'views': dict({
+            'items': dict({
+              'description': 'A saved view as tools show it.',
+              'properties': dict({
+                'can_change': dict({
+                  'description': 'Whether the current user may change it.',
+                  'type': 'boolean',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'name': dict({
+                  'type': 'string',
+                }),
+                'owner': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'User id of the owner; null: shared by all.',
+                }),
+                'page_size': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'The page size of the web UI, if set.',
+                }),
+                'rules': dict({
+                  'items': dict({
+                    'description': 'A filter rule with the label of its type.',
+                    'properties': dict({
+                      'name': dict({
+                        'description': "The label of the rule type, e.g. 'has tag'.",
+                        'type': 'string',
+                      }),
+                      'rule_type': dict({
+                        'type': 'integer',
+                      }),
+                      'value': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                        'description': 'The value as stored, usually an id.',
+                      }),
+                    }),
+                    'required': list([
+                      'rule_type',
+                      'name',
+                      'value',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'sort_field': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'The field it sorts by, null: default.',
+                }),
+                'sort_reverse': dict({
+                  'description': 'Descending when sort_field is set.',
+                  'type': 'boolean',
+                }),
+              }),
+              'required': list([
+                'id',
+                'name',
+                'sort_field',
+                'sort_reverse',
+                'page_size',
+                'owner',
+                'can_change',
+                'rules',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+        }),
+        'required': list([
+          'count',
+          'views',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List saved views',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'core',
           ]),
         }),
@@ -13247,6 +14680,291 @@
         'type': 'object',
       }),
       'title': 'List taxonomy',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'views',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'Run saved view',
+      }),
+      'description': '''
+        Find the documents of a saved view, as the Paperless web UI lists them.
+        
+        The filter rules of the view become the same filters search_documents takes, and the view's
+        sort order applies; the rows and paging are those of search_documents. A rule that cannot be
+        run (an unknown type, a value that does not fit) is an error naming the rule type; fix the
+        view with update_saved_view. count is the total; pass next_page as page to see more. The
+        page size of the view is a setting of the web UI and is not used.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'page': dict({
+            'default': 1,
+            'description': 'Page number, from 1.',
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'page_size': dict({
+            'default': 25,
+            'description': 'Documents per page, at most 100.',
+            'maximum': 100,
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'view': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'integer',
+              }),
+            ]),
+            'description': 'The saved view: its name or id.',
+          }),
+        }),
+        'required': list([
+          'view',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'run_saved_view',
+      'outputSchema': dict({
+        'description': 'One page of a document search.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many documents match in total.',
+            'type': 'integer',
+          }),
+          'documents': dict({
+            'items': dict({
+              'description': 'A document as a compact search row, without its content.',
+              'properties': dict({
+                'added': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'correspondent': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'created': dict({
+                  'format': 'date',
+                  'type': 'string',
+                }),
+                'custom_fields': dict({
+                  'items': dict({
+                    'description': 'A custom field\'s value, readable: select labels, "EUR 12.50", document ids.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                      'value': dict({
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                      'value',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'document_type': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'highlights': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'default': None,
+                  'description': 'Full-text search only: matching excerpt, terms marked with <b>.',
+                }),
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'storage_path': dict({
+                  'anyOf': list([
+                    dict({
+                      'description': 'An object a document refers to; name is null if the user may not see it.',
+                      'properties': dict({
+                        'id': dict({
+                          'type': 'integer',
+                        }),
+                        'name': dict({
+                          'anyOf': list([
+                            dict({
+                              'type': 'string',
+                            }),
+                            dict({
+                              'type': 'null',
+                            }),
+                          ]),
+                        }),
+                      }),
+                      'required': list([
+                        'id',
+                        'name',
+                      ]),
+                      'type': 'object',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                }),
+                'tags': dict({
+                  'items': dict({
+                    'description': 'An object a document refers to; name is null if the user may not see it.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'name': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'name',
+                    ]),
+                    'type': 'object',
+                  }),
+                  'type': 'array',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'created',
+                'added',
+                'correspondent',
+                'document_type',
+                'storage_path',
+                'tags',
+                'custom_fields',
+                'web_url',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'next_page': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The next page, null on the last one.',
+          }),
+          'page': dict({
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'count',
+          'page',
+          'next_page',
+          'documents',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Run saved view',
     }),
     dict({
       '_meta': dict({

@@ -29,32 +29,77 @@ type Ordering = Literal[
 class DocumentQuery(BaseModel):
     """Filters of a document search, every name already resolved to an id; all are ANDed.
 
+    The filters from ``title_contains`` to ``owner`` and ``inbox`` are the ones the search tool
+    offers. The rest exist for saved views (``run_saved_view`` translates the filter rules of a
+    view into them) and are named after the Paperless parameter they become.
+
     Attributes:
         query: Full-text query in Paperless's Tantivy syntax, passed through unchanged.
         more_like: Id of a document to find similar ones to; never together with ``query``.
+        text: Simple full-text search over title and content; alone or with ``query``.
+        title_search: Simple full-text search over the title; alone or with ``query``.
         custom_field_query: Paperless's ``custom_field_query`` expression, passed through.
         ids: Only these documents (those of them the user may see); empty means no restriction.
+        shared_by: Documents this user owns and has shared with someone.
+        ordering: A Paperless ordering field, ``-`` for descending.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
     query: str | None = None
     more_like: int | None = None
+    text: str | None = None
+    title_search: str | None = None
     title_contains: str | None = None
+    content_contains: str | None = None
     correspondent: int | None = None
+    correspondent_isnull: bool | None = None
+    correspondent_in: tuple[int, ...] = ()
+    correspondent_none: tuple[int, ...] = ()
     document_type: int | None = None
+    document_type_isnull: bool | None = None
+    document_type_in: tuple[int, ...] = ()
+    document_type_none: tuple[int, ...] = ()
     storage_path: int | None = None
+    storage_path_isnull: bool | None = None
+    storage_path_in: tuple[int, ...] = ()
+    storage_path_none: tuple[int, ...] = ()
     tags_all: tuple[int, ...] = ()
     tags_any: tuple[int, ...] = ()
     tags_none: tuple[int, ...] = ()
+    tagged: bool | None = None
+    archive_serial_number: int | None = None
+    asn_gt: int | None = None
+    asn_lt: int | None = None
+    asn_isnull: bool | None = None
     created_from: date | None = None
     created_to: date | None = None
+    created_gt: date | None = None
+    created_lt: date | None = None
+    created_year: int | None = None
+    created_month: int | None = None
+    created_day: int | None = None
     added_from: date | None = None
     added_to: date | None = None
+    added_gt: date | None = None
+    added_lt: date | None = None
+    modified_gt: date | None = None
+    modified_lt: date | None = None
     owner: int | None = None
+    owner_in: tuple[int, ...] = ()
+    owner_none: tuple[int, ...] = ()
+    owner_isnull: bool | None = None
+    shared_by: int | None = None
     inbox: bool | None = None
+    mime_type: str | None = None
+    has_duplicates: bool | None = None
+    custom_fields_icontains: str | None = None
+    custom_fields_all: tuple[int, ...] = ()
+    custom_fields_in: tuple[int, ...] = ()
+    custom_fields_none: tuple[int, ...] = ()
+    has_custom_fields: bool | None = None
     custom_field_query: JsonValue = None
-    ordering: Ordering | None = None
+    ordering: str | None = None
     ids: tuple[int, ...] = ()
 
 

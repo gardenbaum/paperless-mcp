@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         WritableKind,
     )
     from paperless_mcp.domain.versions import VersionUpload
+    from paperless_mcp.domain.views import SavedView, ViewValues
 
 
 class InstanceReader(Protocol):
@@ -441,5 +442,64 @@ class AiReader(Protocol):
             PermissionDenied: The user may not change the document (Paperless requires it).
             FeatureUnavailable: Paperless AI is switched off.
             UpstreamUnavailable: The language model failed or took too long.
+        """
+        ...
+
+
+class ViewReader(Protocol):
+    """Saved views the current user may see."""
+
+    async def list_saved_views(self) -> tuple[SavedView, ...]:
+        """Every saved view the user may see, over all pages, in Paperless order (by name).
+
+        Raises:
+            PermissionDenied: The user lacks the global ``view_savedview`` permission.
+        """
+        ...
+
+    async def get_saved_view(self, view_id: int) -> SavedView:
+        """One saved view.
+
+        Raises:
+            NotFound: No such view, or the user may not see it.
+            PermissionDenied: The user lacks the global ``view_savedview`` permission.
+        """
+        ...
+
+
+class ViewWriter(Protocol):
+    """Changes to saved views."""
+
+    async def create_saved_view(self, name: str, values: ViewValues) -> SavedView:
+        """A new view named ``name`` with the settings ``values`` sets, owned by the user.
+
+        ``values.name`` is ignored. Paperless needs a rule list; none given means no rules.
+
+        Raises:
+            PermissionDenied: The user may not add saved views.
+            Validation: Paperless rejected a value (blank or taken name, unknown rule type, a
+                rule value over 255 characters, a page size below 1).
+        """
+        ...
+
+    async def update_saved_view(self, view_id: int, values: ViewValues) -> SavedView:
+        """Change the settings ``values`` sets and return the view as it is afterwards.
+
+        Paperless replaces the rule list as a whole and, unlike a create, accepts a name another
+        view of the user already has.
+
+        Raises:
+            NotFound: No such view, or the user may not see it.
+            PermissionDenied: The user may not change saved views, or this one.
+            Validation: Paperless rejected a value.
+        """
+        ...
+
+    async def delete_saved_view(self, view_id: int) -> None:
+        """Delete the view for good: Paperless has no trash for saved views.
+
+        Raises:
+            NotFound: No such view, or the user may not see it.
+            PermissionDenied: The user may not delete saved views, or this one.
         """
         ...

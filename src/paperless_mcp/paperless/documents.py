@@ -204,24 +204,65 @@ def _day(day: date | None) -> str | None:
     return day.isoformat() if day else None
 
 
+def _flag(value: bool | None) -> str | None:  # noqa: FBT001 -- a tri-state filter, not a switch
+    return None if value is None else str(value).lower()
+
+
 def params(query: DocumentQuery) -> dict[str, str | int]:
     """The Paperless query parameters of ``query``; unset filters are left out."""
     candidates: dict[str, str | int | None] = {
         "query": query.query,
         "more_like_id": query.more_like,
+        "text": query.text,
+        "title_search": query.title_search,
         "title__icontains": query.title_contains,
+        "content__icontains": query.content_contains,
         "correspondent__id": query.correspondent,
+        "correspondent__isnull": _flag(query.correspondent_isnull),
+        "correspondent__id__in": _csv(query.correspondent_in),
+        "correspondent__id__none": _csv(query.correspondent_none),
         "document_type__id": query.document_type,
+        "document_type__isnull": _flag(query.document_type_isnull),
+        "document_type__id__in": _csv(query.document_type_in),
+        "document_type__id__none": _csv(query.document_type_none),
         "storage_path__id": query.storage_path,
+        "storage_path__isnull": _flag(query.storage_path_isnull),
+        "storage_path__id__in": _csv(query.storage_path_in),
+        "storage_path__id__none": _csv(query.storage_path_none),
         "tags__id__all": _csv(query.tags_all),
         "tags__id__in": _csv(query.tags_any),
         "tags__id__none": _csv(query.tags_none),
+        "is_tagged": _flag(query.tagged),
+        "archive_serial_number": query.archive_serial_number,
+        "archive_serial_number__gt": query.asn_gt,
+        "archive_serial_number__lt": query.asn_lt,
+        "archive_serial_number__isnull": _flag(query.asn_isnull),
         "created__date__gte": _day(query.created_from),
         "created__date__lte": _day(query.created_to),
+        "created__date__gt": _day(query.created_gt),
+        "created__date__lt": _day(query.created_lt),
+        "created__year": query.created_year,
+        "created__month": query.created_month,
+        "created__day": query.created_day,
         "added__date__gte": _day(query.added_from),
         "added__date__lte": _day(query.added_to),
+        "added__date__gt": _day(query.added_gt),
+        "added__date__lt": _day(query.added_lt),
+        "modified__date__gt": _day(query.modified_gt),
+        "modified__date__lt": _day(query.modified_lt),
         "owner__id": query.owner,
-        "is_in_inbox": None if query.inbox is None else str(query.inbox).lower(),
+        "owner__id__in": _csv(query.owner_in),
+        "owner__id__none": _csv(query.owner_none),
+        "owner__isnull": _flag(query.owner_isnull),
+        "shared_by__id": query.shared_by,
+        "is_in_inbox": _flag(query.inbox),
+        "mime_type": query.mime_type,
+        "has_duplicates": _flag(query.has_duplicates),
+        "custom_fields__icontains": query.custom_fields_icontains,
+        "custom_fields__id__all": _csv(query.custom_fields_all),
+        "custom_fields__id__in": _csv(query.custom_fields_in),
+        "custom_fields__id__none": _csv(query.custom_fields_none),
+        "has_custom_fields": _flag(query.has_custom_fields),
         "custom_field_query": (
             None if query.custom_field_query is None else json.dumps(query.custom_field_query)
         ),

@@ -1,0 +1,56 @@
+# serializer version: 1
+# name: test_filter_rule_errors
+  dict({
+    'added range backwards': 'Filter rule types 46 (added from) and 45 (added to) make the added range start after it ends. Hint: Swap the dates, or drop one of them. Change the view with update_saved_view.',
+    'bad date': "Filter rule type 8 (created before) has the value 'x', which is not a date (YYYY-MM-DD). Hint: Change the view with update_saved_view.",
+    'bad flag': "Filter rule type 5 (is in inbox) has the value 'x', which is not true or false. Hint: Change the view with update_saved_view.",
+    'bad id list': "Filter rule type 35 (does not have owner in) has the value '2,x', which is not a list of whole numbers. Hint: Change the view with update_saved_view.",
+    'bad json': 'Filter rule type 42 (custom fields query) has a value that is not valid JSON. Hint: Change the view with update_saved_view.',
+    'bad number': "Filter rule type 2 (ASN is) has the value 'x', which is not a whole number. Hint: Change the view with update_saved_view.",
+    'created range backwards': 'Filter rule types 44 (created from) and 43 (created to) make the created range start after it ends. Hint: Swap the dates, or drop one of them. Change the view with update_saved_view.',
+    'no id list value': 'Filter rule type 35 (does not have owner in) needs a value. Hint: Change the view with update_saved_view.',
+    'no value, date': 'Filter rule type 8 (created before) needs a value. Hint: Change the view with update_saved_view.',
+    'no value, flag': 'Filter rule type 5 (is in inbox) needs a value. Hint: Change the view with update_saved_view.',
+    'no value, json': 'Filter rule type 42 (custom fields query) needs a value. Hint: Change the view with update_saved_view.',
+    'no value, number': 'Filter rule type 2 (ASN is) needs a value. Hint: Change the view with update_saved_view.',
+    'no value, text': 'Filter rule type 0 (title contains) needs a value. Hint: Change the view with update_saved_view.',
+    'same filter by two types': 'Filter rule type 49 (simple text search) sets the same filter as rule type 19, which the view has. Hint: Change the view with update_saved_view.',
+    'same type twice': 'Filter rule type 2 (ASN is) occurs more than once; a view may have it only once. Hint: Change the view with update_saved_view.',
+    'three searches': 'Paperless can run only one search per query: rule types 0 (title contains), 20 (fulltext query), 21 (more like this) cannot be combined. Hint: Keep one of them (or a simple search with a fulltext query). Change the view with update_saved_view.',
+    'two searches': 'Paperless can run only one search per query: rule types 19 (title or content contains), 0 (title contains) cannot be combined. Hint: Keep one of them (or a simple search with a fulltext query). Change the view with update_saved_view.',
+    'unknown sort field': "The view sorts by the unknown sort field 'bogus'. Hint: Change the view with update_saved_view. Use clear_sort to drop the sort, or a field such as created or title.",
+    'unknown type': 'Filter rule type 51 is not one of the types of Paperless 3.4.2. Hint: The types are numbered 0 to 50; create_saved_view lists them.',
+  })
+# ---
+# name: test_rule_type_errors
+  dict({
+    ' HAS TAG ': 'accepted',
+    'does not have': "No filter rule type is called 'does not have'. Hint: Did you mean 'does not have tag', 'does not have ASN', 'does not have owner', 'does not have owner in', 'does not have custom field'? Use a number from 0 to 50 or a label that create_saved_view lists.",
+    'has tags': "No filter rule type is called 'has tags'. Hint: Did you mean 'has tag', 'has tags in', 'has any tag'? Use a number from 0 to 50 or a label that create_saved_view lists.",
+    'zzzzqq': "No filter rule type is called 'zzzzqq'. Hint: Use a number from 0 to 50 or a label that create_saved_view lists.",
+  })
+# ---
+# name: test_view_service_errors
+  dict({
+    'create, bad rule value': "Filter rule type 2 (ASN is) has the value 'x', which is not a whole number. Hint: Change the view with update_saved_view.",
+    'create, bad sort': "The view sorts by the unknown sort field 'bogus'. Hint: Change the view with update_saved_view. Use clear_sort to drop the sort, or a field such as created or title.",
+    'create, blank name': 'The view name is empty. Hint: Give the view a name.',
+    'create, taken name': "A saved view you can see is already named 'e2e-view' (id 1). Hint: Choose another name, or update that view.",
+    'create, unknown label': "No filter rule type is called 'has tags'. Hint: Did you mean 'has tag', 'has tags in', 'has any tag'? Use a number from 0 to 50 or a label that create_saved_view lists.",
+    'delete, not allowed': "The user may not change saved view 'e2e-view' (id 1): it belongs to someone else. Hint: Ask its owner, or create a view of your own.",
+    'delete, one rule': "Nothing was changed. Confirming would delete saved view 'e2e-view' (id 1) for good: its 1 filter rule and its sort order are lost; no document is touched. Hint: Describe the effect to the user and call the tool again with the same arguments and confirm=true only once they agree, or if they already asked for exactly this.",
+    'delete, unconfirmed': "Nothing was changed. Confirming would delete saved view 'odd' (id 2) for good: its 1 filter rule and its sort order are lost; no document is touched. Hint: Describe the effect to the user and call the tool again with the same arguments and confirm=true only once they agree, or if they already asked for exactly this.",
+    'get, missing id': 'No saved view has id 99. Hint: Call list_saved_views to see the ids.',
+    'get, near miss': "No saved view is named 'e2e-vew'. Hint: Did you mean 'e2e-view'? Or call list_saved_views to see all names.",
+    'run, unknown type': 'Filter rule type 99 is not one of the types of Paperless 3.4.2. Hint: The types are numbered 0 to 50; create_saved_view lists them.',
+    'update, bad rule value': "Filter rule type 2 (ASN is) has the value 'x', which is not a whole number. Hint: Change the view with update_saved_view.",
+    'update, bad sort': "The view sorts by the unknown sort field 'bogus'. Hint: Change the view with update_saved_view. Use clear_sort to drop the sort, or a field such as created or title.",
+    'update, blank name': 'The view name is empty. Hint: Give the view a name.',
+    'update, both page size': 'page_size and clear_page_size contradict each other. Hint: Pass one of them.',
+    'update, both sort': 'sort_field and clear_sort contradict each other. Hint: Pass one of them.',
+    'update, missing view': "No saved view is named 'nope'. Hint: Call list_saved_views to see the names.",
+    'update, not allowed': "The user may not change saved view 'e2e-view' (id 1): it belongs to someone else. Hint: Ask its owner, or create a view of your own.",
+    'update, nothing': 'Nothing to change: no setting was named. Hint: Name a new name, rules, sort_field or page_size.',
+    'update, taken name': "A saved view you can see is already named 'odd' (id 2). Hint: Choose another name, or update that view.",
+  })
+# ---

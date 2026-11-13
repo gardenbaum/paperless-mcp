@@ -38,9 +38,10 @@ if TYPE_CHECKING:
     from paperless_mcp.services.uploads import UploadService
     from paperless_mcp.services.version_uploads import VersionUploadService
     from paperless_mcp.services.versions import VersionService
+    from paperless_mcp.services.views import ViewService
 
 # Every toolset; each tool carries exactly one of them as its only tag.
-TOOLSETS: Final = frozenset({"core", "ai", "bulk", "versions"})
+TOOLSETS: Final = frozenset({"core", "ai", "bulk", "versions", "views"})
 
 # Tools whose result is an image or a file as MCP content blocks, with no output schema and no
 # structured content (decision-11); every other tool has a typed return model (decision-4).
@@ -74,6 +75,12 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "set_document_version_label": "versions",
     "delete_document_version": "versions",
     "merge_documents_as_versions": "versions",
+    "list_saved_views": "views",
+    "get_saved_view": "views",
+    "create_saved_view": "views",
+    "update_saved_view": "views",
+    "delete_saved_view": "views",
+    "run_saved_view": "views",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
@@ -205,6 +212,49 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=False,
         open_world_hint=False,
     ),
+    "list_saved_views": ToolAnnotations(
+        title="List saved views",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "get_saved_view": ToolAnnotations(
+        title="Get saved view",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "run_saved_view": ToolAnnotations(
+        title="Run saved view",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Saved views are filters, not documents (decision-14 applies by analogy): creating one adds a
+    # record, updating one replaces the rules the caller names, and neither needs a confirm.
+    "create_saved_view": ToolAnnotations(
+        title="Create saved view",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    "update_saved_view": ToolAnnotations(
+        title="Update saved view",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6): a view has no trash. No document is touched. Deleting again
+    # leaves the state as it is (idempotent), though the second call fails.
+    "delete_saved_view": ToolAnnotations(
+        title="Delete saved view",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
     # Destructive (decision-6, decision-14): no trash for taxonomy, a tag takes its child tags.
     "delete_taxonomy_item": ToolAnnotations(
         title="Delete taxonomy item",
@@ -330,6 +380,7 @@ class Services:
     version_uploads: VersionUploadService
     bulk_documents: BulkDocumentEditor
     bulk_taxonomy: BulkTaxonomyEditor
+    views: ViewService
 
 
 def services(ctx: Context) -> Services:

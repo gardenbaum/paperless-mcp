@@ -48,6 +48,8 @@ from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations ar
     TaskReader,
     TaxonomyReader,
     TaxonomyWriter,
+    ViewReader,
+    ViewWriter,
 )
 from paperless_mcp.paperless.ai import PaperlessAiReader
 from paperless_mcp.paperless.auth import StaticTokenProvider
@@ -57,6 +59,7 @@ from paperless_mcp.paperless.documents import PaperlessDocumentReader, Paperless
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
+from paperless_mcp.paperless.views import PaperlessViewReader, PaperlessViewWriter
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, AsyncIterator, Callable, Sequence
@@ -70,6 +73,8 @@ if TYPE_CHECKING:
 SCRATCH_TAG = "contract-tag-"
 # The same for every other kind of taxonomy object (and tags that are not about tags as such).
 SCRATCH_ITEM = "contract-item-"
+# The same for saved views, which Paperless cannot filter by name: the cleanup lists them.
+SCRATCH_VIEW = "contract-view-"
 SCRATCH_PATHS = (
     "/api/tags/",
     "/api/correspondents/",
@@ -91,6 +96,8 @@ class Ports:
     taxonomy_writes: TaxonomyWriter
     bulk_writes: BulkWriter
     ai: AiReader
+    views: ViewReader
+    view_writes: ViewWriter
 
 
 def fake_ports(state: FakeState, user: str) -> Ports:
@@ -106,6 +113,8 @@ def fake_ports(state: FakeState, user: str) -> Ports:
         taxonomy_writes=writer,
         bulk_writes=writer,
         ai=fake,
+        views=fake,
+        view_writes=writer,
     )
 
 
@@ -120,6 +129,8 @@ def live_ports(client: PaperlessClient) -> Ports:
         taxonomy_writes=PaperlessTaxonomyWriter(client),
         bulk_writes=PaperlessBulkWriter(client),
         ai=PaperlessAiReader(client),
+        views=PaperlessViewReader(client),
+        view_writes=PaperlessViewWriter(client),
     )
 
 
@@ -439,6 +450,10 @@ def cleanup(stack: Stack, documents: list[int], users: list[int]) -> None:
     delete_and_empty_trash(stack, documents)
     for user in users:
         _ = stack.admin.delete(f"/api/users/{user}/")
+    views = stack.admin.get("/api/saved_views/", params={"page_size": 100})
+    for row in results(views):
+        if str(row["name"]).startswith(SCRATCH_VIEW):
+            _ = stack.admin.delete(f"/api/saved_views/{row['id']}/")
     for path in SCRATCH_PATHS:
         for prefix in (SCRATCH_TAG, SCRATCH_ITEM):
             found = stack.admin.get(path, params={"name__istartswith": prefix})

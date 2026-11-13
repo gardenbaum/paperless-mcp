@@ -116,7 +116,9 @@ class DocumentService:
             raise Validation(message, hint=hint)
         _check_range("created", query.created_from, query.created_to)
         _check_range("added", query.added_from, query.added_to)
-        resolved = query.model_copy(update=await self._ids(names))
+        # Names are optional: the ids a query already holds (a saved view's) stay unless named.
+        given = {k: v for k, v in (await self._ids(names)).items() if v not in {None, ()}}
+        resolved = query.model_copy(update=given)
         found = await self._reader.search_documents(resolved, page=page, page_size=page_size)
         known: dict[TaxonomyKind, dict[int, TaxonomyItem]] = {
             kind: await self._known(kind) for kind in REFERRED

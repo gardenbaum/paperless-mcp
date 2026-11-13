@@ -11,7 +11,7 @@ Deliberate deviations from the schema are listed below, each with its reason.
 
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from datetime import datetime
 from email.parser import BytesParser
 from email.policy import default
@@ -45,6 +45,16 @@ UNDECLARED_QUERY_PARAMETERS: Mapping[tuple[str, str], Mapping[str, str]] = {
         "fields": (
             "the update serializer honours it like the retrieve one; without it the answer "
             "carries the whole OCR text (PLMCP-16)"
+        ),
+    },
+}
+# Query parameters the schema declares with the wrong type: (method, path template) ->
+# {parameter: reason}. Their value is not type-checked (the name must still be declared).
+MISTYPED_QUERY_PARAMETERS: Mapping[tuple[str, str], Mapping[str, str]] = {
+    ("GET", "/api/documents/"): {
+        "shared_by__id": (
+            "declared boolean, but SharedByUser filters the documents the user with this id "
+            "owns and shared; the web UI sends the user id (PLMCP-25)"
         ),
     },
 }
@@ -169,6 +179,25 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
         "3.4.2 answers {user, settings, permissions}; the schema has {id, settings} (PLMCP-7)"
     ),
 }
+# Responses that lack a property the schema requires, which is filled in (as an empty object)
+# before the body is validated, so that the rest of the body is still checked: (method, path
+# template, status) -> (property, reason). A paged list is filled in each of its results.
+_SAVED_VIEW_ENDPOINTS = (
+    ("GET", "/api/saved_views/", 200),
+    ("GET", "/api/saved_views/{id}/", 200),
+    ("POST", "/api/saved_views/", 201),
+    ("PATCH", "/api/saved_views/{id}/", 200),
+)
+_NO_PERMISSIONS = (
+    "permissions",
+    (
+        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
+        "list asks for `full_perms` (PLMCP-25)"
+    ),
+)
+OMITTED_RESPONSE_PROPERTIES: Mapping[tuple[str, str, int], tuple[str, str]] = dict.fromkeys(
+    _SAVED_VIEW_ENDPOINTS, _NO_PERMISSIONS
+)
 # Endpoints that answer a file: (method, path template) -> reason. The schema declares their 200 as
 # application/json (format binary), but Paperless sends the file with its own content type, so
 # openapi-core cannot match it. Their 200 is checked for what every file response has instead: a
@@ -211,11 +240,14 @@ class SchemaViolationError(AssertionError):
 class _Request:
     """An httpx2 request in the shape of openapi-core's `Request` protocol."""
 
-    def __init__(self, request: httpx2.Request, body: bytes | None = None) -> None:
+    def __init__(
+        self, request: httpx2.Request, body: bytes | None = None, omit: Collection[str] = ()
+    ) -> None:
         self._request: httpx2.Request = request
         self._body: bytes | None = body or request.content or None
+        query = parse_qs(request.url.query.decode(), keep_blank_values=True)
         self.parameters: RequestParameters = RequestParameters(
-            query=ImmutableMultiDict(parse_qs(request.url.query.decode(), keep_blank_values=True)),
+            query=ImmutableMultiDict({k: v for k, v in query.items() if k not in omit}),
             header=Headers(dict(request.headers)),
         )
 
@@ -394,7 +426,10 @@ def check_request(request: httpx2.Request) -> None:
             message = f"{where}: {'; '.join(problems)}"
             raise SchemaViolationError(message)
         return
-    errors = list(_OPENAPI.iter_request_errors(_Request(request, _narrowed(request))))
+    mistyped = MISTYPED_QUERY_PARAMETERS.get((request.method, template), {}).keys()
+    errors = list(
+        _OPENAPI.iter_request_errors(_Request(request, _narrowed(request), omit=mistyped))
+    )
     if errors:
         raise _fail(request, "request does not match the schema", errors)
     if undeclared := _undeclared_query_parameters(request):
@@ -425,6 +460,24 @@ def _check_file_response(request: httpx2.Request, response: httpx2.Response) -> 
         raise SchemaViolationError(message)
 
 
+def _with_omitted_properties(
+    request: httpx2.Request, template: str, response: httpx2.Response
+) -> httpx2.Response:
+    """The response with the properties of `OMITTED_RESPONSE_PROPERTIES` filled in."""
+    listed = OMITTED_RESPONSE_PROPERTIES.get((request.method, template, response.status_code))
+    body = _json_or_none(response)
+    if listed is None or not isinstance(body, dict):
+        return response
+    name = listed[0]
+    objects = cast("Json", body)
+    rows = objects.get("results")
+    for row in cast("list[Json]", rows) if isinstance(rows, list) else [objects]:
+        _ = row.setdefault(name, {})
+    return httpx2.Response(
+        response.status_code, json=body, headers={"Content-Type": "application/json"}
+    )
+
+
 def check_response(request: httpx2.Request, response: httpx2.Response) -> None:
     """Raise `SchemaViolationError` unless the response is one the schema allows for the request."""
     template = _template(request)
@@ -442,6 +495,7 @@ def check_response(request: httpx2.Request, response: httpx2.Response) -> None:
             message = f"{request.method} {request.url.path}: not a DRF error body: {response.text}"
             raise SchemaViolationError(message)
         return
+    response = _with_omitted_properties(request, template, response)
     errors = list(_OPENAPI.iter_response_errors(_Request(request), _Response(response)))
     if errors:
         raise _fail(request, f"{response.status_code} response does not match the schema", errors)
