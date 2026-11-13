@@ -138,3 +138,15 @@ async def test_the_resources_and_prompts_match_the_snapshot(
     }
 
     assert wire == snapshot
+
+
+@pytest.mark.decision("decision-7")
+async def test_upload_document_as_a_stdio_server_with_an_allowlist_offers_it(
+    snapshot: SnapshotAssertion,
+) -> None:
+    """The one tool that differs in this mode (the rest of the surface is the `all` profile)."""
+    server = serve(admin(ai_enabled=True), stdio=True, upload_dirs=["/srv/paperless/consume"])
+    async with Client(server) as client:
+        [tool] = [t for t in await client.list_tools() if t.name == "upload_document"]
+
+    assert tool.model_dump(mode="json", by_alias=True, exclude_none=True) == snapshot

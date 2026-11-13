@@ -1,0 +1,33 @@
+# serializer version: 1
+# name: test_the_words_of_an_outcome_that_is_not_a_plain_success
+  dict({
+    'no document': 'Paperless consumed the file but names no document for it (it may have been split into several, or the new document is hidden from this user).',
+    'unreadable task': 'Paperless accepted the file, but its task could not be read (unexpected error); the outcome is unknown. Follow the task with get_task.',
+  })
+# ---
+# name: test_the_words_of_the_source_checks
+  dict({
+    'control characters': 'Validation: The file name has control characters. Hint: Give the file a plain name such as invoice.pdf.',
+    'empty content': "Validation: The file is empty. Hint: Send the file's bytes, base64-encoded.",
+    'empty file': 'Validation: The file is empty. Hint: Upload a file that has content.',
+    'file too large': 'Validation: The file is larger than the limit of 5 bytes. Hint: Upload a smaller file; the operator can raise PAPERLESS_MCP_MAX_UPLOAD_BYTES.',
+    'name too long': 'Validation: The file name is longer than 255 bytes. Hint: Give the file a plain name such as invoice.pdf.',
+    'no name': 'Validation: The file name is empty or only dots. Hint: Give the file a plain name such as invoice.pdf.',
+    'not base64': 'Validation: The content is not valid base64. Hint: Send standard base64 (RFC 4648) on one line: no line breaks, no data: prefix.',
+    'nul': 'Validation: The path contains a NUL byte. Hint: Give the plain path of the file.',
+    'outside': 'NotFound: No file was found at that path inside the allowed directories. Hint: Give the absolute path of a regular file inside one of: /srv/in, /srv/more.',
+    'paths off': 'Validation: Uploading by path is not enabled. Hint: Send content_base64; the operator enables paths with PAPERLESS_MCP_UPLOAD_DIRS.',
+    'platform': 'Validation: Uploading by path is not supported on this platform. Hint: Send the file as content_base64.',
+    'relative': 'Validation: The path must be absolute. Hint: Give the full path starting with / (or a drive).',
+    'too large': 'Validation: The file is larger than the limit of 5 bytes. Hint: Upload a smaller file; the operator can raise PAPERLESS_MCP_MAX_UPLOAD_BYTES.',
+    'too long to look at': 'Validation: The file is larger than the limit of 5 bytes. Hint: Upload a smaller file; the operator can raise PAPERLESS_MCP_MAX_UPLOAD_BYTES.',
+  })
+# ---
+# name: test_the_words_of_the_upload_checks
+  dict({
+    'blank title': 'Validation: The title cannot be blank. Hint: Pass a title, or leave it out to use the file name.',
+    'long title': 'Validation: The title is longer than 128 characters. Hint: Shorten the title.',
+    'serial number': 'Validation: The archive serial number must be between 0 and 4294967295. Hint: Pass an unused whole number in that range.',
+    'unsupported type': 'Validation: The file is not a type Paperless can consume. Hint: Supported: PDF, PNG, JPEG, GIF, TIFF, BMP, WebP, plain text and CSV; Word, Excel, PowerPoint, OpenDocument and RTF files only if Paperless runs Tika and Gotenberg.',
+  })
+# ---

@@ -1,9 +1,13 @@
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
 
 from paperless_mcp.settings import PaperlessSettings, ServerSettings
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 URL = "http://paperless.internal:8000"
 TOKEN = "test-token"
@@ -223,3 +227,100 @@ def test_the_download_limit_must_be_a_positive_whole_number(
     monkeypatch.setenv("PAPERLESS_MCP_MAX_DOWNLOAD_BYTES", value)
 
     assert invalid_fields(ServerSettings) == [("max_download_bytes",)]
+
+
+# The upload settings of PLMCP-18
+
+
+def test_uploads_up_to_10_mebibytes_are_accepted_by_default() -> None:
+    assert ServerSettings.model_validate({}).max_upload_bytes == 10 * 1024 * 1024
+
+
+def test_the_upload_limit_is_read_from_the_environment_up_to_100_mebibytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_MAX_UPLOAD_BYTES", "4096")
+    assert ServerSettings.model_validate({}).max_upload_bytes == 4096
+
+    monkeypatch.setenv("PAPERLESS_MCP_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024))
+    assert ServerSettings.model_validate({}).max_upload_bytes == 100 * 1024 * 1024
+
+    monkeypatch.setenv("PAPERLESS_MCP_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024 + 1))
+    assert invalid_fields(ServerSettings) == [("max_upload_bytes",)]
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "big", "1.5"])
+def test_the_upload_limit_must_be_a_positive_whole_number(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_MAX_UPLOAD_BYTES", value)
+
+    assert invalid_fields(ServerSettings) == [("max_upload_bytes",)]
+
+
+def test_uploading_by_path_is_off_by_default() -> None:
+    assert ServerSettings.model_validate({}).upload_dirs == ()
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["/data/in,/home/me/scans", '["/data/in", "/home/me/scans"]', " /data/in , /home/me/scans,, "],
+)
+def test_the_upload_directories_are_a_list_of_absolute_paths(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", value)
+
+    assert ServerSettings.model_validate({}).upload_dirs == ("/data/in", "/home/me/scans")
+
+
+@pytest.mark.parametrize("value", ["scans", "/data/in,relative/dir", "~/scans", "."])
+def test_a_relative_upload_directory_is_refused_because_it_would_depend_on_where_the_server_starts(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", value)
+
+    assert invalid_fields(ServerSettings) == [("upload_dirs",)]
+
+
+def test_the_filesystem_root_is_refused_as_an_upload_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", "/")
+
+    assert invalid_fields(ServerSettings) == [("upload_dirs",)]
+
+
+@pytest.mark.parametrize("directory", ["/proc", "/sys", "/dev", "/run", "/proc/self", "/dev/pts"])
+def test_a_pseudo_file_system_is_refused_as_an_upload_directory(
+    monkeypatch: pytest.MonkeyPatch, directory: str
+) -> None:
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", directory)
+
+    assert invalid_fields(ServerSettings) == [("upload_dirs",)]
+
+
+def test_the_home_directory_itself_is_refused_but_a_folder_in_it_is_fine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", str(tmp_path))
+    assert invalid_fields(ServerSettings) == [("upload_dirs",)]
+
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", f"{tmp_path}/scans, {tmp_path}/../other")
+    assert ServerSettings.model_validate({}).upload_dirs == (
+        f"{tmp_path}/scans",
+        f"{tmp_path}/../other",
+    )
+
+
+def test_a_symlink_to_the_home_directory_is_refused_too(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / "shortcut").symlink_to(home, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PAPERLESS_MCP_UPLOAD_DIRS", str(tmp_path / "shortcut"))
+
+    assert invalid_fields(ServerSettings) == [("upload_dirs",)]

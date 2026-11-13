@@ -37,6 +37,8 @@ RETRY_STATUSES = frozenset({429, 502, 503, 504})
 type Method = Literal["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
 type Params = Mapping[str, str | int]
 type Files = Mapping[str, tuple[str, bytes, str]]
+# Form fields; a list repeats the field, as Paperless wants its tags.
+type Form = Mapping[str, str | list[str]]
 type Sleep = Callable[[float], Awaitable[None]]
 type Clock = Callable[[], datetime]
 type Jitter = Callable[[float], float]
@@ -179,7 +181,7 @@ class PaperlessClient:
         *,
         params: Params | None = None,
         json: object = None,
-        data: Mapping[str, str] | None = None,
+        data: Form | None = None,
         files: Files | None = None,
         timeout: float | None = None,  # noqa: ASYNC109 -- the HTTP request timeout, not a cancel scope
         retry: bool = True,
@@ -295,7 +297,7 @@ class PaperlessClient:
         *,
         params: Params | None = None,
         json: object = None,
-        data: Mapping[str, str] | None = None,
+        data: Form | None = None,
         files: Files | None = None,
         timeout: float | None = None,
     ) -> httpx2.Request:
@@ -347,7 +349,7 @@ class PaperlessClient:
         *,
         params: Params | None = None,
         json: object = None,
-        data: Mapping[str, str] | None = None,
+        data: Form | None = None,
         files: Files | None = None,
         timeout: float | None = None,  # noqa: ASYNC109 -- the HTTP request timeout, not a cancel scope
         retry: bool = True,

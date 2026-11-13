@@ -2,6 +2,8 @@
 
 import os
 import runpy
+import subprocess
+import sys
 
 import pytest
 from harness import TOKEN, paperless_answering, refused_url
@@ -117,3 +119,27 @@ def test_python_dash_m_runs_the_same_entrypoint(capsys: pytest.CaptureFixture[st
 
     assert caught.value.code == 1
     assert "invalid configuration" in capsys.readouterr().err
+
+
+def test_the_transport_is_stdio_whatever_the_environment_says(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FASTMCP_TRANSPORT must not turn the stdio entrypoint, and its path uploads, into HTTP."""
+    env = {**os.environ, "PAPERLESS_URL": refused_url(), "PAPERLESS_TOKEN": TOKEN}
+    env |= {"FASTMCP_TRANSPORT": "streamable-http", "FASTMCP_PORT": "0"}
+    env |= {"FASTMCP_HOST": "127.0.0.1", "PAPERLESS_MCP_STARTUP_TIMEOUT": "2"}
+    monkeypatch.setenv("PYTHONUNBUFFERED", "1")
+
+    finished = subprocess.run(
+        [sys.executable, "-m", "paperless_mcp"],
+        env=env,
+        stdin=subprocess.DEVNULL,  # stdio ends at once; a web server would keep running
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert finished.returncode == 0
+    assert "uvicorn" not in finished.stderr.lower()
+    assert "http://" not in finished.stderr.replace(env["PAPERLESS_URL"], "")

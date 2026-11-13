@@ -19,6 +19,7 @@ write its contract tests.
 
 import functools
 import re
+import uuid
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import PurePath
@@ -49,6 +50,7 @@ from paperless_mcp.domain.documents import (
     DocumentPatch,
     DocumentQuery,
     DocumentRecord,
+    DocumentUpload,
     DocumentVersion,
     FileMetadata,
     HistoryEntry,
@@ -88,6 +90,14 @@ MAX_TITLE = 128
 
 VERSION = "3.4.2"
 API_VERSION = 10
+
+# The types 3.4.2 consumes without Tika or Gotenberg; `post_document` answers 400 for any other.
+CONSUMABLE = frozenset(
+    {
+        *("application/pdf", "text/plain", "text/csv", "text/markdown"),
+        *("image/jpeg", "image/png", "image/gif", "image/tiff", "image/bmp", "image/webp"),
+    }
+)
 
 # A WebP header, as far as clients sniff it: Paperless 3.4 renders thumbnails as WebP.
 THUMBNAIL = b"RIFF\x1a\x00\x00\x00WEBPVP8L fake"
@@ -758,6 +768,102 @@ class FakePaperless:
         document.__dict__.update(changes)
         document.modified = datetime.now(UTC)
         return _record(document, self.user, report_change=False)  # an update's answer omits it
+
+    @write
+    async def upload_document(self, upload: DocumentUpload) -> str:
+        """`DocumentWriter.upload_document` (PostDocumentView): the form is checked, then a task.
+
+        Consumption is immediate here. Probed on 3.4.2: a file type it cannot consume, an
+        unknown id and a custom field value of the wrong type are 400s; a taken archive serial
+        number only fails the task; the same content twice makes two documents; the new
+        document is owned by the uploader, gets the parents of its tags and the inbox tags.
+
+        Raises:
+            PermissionDenied: The user lacks the global `add_document` permission.
+            Validation: Paperless's 400 for the form, with its message.
+        """
+        if not self.user.has("add_document"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        if upload.mime_type not in CONSUMABLE:
+            reject("document", f"File type {upload.mime_type} not supported")
+        state = self.state
+        for name, known in (
+            ("correspondent", state.correspondents),
+            ("document_type", state.document_types),
+            ("storage_path", state.storage_paths),
+        ):
+            value = cast("int | None", getattr(upload, name))
+            if value is not None and value not in {o.id for o in known}:
+                reject(name, f'Invalid pk "{value}" - object does not exist.')
+        tags = {t.id: t for t in state.tags}
+        for tag in upload.tags:
+            if tag not in tags:
+                reject("tags", f'Invalid pk "{tag}" - object does not exist.')
+        values = self._values(upload)
+        now = datetime.now(UTC)
+        task = FakeTask(
+            id=len(state.tasks) + 1, task_id=str(uuid.uuid4()), created=now, finished=now
+        )
+        state.tasks.append(task)
+        taken = upload.archive_serial_number is not None and any(
+            d.archive_serial_number == upload.archive_serial_number for d in state.documents
+        )
+        if taken:
+            task.status = "failure"
+            task.message = (
+                f"{upload.filename}: Not consuming {upload.filename}: "
+                f"Given ASN {upload.archive_serial_number} already exists!"
+            )
+            return task.task_id
+        number = max((d.id for d in state.documents), default=0) + 1
+        title = upload.title or PurePath(upload.filename).stem
+        text = (
+            upload.content.decode(errors="replace") if upload.mime_type.startswith("text/") else ""
+        )
+        inbox = [t.id for t in state.tags if t.is_inbox]
+        state.documents.append(
+            FakeDocument(
+                id=number,
+                title=title,
+                content=text,
+                created=upload.created or now.date(),
+                added=now,
+                modified=now,
+                owner=self.user.id,
+                archive_serial_number=upload.archive_serial_number,
+                tags=tag_closure([], [*upload.tags, *inbox], tags),
+                correspondent=upload.correspondent,
+                document_type=upload.document_type,
+                storage_path=upload.storage_path,
+                custom_fields=values,
+                mime_type=upload.mime_type,
+                file_name=upload.filename,
+                original=upload.content,
+                archive=upload.content + b"\n%archive"
+                if upload.mime_type == "application/pdf"
+                else None,
+                history=[_created(number, title, text)],
+                versions=[_root_version(number)],
+            )
+        )
+        task.status = "success"
+        task.document_ids = (number,)
+        return task.task_id
+
+    def _values(self, upload: DocumentUpload) -> dict[int, JsonValue]:
+        """The custom field values of an upload, checked like the form serializer does."""
+        fields = {f.id: f for f in self.state.custom_fields}
+        documents = {d.id for d in self.state.documents}
+        stored: dict[int, JsonValue] = {}
+        for item in upload.custom_fields:
+            if item.field not in fields:
+                reject("custom_fields", f'Invalid pk "{item.field}" - object does not exist.')
+            try:
+                stored[item.field] = coerce(fields[item.field], item.value, documents)
+            except ValueError as error:
+                reject("custom_fields", str(error))
+        return stored
 
     def _changes(self, document: FakeDocument, patch: DocumentPatch) -> dict[str, object]:
         """The attributes `patch` sets, validated like the serializer; nothing is applied."""

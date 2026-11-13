@@ -45,6 +45,6 @@ def main() -> None:
     configure_logging(settings.log_level)
     try:
         # No banner: it is noise on stderr and would check PyPI for updates (decision-7).
-        create_server(paperless, settings).run(show_banner=False)
+        create_server(paperless, settings, stdio=True).run(transport="stdio", show_banner=False)
     except PaperlessMcpError as error:
         _fail(error.describe())

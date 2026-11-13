@@ -17,6 +17,7 @@ from paperless_mcp.domain.documents import (
     DocumentPage,
     DocumentPatch,
     DocumentRecord,
+    DocumentUpload,
     DocumentVersion,
     FileMetadata,
     HistoryEntry,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from paperless_mcp.paperless.client import PaperlessClient, Params
 
 PATH = "/api/documents/"
+UPLOAD_PATH = "/api/documents/post_document/"
 # Most bytes of a thumbnail read; real ones are 2 KB to 30 KB WebP, so this is generous.
 THUMBNAIL_LIMIT = 4 * 1024 * 1024
 FIELDS = "id,title,created,added,correspondent,document_type,storage_path,tags,custom_fields"
@@ -153,6 +155,10 @@ class _Suggestions(BaseModel):
     document_types: list[int]
     storage_paths: list[int]
     dates: list[str]
+
+
+class _TaskId(RootModel[str]):
+    """The answer of ``post_document``: the UUID of the consumption task, as a JSON string."""
 
 
 class _Notes(RootModel[list[_Note]]):
@@ -510,3 +516,37 @@ class PaperlessDocumentWriter:
             _ = await self._client.request("DELETE", f"{PATH}{document_id}/", retry=False)
         except NotFound:
             raise unseen_document(document_id) from None
+
+    async def upload_document(self, upload: DocumentUpload) -> str:
+        """See ``DocumentWriter.upload_document``.
+
+        One multipart POST to ``post_document``: the file as ``document`` and the metadata as
+        form fields, tags repeated and custom fields as a JSON object of field id to value.
+        Sent once: the client never retries a POST, and a retry after a lost answer could create
+        the document twice.
+        """
+        form: dict[str, str | list[str]] = {}
+        if upload.title is not None:
+            form["title"] = upload.title
+        if upload.created is not None:
+            form["created"] = upload.created.isoformat()
+        numbers = {
+            "correspondent": upload.correspondent,
+            "document_type": upload.document_type,
+            "storage_path": upload.storage_path,
+            "archive_serial_number": upload.archive_serial_number,
+        }
+        form.update({name: str(value) for name, value in numbers.items() if value is not None})
+        if upload.tags:
+            form["tags"] = [str(tag) for tag in upload.tags]
+        if upload.custom_fields:
+            values = {str(item.field): item.value for item in upload.custom_fields}
+            form["custom_fields"] = json.dumps(values, separators=(",", ":"))
+        answer = await self._client.call(
+            "POST",
+            UPLOAD_PATH,
+            _TaskId,
+            data=form,
+            files={"document": (upload.filename, upload.content, upload.mime_type)},
+        )
+        return answer.root

@@ -17,6 +17,7 @@ from fakes.paperless import (
     seeded,
     write,
 )
+from paperless_mcp.domain.documents import DocumentUpload
 from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-8")]
@@ -262,3 +263,14 @@ async def test_notes_and_deletion_write_nothing_without_the_opt_in() -> None:
         await fake.delete_document(1)
 
     assert (len(state.documents), len(state.trash), len(state.documents[0].notes)) == (2, 0, 1)
+
+
+async def test_an_upload_fails_unless_the_test_opts_in_and_leaves_no_task() -> None:
+    state = seeded()
+    upload = DocumentUpload(filename="a.pdf", mime_type="application/pdf", content=b"%PDF-1.4")
+
+    with pytest.raises(WriteNotAllowedError, match=r"upload_document.*allow_writes=True"):
+        _ = await FakePaperless(state, user="admin").upload_document(upload)
+
+    assert state.tasks == []
+    assert len(state.documents) == 2

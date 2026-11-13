@@ -4787,6 +4787,280 @@
       }),
       'title': 'Update taxonomy item',
     }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Upload document',
+      }),
+      'description': 'Upload a file, sent as base64 content, to Paperless as a new document. The type comes from the content, not the name: PDF, images, plain text and CSV (Office, OpenDocument and RTF only if Paperless runs Tika). Metadata is given by name as in search_documents; an unknown name is an error and nothing is uploaded; tags are never created. Paperless consumes the file later: the result holds the task_id and, with wait_seconds, the new document_id and web_url; a problem found only then (a taken archive serial number) shows as state failure. Each call adds a document, also for content Paperless already holds (no duplicate check).',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'archive_serial_number': dict({
+            'anyOf': list([
+              dict({
+                'maximum': 4294967295,
+                'minimum': 0,
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Archive serial number; it must be unused.',
+          }),
+          'content_base64': dict({
+            'description': "The file's bytes as standard base64 (RFC 4648) on one line, without a data: prefix. The server refuses files over its size limit (10 MiB by default).",
+            'minLength': 1,
+            'type': 'string',
+          }),
+          'correspondent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'created': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Creation date (YYYY-MM-DD); default: Paperless reads it.',
+          }),
+          'custom_fields': dict({
+            'anyOf': list([
+              dict({
+                'additionalProperties': dict({
+                }),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Custom field values keyed by field name or id. Values by data type: string/longtext text; url with scheme; date 'YYYY-MM-DD'; boolean true/false; integer; float; monetary 'EUR12.50' (or 12.5); documentlink a list of document ids; select the option's label.",
+          }),
+          'document_type': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'filename': dict({
+            'description': "The file's name, e.g. 'Rechnung März.pdf'. Directories are dropped, other characters (non-ASCII too) are kept; Paperless keeps it as the original name.",
+            'minLength': 1,
+            'type': 'string',
+          }),
+          'storage_path': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'tags': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; they must exist (none is created).',
+          }),
+          'title': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Title (at most 128 characters); default: the file name without extension.',
+          }),
+          'wait_seconds': dict({
+            'default': 0,
+            'description': 'Wait up to this many seconds for Paperless to consume the file and return the new document_id; more than 30 is cut to 30. 0 returns the task id at once; follow it with get_task.',
+            'minimum': 0,
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'content_base64',
+          'filename',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'upload_document',
+      'outputSchema': dict({
+        'description': 'What an upload did: the file Paperless accepted and, if it was waited for, its outcome.',
+        'properties': dict({
+          'document_id': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The new document once consumption succeeded; else null.',
+          }),
+          'filename': dict({
+            'description': 'The name the file was uploaded under.',
+            'type': 'string',
+          }),
+          'message': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Why consumption failed, or why the state is unknown.',
+          }),
+          'mime_type': dict({
+            'description': 'The type found in the content.',
+            'type': 'string',
+          }),
+          'size_bytes': dict({
+            'type': 'integer',
+          }),
+          'state': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'pending',
+                  'started',
+                  'success',
+                  'failure',
+                  'revoked',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'const': 'unknown',
+                'type': 'string',
+              }),
+            ]),
+            'description': 'pending, started, success, failure or revoked; unknown when the task could not be read after the upload (e.g. this user may not view tasks): the upload was accepted all the same.',
+          }),
+          'task_id': dict({
+            'description': 'Follow it with get_task; Paperless consumes later.',
+            'type': 'string',
+          }),
+          'wait': dict({
+            'description': 'not_requested: wait_seconds was 0; finished: consumption ended within the wait (see state); timed_out: still running, ask get_task later.',
+            'enum': list([
+              'not_requested',
+              'finished',
+              'timed_out',
+            ]),
+            'type': 'string',
+          }),
+          'waited_seconds': dict({
+            'type': 'number',
+          }),
+          'web_url': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Link to the new document, once known.',
+          }),
+        }),
+        'required': list([
+          'task_id',
+          'state',
+          'message',
+          'document_id',
+          'web_url',
+          'wait',
+          'waited_seconds',
+          'filename',
+          'mime_type',
+          'size_bytes',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Upload document',
+    }),
   ])
 # ---
 # name: test_the_surface_matches_the_snapshot[default]
@@ -9280,6 +9554,280 @@
       }),
       'title': 'Update taxonomy item',
     }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'core',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Upload document',
+      }),
+      'description': 'Upload a file, sent as base64 content, to Paperless as a new document. The type comes from the content, not the name: PDF, images, plain text and CSV (Office, OpenDocument and RTF only if Paperless runs Tika). Metadata is given by name as in search_documents; an unknown name is an error and nothing is uploaded; tags are never created. Paperless consumes the file later: the result holds the task_id and, with wait_seconds, the new document_id and web_url; a problem found only then (a taken archive serial number) shows as state failure. Each call adds a document, also for content Paperless already holds (no duplicate check).',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'archive_serial_number': dict({
+            'anyOf': list([
+              dict({
+                'maximum': 4294967295,
+                'minimum': 0,
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Archive serial number; it must be unused.',
+          }),
+          'content_base64': dict({
+            'description': "The file's bytes as standard base64 (RFC 4648) on one line, without a data: prefix. The server refuses files over its size limit (10 MiB by default).",
+            'minLength': 1,
+            'type': 'string',
+          }),
+          'correspondent': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'created': dict({
+            'anyOf': list([
+              dict({
+                'format': 'date',
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Creation date (YYYY-MM-DD); default: Paperless reads it.',
+          }),
+          'custom_fields': dict({
+            'anyOf': list([
+              dict({
+                'additionalProperties': dict({
+                }),
+                'type': 'object',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': "Custom field values keyed by field name or id. Values by data type: string/longtext text; url with scheme; date 'YYYY-MM-DD'; boolean true/false; integer; float; monetary 'EUR12.50' (or 12.5); documentlink a list of document ids; select the option's label.",
+          }),
+          'document_type': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'filename': dict({
+            'description': "The file's name, e.g. 'Rechnung März.pdf'. Directories are dropped, other characters (non-ASCII too) are kept; Paperless keeps it as the original name.",
+            'minLength': 1,
+            'type': 'string',
+          }),
+          'storage_path': dict({
+            'anyOf': list([
+              dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Name or id; see list_taxonomy.',
+          }),
+          'tags': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'integer',
+                    }),
+                  ]),
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Tag names or ids; they must exist (none is created).',
+          }),
+          'title': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Title (at most 128 characters); default: the file name without extension.',
+          }),
+          'wait_seconds': dict({
+            'default': 0,
+            'description': 'Wait up to this many seconds for Paperless to consume the file and return the new document_id; more than 30 is cut to 30. 0 returns the task id at once; follow it with get_task.',
+            'minimum': 0,
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'content_base64',
+          'filename',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'upload_document',
+      'outputSchema': dict({
+        'description': 'What an upload did: the file Paperless accepted and, if it was waited for, its outcome.',
+        'properties': dict({
+          'document_id': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The new document once consumption succeeded; else null.',
+          }),
+          'filename': dict({
+            'description': 'The name the file was uploaded under.',
+            'type': 'string',
+          }),
+          'message': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Why consumption failed, or why the state is unknown.',
+          }),
+          'mime_type': dict({
+            'description': 'The type found in the content.',
+            'type': 'string',
+          }),
+          'size_bytes': dict({
+            'type': 'integer',
+          }),
+          'state': dict({
+            'anyOf': list([
+              dict({
+                'enum': list([
+                  'pending',
+                  'started',
+                  'success',
+                  'failure',
+                  'revoked',
+                ]),
+                'type': 'string',
+              }),
+              dict({
+                'const': 'unknown',
+                'type': 'string',
+              }),
+            ]),
+            'description': 'pending, started, success, failure or revoked; unknown when the task could not be read after the upload (e.g. this user may not view tasks): the upload was accepted all the same.',
+          }),
+          'task_id': dict({
+            'description': 'Follow it with get_task; Paperless consumes later.',
+            'type': 'string',
+          }),
+          'wait': dict({
+            'description': 'not_requested: wait_seconds was 0; finished: consumption ended within the wait (see state); timed_out: still running, ask get_task later.',
+            'enum': list([
+              'not_requested',
+              'finished',
+              'timed_out',
+            ]),
+            'type': 'string',
+          }),
+          'waited_seconds': dict({
+            'type': 'number',
+          }),
+          'web_url': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Link to the new document, once known.',
+          }),
+        }),
+        'required': list([
+          'task_id',
+          'state',
+          'message',
+          'document_id',
+          'web_url',
+          'wait',
+          'waited_seconds',
+          'filename',
+          'mime_type',
+          'size_bytes',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Upload document',
+    }),
   ])
 # ---
 # name: test_the_surface_matches_the_snapshot[read-only]
@@ -11683,4 +12231,303 @@
       'title': 'Search documents',
     }),
   ])
+# ---
+# name: test_upload_document_as_a_stdio_server_with_an_allowlist_offers_it
+  dict({
+    '_meta': dict({
+      'fastmcp': dict({
+        'tags': list([
+          'core',
+        ]),
+      }),
+    }),
+    'annotations': dict({
+      'destructiveHint': False,
+      'idempotentHint': False,
+      'openWorldHint': False,
+      'readOnlyHint': False,
+      'title': 'Upload document',
+    }),
+    'description': 'Upload a file to Paperless as a new document. Give the file either as path (an absolute path of a regular file inside the directories the operator allowed; symlinks are followed only to files inside them) or as base64 content_base64 with a filename. The type comes from the content, not the name: PDF, images, plain text and CSV (Office, OpenDocument and RTF only if Paperless runs Tika). Metadata is given by name as in search_documents; an unknown name is an error and nothing is uploaded; tags are never created. Paperless consumes the file later: the result holds the task_id and, with wait_seconds, the new document_id and web_url; a problem found only then (a taken archive serial number) shows as state failure. Each call adds a document, also for content Paperless already holds (no duplicate check).',
+    'inputSchema': dict({
+      'additionalProperties': False,
+      'properties': dict({
+        'archive_serial_number': dict({
+          'anyOf': list([
+            dict({
+              'maximum': 4294967295,
+              'minimum': 0,
+              'type': 'integer',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Archive serial number; it must be unused.',
+        }),
+        'content_base64': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': "The file's bytes as standard base64 on one line, without a data: prefix; needs filename. Not together with path.",
+        }),
+        'correspondent': dict({
+          'anyOf': list([
+            dict({
+              'anyOf': list([
+                dict({
+                  'type': 'string',
+                }),
+                dict({
+                  'type': 'integer',
+                }),
+              ]),
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Name or id; see list_taxonomy.',
+        }),
+        'created': dict({
+          'anyOf': list([
+            dict({
+              'format': 'date',
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Creation date (YYYY-MM-DD); default: Paperless reads it.',
+        }),
+        'custom_fields': dict({
+          'anyOf': list([
+            dict({
+              'additionalProperties': dict({
+              }),
+              'type': 'object',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': "Custom field values keyed by field name or id. Values by data type: string/longtext text; url with scheme; date 'YYYY-MM-DD'; boolean true/false; integer; float; monetary 'EUR12.50' (or 12.5); documentlink a list of document ids; select the option's label.",
+        }),
+        'document_type': dict({
+          'anyOf': list([
+            dict({
+              'anyOf': list([
+                dict({
+                  'type': 'string',
+                }),
+                dict({
+                  'type': 'integer',
+                }),
+              ]),
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Name or id; see list_taxonomy.',
+        }),
+        'filename': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': "The name to upload under, e.g. 'Rechnung März.pdf'; required with content_base64, default with path: the file's own name. Directories are dropped.",
+        }),
+        'path': dict({
+          'anyOf': list([
+            dict({
+              'format': 'path',
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Absolute path of the file on the machine this server runs on. Only files inside the directories the operator allowed can be read; anything else is not found. Not together with content_base64.',
+        }),
+        'storage_path': dict({
+          'anyOf': list([
+            dict({
+              'anyOf': list([
+                dict({
+                  'type': 'string',
+                }),
+                dict({
+                  'type': 'integer',
+                }),
+              ]),
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Name or id; see list_taxonomy.',
+        }),
+        'tags': dict({
+          'anyOf': list([
+            dict({
+              'items': dict({
+                'anyOf': list([
+                  dict({
+                    'type': 'string',
+                  }),
+                  dict({
+                    'type': 'integer',
+                  }),
+                ]),
+              }),
+              'type': 'array',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Tag names or ids; they must exist (none is created).',
+        }),
+        'title': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'default': None,
+          'description': 'Title (at most 128 characters); default: the file name without extension.',
+        }),
+        'wait_seconds': dict({
+          'default': 0,
+          'description': 'Wait up to this many seconds for Paperless to consume the file and return the new document_id; more than 30 is cut to 30. 0 returns the task id at once; follow it with get_task.',
+          'minimum': 0,
+          'type': 'integer',
+        }),
+      }),
+      'type': 'object',
+    }),
+    'name': 'upload_document',
+    'outputSchema': dict({
+      'description': 'What an upload did: the file Paperless accepted and, if it was waited for, its outcome.',
+      'properties': dict({
+        'document_id': dict({
+          'anyOf': list([
+            dict({
+              'type': 'integer',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'description': 'The new document once consumption succeeded; else null.',
+        }),
+        'filename': dict({
+          'description': 'The name the file was uploaded under.',
+          'type': 'string',
+        }),
+        'message': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'description': 'Why consumption failed, or why the state is unknown.',
+        }),
+        'mime_type': dict({
+          'description': 'The type found in the content.',
+          'type': 'string',
+        }),
+        'size_bytes': dict({
+          'type': 'integer',
+        }),
+        'state': dict({
+          'anyOf': list([
+            dict({
+              'enum': list([
+                'pending',
+                'started',
+                'success',
+                'failure',
+                'revoked',
+              ]),
+              'type': 'string',
+            }),
+            dict({
+              'const': 'unknown',
+              'type': 'string',
+            }),
+          ]),
+          'description': 'pending, started, success, failure or revoked; unknown when the task could not be read after the upload (e.g. this user may not view tasks): the upload was accepted all the same.',
+        }),
+        'task_id': dict({
+          'description': 'Follow it with get_task; Paperless consumes later.',
+          'type': 'string',
+        }),
+        'wait': dict({
+          'description': 'not_requested: wait_seconds was 0; finished: consumption ended within the wait (see state); timed_out: still running, ask get_task later.',
+          'enum': list([
+            'not_requested',
+            'finished',
+            'timed_out',
+          ]),
+          'type': 'string',
+        }),
+        'waited_seconds': dict({
+          'type': 'number',
+        }),
+        'web_url': dict({
+          'anyOf': list([
+            dict({
+              'type': 'string',
+            }),
+            dict({
+              'type': 'null',
+            }),
+          ]),
+          'description': 'Link to the new document, once known.',
+        }),
+      }),
+      'required': list([
+        'task_id',
+        'state',
+        'message',
+        'document_id',
+        'web_url',
+        'wait',
+        'waited_seconds',
+        'filename',
+        'mime_type',
+        'size_bytes',
+      ]),
+      'type': 'object',
+    }),
+    'title': 'Upload document',
+  })
 # ---

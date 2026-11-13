@@ -14,15 +14,17 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, TypeIs
 from urllib.parse import urlsplit
 
-from paperless_mcp.domain.errors import Ambiguous, Validation
+from paperless_mcp.domain.errors import Ambiguous, NotFound, Validation
 from paperless_mcp.services.taxonomy import fold
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from pydantic import JsonValue
 
+    from paperless_mcp.domain.ports import DocumentReader
     from paperless_mcp.domain.taxonomy import TaxonomyItem
+    from paperless_mcp.services.taxonomy import TaxonomyResolver
 
 MAX_STRING = 128
 MONEY_DECIMALS = 2
@@ -192,3 +194,43 @@ def normalise(field: TaxonomyItem, value: object) -> JsonValue:
         message = f"Custom field {field.name!r} has the data type {kind!r}, which is not supported."
         raise Validation(message, hint="Leave this field out; it cannot be set through this tool.")
     return check(field, value)
+
+
+async def resolve_values(
+    taxonomy: TaxonomyResolver, values: Mapping[str, JsonValue]
+) -> dict[int, tuple[TaxonomyItem, JsonValue]]:
+    """The custom fields ``values`` name (by name or id), each with its value in stored form.
+
+    Raises:
+        NotFound: A field name or id matches nothing.
+        Ambiguous: A field name matches several fields, or a select label several options.
+        Validation: A value does not fit its field, or a field is named twice.
+    """
+    found: dict[int, tuple[TaxonomyItem, JsonValue]] = {}
+    for key, value in values.items():
+        item = await taxonomy.resolve("custom_field", key)
+        if item.id in found:
+            message = f"Custom field {item.name!r} is given twice."
+            raise Validation(message, hint="Name each field once, by name or by id.")
+        found[item.id] = (item, normalise(item, value))
+    return found
+
+
+def linked(value: JsonValue | None) -> set[int]:
+    """The document ids in a document link value; nothing for any other value."""
+    return {n for n in value if isinstance(n, int)} if isinstance(value, list) else set()
+
+
+async def require_visible(reader: DocumentReader, documents: set[int]) -> None:
+    """Every linked document must be one the user sees (Paperless mirrors the link there).
+
+    Raises:
+        NotFound: A document does not exist or is hidden from the user.
+    """
+    if not documents:
+        return
+    seen = await reader.get_document_titles(documents)
+    missing = sorted(documents - seen.keys())
+    if missing:
+        message = f"No document {missing[0]} exists that this user may see."
+        raise NotFound(message, hint="Take the id from a search_documents row.")

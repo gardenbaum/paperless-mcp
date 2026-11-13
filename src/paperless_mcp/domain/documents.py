@@ -9,6 +9,8 @@ from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from paperless_mcp.domain.tasks import TaskState, Wait
+
 type Include = Literal["notes", "history", "metadata", "versions", "suggestions"]
 type Ordering = Literal[
     "created",
@@ -111,6 +113,47 @@ class DocumentPatch(BaseModel):
                 message = f"{name} cannot be cleared"
                 raise ValueError(message)
         return self
+
+
+class DocumentUpload(BaseModel):
+    """A file with the metadata Paperless should give it, ids only; the port sends it as is.
+
+    Paperless applies the metadata when it consumes the file, so a field left out is decided by
+    its own rules (matching, workflows, the file name as the title).
+
+    Attributes:
+        filename: The name the file is uploaded under; Paperless keeps it as the original name.
+        mime_type: What the content is; the services have sniffed it, Paperless does so again.
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    filename: str
+    mime_type: str
+    content: bytes = Field(repr=False)
+    title: str | None = None
+    created: date | None = None
+    correspondent: int | None = None
+    document_type: int | None = None
+    storage_path: int | None = None
+    tags: tuple[int, ...] = ()
+    archive_serial_number: int | None = None
+    custom_fields: tuple[CustomFieldValue, ...] = ()
+
+
+class UploadMetadata(BaseModel):
+    """What a caller wants a new document to have, with names where Paperless wants ids."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    title: str | None = None
+    created: date | None = None
+    archive_serial_number: int | None = None
+    correspondent: NameOrId | None = None
+    document_type: NameOrId | None = None
+    storage_path: NameOrId | None = None
+    tags: tuple[NameOrId, ...] = ()
+    custom_fields: dict[str, JsonValue] = Field(default_factory=dict[str, JsonValue])
 
 
 type Clearable = Literal[
@@ -516,3 +559,44 @@ class Thumbnail(BaseModel):
 
     report: FileReport
     data: bytes
+
+
+type UploadState = TaskState | Literal["unknown"]
+
+
+class UploadResult(BaseModel):
+    """What an upload did: the file Paperless accepted and, if it was waited for, its outcome."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    task_id: Annotated[str, Field(description="Follow it with get_task; Paperless consumes later.")]
+    state: Annotated[
+        UploadState,
+        Field(
+            description=(
+                "pending, started, success, failure or revoked; unknown when the task could not "
+                "be read after the upload (e.g. this user may not view tasks): the upload was "
+                "accepted all the same."
+            )
+        ),
+    ]
+    message: Annotated[
+        str | None, Field(description="Why consumption failed, or why the state is unknown.")
+    ]
+    document_id: Annotated[
+        int | None, Field(description="The new document once consumption succeeded; else null.")
+    ]
+    web_url: Annotated[str | None, Field(description="Link to the new document, once known.")]
+    wait: Annotated[
+        Wait,
+        Field(
+            description=(
+                "not_requested: wait_seconds was 0; finished: consumption ended within the wait "
+                "(see state); timed_out: still running, ask get_task later."
+            )
+        ),
+    ]
+    waited_seconds: float
+    filename: Annotated[str, Field(description="The name the file was uploaded under.")]
+    mime_type: Annotated[str, Field(description="The type found in the content.")]
+    size_bytes: int

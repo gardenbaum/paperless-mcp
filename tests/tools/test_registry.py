@@ -36,7 +36,7 @@ pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-4")]
 # Default profile budget (design 6): the core and ai toolsets together.
 TOOL_BUDGET = 20
 # (tool, parameter) pairs that may take a server-side path: stdio-only uploads (decision-7).
-STDIO_PATH_PARAMETERS: frozenset[tuple[str, str]] = frozenset()
+STDIO_PATH_PARAMETERS: frozenset[tuple[str, str]] = frozenset({("upload_document", "path")})
 # JSON schema formats pydantic gives Path, FilePath and DirectoryPath. Filesystem paths must be
 # typed as such, so this check sees them.
 PATH_FORMATS = frozenset({"path", "file-path", "directory-path"})
@@ -119,12 +119,25 @@ def formats(schema: object) -> set[str]:
     return set()
 
 
-def path_parameters(tools: list[Tool]) -> list[str]:
+def path_parameters(
+    tools: list[Tool], allowed: frozenset[tuple[str, str]] = STDIO_PATH_PARAMETERS
+) -> list[str]:
+    """Path-typed parameters (`name.parameter`) that are not in `allowed`."""
     return [
         f"{t.name}.{name}"
         for t in tools
         for name, schema in cast("dict[str, object]", t.parameters.get("properties", {})).items()
-        if formats(schema) & PATH_FORMATS and (t.name, name) not in STDIO_PATH_PARAMETERS
+        if formats(schema) & PATH_FORMATS and (t.name, name) not in allowed
+    ]
+
+
+def stdio_only_parameters(tools: list[Tool]) -> list[str]:
+    """Parameters of the stdio-only allowlist (`name.parameter`) that these tools declare."""
+    return [
+        f"{t.name}.{name}"
+        for t in tools
+        for name in cast("dict[str, object]", t.parameters.get("properties", {}))
+        if (t.name, name) in STDIO_PATH_PARAMETERS
     ]
 
 
@@ -212,6 +225,39 @@ async def test_the_confirm_check_has_destructive_tools_to_check() -> None:
 @pytest.mark.decision("decision-7")
 async def test_no_tool_takes_a_filesystem_path_outside_the_stdio_allowlist() -> None:
     assert path_parameters(await server_tools()) == []
+
+
+@pytest.mark.decision("decision-7")
+async def test_no_path_parameter_is_in_a_schema_unless_stdio_runs_with_an_allowlist(
+    tmp_path: Path,
+) -> None:
+    fake = admin(ai_enabled=True)
+    everywhere = {
+        "http": serve(fake, toolsets=["all"]),
+        # The allowlist alone is not enough: HTTP never offers a path, whatever is configured.
+        "http with an allowlist": serve(fake, toolsets=["all"], upload_dirs=[str(tmp_path)]),
+        "stdio": serve(fake, toolsets=["all"], stdio=True),
+    }
+
+    for name, server in everywhere.items():
+        tools = list(await server.list_tools())
+        assert stdio_only_parameters(tools) == [], name
+        assert path_parameters(tools, frozenset()) == [], name
+        assert "upload_document" in {t.name for t in tools}, name
+
+
+@pytest.mark.decision("decision-7")
+async def test_the_path_parameter_exists_over_stdio_with_an_allowlist_and_is_allowlisted(
+    tmp_path: Path,
+) -> None:
+    server = serve(
+        admin(ai_enabled=True), toolsets=["all"], stdio=True, upload_dirs=[str(tmp_path)]
+    )
+    tools = list(await server.list_tools())
+
+    assert stdio_only_parameters(tools) == ["upload_document.path"]
+    assert path_parameters(tools) == []
+    assert path_parameters(tools, frozenset()) == ["upload_document.path"]
 
 
 @pytest.mark.decision("decision-11")
@@ -361,6 +407,32 @@ async def test_self_test_destructive_tools_without_a_false_confirm_are_found() -
 @pytest.mark.decision("decision-7")
 async def test_self_test_path_parameters_are_found() -> None:
     assert path_parameters(await offending_tools()) == ["bare.source"]
+
+
+@offenders.tool
+async def upload_document(path: Path | None = None) -> int:
+    """A stdio-only tool as the allowlist names it, here in the offenders' provider."""
+    return len(str(path))
+
+
+@pytest.mark.decision("decision-7")
+async def test_self_test_a_path_parameter_is_found_unless_it_is_allowlisted_by_tool_and_name() -> (
+    None
+):
+    tools = await offending_tools()
+    allowlisted = frozenset({("upload_document", "path")})
+
+    assert set(path_parameters(tools, frozenset())) == {"bare.source", "upload_document.path"}
+    assert path_parameters(tools, allowlisted) == ["bare.source"]
+    assert path_parameters(tools, frozenset({("other_tool", "path")})) == [
+        "bare.source",
+        "upload_document.path",
+    ]
+
+
+@pytest.mark.decision("decision-7")
+async def test_self_test_a_stdio_only_parameter_in_a_schema_is_found() -> None:
+    assert stdio_only_parameters(await offending_tools()) == ["upload_document.path"]
 
 
 async def test_self_test_tools_without_the_read_only_hint_are_found() -> None:

@@ -12,6 +12,9 @@ Deliberate deviations from the schema are listed below, each with its reason.
 import json
 import re
 from collections.abc import Callable, Mapping
+from datetime import datetime
+from email.parser import BytesParser
+from email.policy import default
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -25,6 +28,8 @@ from openapi_core.templating.paths.finders import APICallPathFinder
 from werkzeug.datastructures import Headers, ImmutableMultiDict
 
 if TYPE_CHECKING:
+    from email.message import MIMEPart
+
     from openapi_core.templating.datatypes import TemplateResult
 
 SCHEMA_PATH = Path(__file__).parents[2] / "docs" / "vendor" / "paperless" / "openapi.json"
@@ -42,6 +47,15 @@ UNDECLARED_QUERY_PARAMETERS: Mapping[tuple[str, str], Mapping[str, str]] = {
             "carries the whole OCR text (PLMCP-16)"
         ),
     },
+}
+# Multipart requests: (method, path template) -> reason. openapi-core reads every field of a form
+# as text and does not convert it to the declared type, so it fails integers; Paperless takes a
+# plain date for a `date-time` field. Their fields are checked by `_form_errors` instead: declared
+# names, required ones present, integers and date(-time)s that parse.
+FORM_REQUESTS: Mapping[tuple[str, str], str] = {
+    ("POST", "/api/documents/post_document/"): (
+        "form values are text, and `created` accepts a plain date (PLMCP-18)"
+    ),
 }
 # Responses whose body the generated schema describes wrongly: (method, path template, status) ->
 # reason. Their bodies are not checked; the live contract suite (tests/contract) checks the
@@ -163,7 +177,9 @@ type Json = dict[str, object]
 # the annotation of `spec_validator_cls` omits None.
 _CONFIG = Config(spec_validator_cls=None)  # pyright: ignore[reportArgumentType] -- see above
 _OPENAPI = OpenAPI.from_file_path(str(SCHEMA_PATH), config=_CONFIG)
-_PATHS = cast("dict[str, Json]", json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))["paths"])
+_DOCUMENT = cast("Json", json.loads(SCHEMA_PATH.read_text(encoding="utf-8")))
+_PATHS = cast("dict[str, Json]", _DOCUMENT["paths"])
+_SCHEMAS = cast("dict[str, Json]", cast("Json", _DOCUMENT["components"])["schemas"])
 
 
 class SchemaViolationError(AssertionError):
@@ -287,8 +303,73 @@ def _narrowed(request: httpx2.Request) -> bytes | None:
     return json.dumps(body).encode()
 
 
+def _field_problems(name: str, part: MIMEPart, kind: Json) -> list[str]:
+    """What is wrong with one part of a form, against its property of the form schema."""
+    is_file = part.get_filename() is not None
+    problems = ["document is not a file part"] if name == "document" and not is_file else []
+    text = "" if is_file else cast("str", part.get_content())
+    if not is_file and len(text) < cast("int", kind.get("minLength", 0)):
+        problems.append(f"{name} is shorter than {kind['minLength']}")
+    if name == "custom_fields":  # untyped in the schema; Paperless parses it as JSON
+        try:
+            _ = cast("object", json.loads(text))
+        except ValueError:
+            problems.append("custom_fields is not valid JSON")
+    items = cast("Json", kind.get("items", kind))
+    try:
+        if items.get("type") == "integer":
+            number = int(text)
+            low, high = items.get("minimum", number), items.get("maximum", number)
+            if not low <= number <= high:  # pyright: ignore[reportOperatorIssue] -- JSON numbers
+                problems.append(f"{name} is out of range")
+        if kind.get("format") == "date-time":
+            _ = datetime.fromisoformat(text)
+    except ValueError:
+        problems.append(f"{name}={text!r} is not valid for its type")
+    return problems
+
+
+def _form_errors(request: httpx2.Request, template: str) -> list[str]:
+    """What is wrong with the fields of a multipart request, against its form schema."""
+    operation = cast("Json", _PATHS[template][request.method.lower()])
+    body = cast("Json", cast("Json", operation["requestBody"])["content"])
+    reference = str(cast("Json", cast("Json", body["multipart/form-data"])["schema"])["$ref"])
+    schema = _SCHEMAS[reference.rsplit("/", 1)[-1]]
+    properties = cast("dict[str, Json]", schema["properties"])
+    problems: list[str] = []
+    header = f"Content-Type: {request.headers.get('Content-Type', '')}\r\n\r\n".encode()
+    message = BytesParser(policy=default).parsebytes(header + request.content)
+    if not message.is_multipart():
+        return ["the body is not multipart/form-data"]
+    sent = [
+        (str(p.get_param("name", header="content-disposition")), p) for p in message.iter_parts()
+    ]
+    names = [name for name, _ in sent]
+    if "Authorization" not in request.headers:
+        problems.append("no credentials")
+    problems += [f"undeclared field {name!r}" for name in names if name not in properties]
+    problems += [
+        f"missing field {name!r}"
+        for name in cast("list[str]", schema.get("required", []))
+        if name not in names
+    ]
+    for name, part in sent:
+        problems += _field_problems(name, part, properties.get(name, {}))
+    return problems
+
+
 def check_request(request: httpx2.Request) -> None:
     """Raise `SchemaViolationError` unless the request matches an operation of the schema."""
+    try:
+        template = _template(request)
+    except PathError:  # no such operation: openapi-core reports it below
+        template = ""
+    if (request.method, template) in FORM_REQUESTS:
+        if problems := _form_errors(request, template):
+            where = f"{request.method} {request.url.path}: form does not match the schema"
+            message = f"{where}: {'; '.join(problems)}"
+            raise SchemaViolationError(message)
+        return
     errors = list(_OPENAPI.iter_request_errors(_Request(request, _narrowed(request))))
     if errors:
         raise _fail(request, "request does not match the schema", errors)
