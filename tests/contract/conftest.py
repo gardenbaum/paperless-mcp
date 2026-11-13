@@ -63,6 +63,15 @@ if TYPE_CHECKING:
 
 # Every tag a contract test creates starts with this; the live backend deletes them again.
 SCRATCH_TAG = "contract-tag-"
+# The same for every other kind of taxonomy object (and tags that are not about tags as such).
+SCRATCH_ITEM = "contract-item-"
+SCRATCH_PATHS = (
+    "/api/tags/",
+    "/api/correspondents/",
+    "/api/document_types/",
+    "/api/storage_paths/",
+    "/api/custom_fields/",
+)
 
 
 @dataclass(frozen=True)
@@ -327,6 +336,18 @@ def live_restricted(
     return restricted
 
 
+def cleanup(stack: Stack, documents: list[int], users: list[int]) -> None:
+    """Delete what a live test made: documents, users and scratch objects (SCRATCH_*)."""
+    delete_and_empty_trash(stack, documents)
+    for user in users:
+        _ = stack.admin.delete(f"/api/users/{user}/")
+    for path in SCRATCH_PATHS:
+        for prefix in (SCRATCH_TAG, SCRATCH_ITEM):
+            found = stack.admin.get(path, params={"name__istartswith": prefix})
+            for row in results(found):
+                _ = stack.admin.delete(f"{path}{row['id']}/")
+
+
 @contextlib.asynccontextmanager
 async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
     """The adapter on the live stack; documents a test uploads are deleted when it ends."""
@@ -388,13 +409,7 @@ async def live_backend(stack: Stack) -> AsyncGenerator[Backend]:
                 expected_version=EXPECTED_VERSION,
             )
     finally:
-        delete_and_empty_trash(stack, created)
-        for user in users:
-            _ = stack.admin.delete(f"/api/users/{user}/")
-        # Tags the contract tests created (they all start with SCRATCH_TAG).
-        found = stack.admin.get("/api/tags/", params={"name__istartswith": SCRATCH_TAG})
-        for row in results(found):
-            _ = stack.admin.delete(f"/api/tags/{row['id']}/")
+        cleanup(stack, created, users)
 
 
 @pytest.fixture(params=["fake", pytest.param("live", marks=pytest.mark.e2e)])

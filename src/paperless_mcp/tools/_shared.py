@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from paperless_mcp.services.removal import DocumentRemoval
     from paperless_mcp.services.tasks import TaskService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
+    from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
 
 # Every toolset; each tool carries exactly one of them as its only tag.
 TOOLSETS: Final = frozenset({"core", "ai"})
@@ -57,6 +58,9 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "delete_document": "core",
     "ask_paperless_ai": "ai",
     "get_ai_suggestions": "ai",
+    "create_taxonomy_item": "core",
+    "update_taxonomy_item": "core",
+    "delete_taxonomy_item": "core",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
@@ -163,6 +167,30 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=True,
         open_world_hint=True,
     ),
+    # Not destructive (decision-14): it never drops what the caller did not name; removing select
+    # options, the one lossy change, needs confirm like update_document's owner change.
+    "update_taxonomy_item": ToolAnnotations(
+        title="Update taxonomy item",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "create_taxonomy_item": ToolAnnotations(
+        title="Create taxonomy item",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6, decision-14): no trash for taxonomy, a tag takes its child tags.
+    "delete_taxonomy_item": ToolAnnotations(
+        title="Delete taxonomy item",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
 }
 
 logger = logging.getLogger(__name__)
@@ -189,6 +217,7 @@ class Services:
 
     instance: InstanceService
     taxonomy: TaxonomyResolver
+    taxonomy_edits: TaxonomyEditor
     documents: DocumentService
     files: FileService
     edits: DocumentEditor

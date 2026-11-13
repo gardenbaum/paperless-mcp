@@ -38,7 +38,16 @@ from paperless_mcp.domain.documents import (
 )
 from paperless_mcp.domain.instance import InstanceOverview
 from paperless_mcp.domain.tasks import TaskReport
-from paperless_mcp.domain.taxonomy import TaxonomyKind, TaxonomyListing
+from paperless_mcp.domain.taxonomy import (
+    DataType,
+    MatchingAlgorithm,
+    TaxonomyDeletion,
+    TaxonomyDetail,
+    TaxonomyKind,
+    TaxonomyListing,
+    WritableKind,
+)
+from paperless_mcp.domain.taxonomy_edits import TaxonomyCreate, TaxonomyEdit
 from paperless_mcp.services.documents import DEFAULT_SLICE, HISTORY_LIMIT
 from paperless_mcp.services.notes import MAX_NOTE_CHARS
 from paperless_mcp.services.tasks import MAX_WAIT_SECONDS
@@ -61,6 +70,52 @@ type SliceSize = Annotated[
     Field(ge=1, le=MAX_SLICE, description=f"Characters to return, at most {MAX_SLICE}."),
 ]
 type Day = Annotated[date | None, Field(description="Date (YYYY-MM-DD), inclusive.")]
+type Kind = Annotated[
+    WritableKind,
+    Field(description="What to work on; it decides which of the other settings apply."),
+]
+type Item = Annotated[NameOrId, Field(description="Name or id; see list_taxonomy.")]
+type Algorithm = Annotated[
+    MatchingAlgorithm | None,
+    Field(
+        description=(
+            "Tags, correspondents, document types, storage paths: how Paperless assigns it to "
+            "new documents by itself. none: never (the default when creating); any or all: "
+            "any or all of the words in match; literal: the exact phrase; regex: a regular "
+            "expression; fuzzy: similar words; auto: learned from your documents."
+        )
+    ),
+]
+type Match = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Tags, correspondents, document types, storage paths: the words, phrase or regular "
+            "expression the matching algorithm uses."
+        )
+    ),
+]
+type CaseInsensitive = Annotated[
+    bool | None,
+    Field(description="Tags, correspondents, document types, storage paths: ignore case."),
+]
+type Colour = Annotated[str | None, Field(description="Tags: the colour as #rrggbb.")]
+type ParentTag = Annotated[
+    NameOrId | None, Field(description="Tags: name or id of the parent tag; see list_taxonomy.")
+]
+type InboxTag = Annotated[
+    bool | None, Field(description="Tags: whether documents with it count as inbox documents.")
+]
+type PathTemplate = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Storage paths: the folder template for stored files, e.g. "
+            "'{{ created_year }}/{{ correspondent }}/{{ title }}'. Paperless refuses unknown "
+            "variables."
+        )
+    ),
+]
 
 provider = LocalProvider()
 
@@ -104,6 +159,145 @@ async def list_taxonomy(
         truncated=len(rows) > LIST_LIMIT,
         items=tuple(rows[:LIST_LIMIT]),
     )
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["create_taxonomy_item"])
+@boundary
+async def create_taxonomy_item(  # noqa: PLR0913 -- one parameter per setting, described for the LLM
+    ctx: Context,
+    kind: Kind,
+    name: Annotated[str, Field(description="The new name, 1 to 128 characters, unique for you.")],
+    *,
+    matching_algorithm: Algorithm = None,
+    match: Match = None,
+    case_insensitive: CaseInsensitive = None,
+    colour: Colour = None,
+    parent: ParentTag = None,
+    is_inbox_tag: InboxTag = None,
+    path: PathTemplate = None,
+    data_type: Annotated[
+        DataType | None,
+        Field(
+            description="Custom fields (required): what the field holds; it cannot change later."
+        ),
+    ] = None,
+    select_options: Annotated[
+        list[str] | None,
+        Field(description="Custom fields of data_type select (required): the option labels."),
+    ] = None,
+) -> TaxonomyDetail:
+    """Create a tag, correspondent, document type, storage path or custom field.
+
+    The kind decides which settings apply; a setting of another kind is an error. A storage
+    path needs path, a custom field needs data_type, and a select field needs select_options.
+    The new object matches nothing automatically unless matching_algorithm says so. Tags,
+    correspondents, document types and storage paths belong to you: other Paperless users do
+    not see them until they are shared, and their names are unique per kind and owner. Custom
+    fields have no owner and are visible to everyone, so their names are unique across all
+    users. Returns the object as it was stored, with the ids of select options.
+    """
+    fields = TaxonomyCreate(
+        name=name,
+        matching_algorithm=matching_algorithm,
+        match=match,
+        case_insensitive=case_insensitive,
+        colour=colour,
+        parent=parent,
+        is_inbox_tag=is_inbox_tag,
+        path=path,
+        data_type=data_type,
+        select_options=tuple(select_options or ()),
+    )
+    return await services(ctx).taxonomy_edits.create(kind, fields)
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["update_taxonomy_item"])
+@boundary
+async def update_taxonomy_item(  # noqa: PLR0913 -- one parameter per setting, described for the LLM
+    ctx: Context,
+    kind: Kind,
+    item: Item,
+    *,
+    name: Annotated[str | None, Field(description="New name, 1 to 128 characters.")] = None,
+    matching_algorithm: Algorithm = None,
+    match: Match = None,
+    case_insensitive: CaseInsensitive = None,
+    colour: Colour = None,
+    parent: ParentTag = None,
+    clear_parent: Annotated[
+        bool, Field(description="Tags: make the tag a top-level tag (not with parent).")
+    ] = False,
+    is_inbox_tag: InboxTag = None,
+    path: PathTemplate = None,
+    select_options_add: Annotated[
+        list[str] | None, Field(description="Select fields: labels of options to add.")
+    ] = None,
+    select_options_rename: Annotated[
+        dict[str, str] | None,
+        Field(description="Select fields: option label (or id) to its new label."),
+    ] = None,
+    select_options_remove: Annotated[
+        list[str] | None,
+        Field(description="Select fields: labels (or ids) of options to remove; needs confirm."),
+    ] = None,
+    confirm: Annotated[
+        bool,
+        Field(
+            description=(
+                "Required to remove select options: documents that hold a removed option keep a "
+                "value that is no longer one of the field's options."
+            )
+        ),
+    ] = False,
+) -> TaxonomyDetail:
+    """Change a tag, correspondent, document type, storage path or custom field.
+
+    Only the settings you name change. The kind decides which settings apply. Select options
+    are added, renamed or removed one by one and the others keep their ids, so documents keep
+    their values; renaming an option changes its label for every document. The data type of a
+    custom field cannot change (create a new field instead). A tag cannot become its own
+    ancestor. Returns the object as stored, with the number of documents that use it.
+    """
+    edit = TaxonomyEdit(
+        name=name,
+        matching_algorithm=matching_algorithm,
+        match=match,
+        case_insensitive=case_insensitive,
+        colour=colour,
+        parent=parent,
+        clear_parent=clear_parent,
+        is_inbox_tag=is_inbox_tag,
+        path=path,
+        options_add=tuple(select_options_add or ()),
+        options_rename=select_options_rename or {},
+        options_remove=tuple(select_options_remove or ()),
+        confirm=confirm,
+    )
+    return await services(ctx).taxonomy_edits.update(kind, item, edit)
+
+
+@provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["delete_taxonomy_item"])
+@boundary
+async def delete_taxonomy_item(
+    ctx: Context,
+    kind: Kind,
+    item: Item,
+    *,
+    confirm: Annotated[
+        bool,
+        Field(
+            description="true to delete; without it nothing is deleted and the effect is explained."
+        ),
+    ] = False,
+) -> TaxonomyDeletion:
+    """Delete a tag, correspondent, document type, storage path or custom field for good.
+
+    There is no trash for these: the documents stay but lose the tag, correspondent, type, path
+    or field value, and deleting a tag also deletes its child tags. Call it first without
+    confirm: it deletes nothing and returns the effect (documents affected, child tags that go
+    with it); call it again with confirm=true to delete.
+    """
+    return await services(ctx).taxonomy_edits.delete(kind, item, confirm=confirm)
 
 
 @provider.tool(tags={TOOLSET}, annotations=ANNOTATIONS["search_documents"])

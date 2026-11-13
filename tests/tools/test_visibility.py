@@ -119,7 +119,11 @@ async def test_read_only_mode_offers_only_tools_with_the_read_only_hint() -> Non
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"], read_only=True)
 
     # The tools of core that change data are hidden in read-only mode.
-    writing = {"update_document", "add_note", "delete_note", "delete_document"}
+    writing = {"update_document", "add_note", "delete_note", "delete_document"} | {
+        "create_taxonomy_item",
+        "update_taxonomy_item",
+        "delete_taxonomy_item",
+    }
     expected = (CORE - writing) | SHIPPED_AI | {"ask_something", "bulk_preview"}
     assert await names(server) == expected
 

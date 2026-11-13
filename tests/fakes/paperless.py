@@ -19,7 +19,7 @@ write its contract tests.
 
 import functools
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime
 from pathlib import PurePath
 from typing import TYPE_CHECKING, Concatenate, cast
@@ -39,6 +39,7 @@ from fakes.accounts import (
 )
 from fakes.custom_field_query import compile_query
 from fakes.document_values import coerce, reject, tag_closure
+from fakes.taxonomy_rules import check_colour, check_match, check_name, check_path, with_ids
 from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer, ChatSource
 from paperless_mcp.domain.documents import (
     CustomFieldValue,
@@ -63,19 +64,24 @@ from paperless_mcp.domain.instance import (
     SystemStatus,
 )
 from paperless_mcp.domain.tasks import TaskState, TaskStatus
-from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyItem
+from paperless_mcp.domain.taxonomy import SelectOption, TaxonomyDetail, TaxonomyItem
 from paperless_mcp.paperless.documents import beyond_last_page, unseen_document, unseen_note
 from paperless_mcp.paperless.errors import ai_disabled
 from paperless_mcp.paperless.tasks import not_found
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection
+    from collections.abc import Callable, Collection, Sequence
     from types import CoroutineType
 
     from _typeshed import SupportsRichComparison
 
     from paperless_mcp.domain.documents import FileVersion
-    from paperless_mcp.domain.taxonomy import TaxonomyKind
+    from paperless_mcp.domain.taxonomy import (
+        MatchingAlgorithm,
+        TaxonomyKind,
+        TaxonomyValues,
+        WritableKind,
+    )
 
 # Paperless's max_length of document titles and tag names.
 MAX_TITLE = 128
@@ -158,9 +164,15 @@ class Owned:
 
 @dataclass(kw_only=True)
 class FakeTaxonomy(Owned):
-    """A correspondent, document type, storage path or saved view."""
+    """A correspondent, document type, storage path or saved view.
+
+    Matching is Paperless's default for a new object made by hand (any word, nothing to match).
+    """
 
     name: str
+    matching_algorithm: MatchingAlgorithm = "any"
+    match: str = ""
+    case_insensitive: bool = True
 
 
 @dataclass(kw_only=True)
@@ -170,6 +182,13 @@ class FakeTag(FakeTaxonomy):
     is_inbox: bool = False
     colour: str = "#a6cee3"
     parent: int | None = None
+
+
+@dataclass(kw_only=True)
+class FakeStoragePath(FakeTaxonomy):
+    """A storage path with its template."""
+
+    path: str = "{{ title }}"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -299,7 +318,7 @@ class FakeState:
     tags: list[FakeTag] = field(default_factory=list[FakeTag])
     correspondents: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
     document_types: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
-    storage_paths: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
+    storage_paths: list[FakeStoragePath] = field(default_factory=list[FakeStoragePath])
     custom_fields: list[FakeCustomField] = field(default_factory=list[FakeCustomField])
     saved_views: list[FakeTaxonomy] = field(default_factory=list[FakeTaxonomy])
     groups: list[FakeGroup] = field(default_factory=list[FakeGroup])
@@ -395,7 +414,9 @@ def seeded() -> FakeState:
         ],
         correspondents=[FakeTaxonomy(id=1, name="e2e-acme")],
         document_types=[FakeTaxonomy(id=1, name="e2e-invoice")],
-        storage_paths=[FakeTaxonomy(id=1, name="e2e-archive")],
+        storage_paths=[
+            FakeStoragePath(id=1, name="e2e-archive", path="e2e/{{ created_year }}/{{ title }}")
+        ],
         custom_fields=fields,
         saved_views=[FakeTaxonomy(id=1, name="e2e-view", owner=admin.id)],
         groups=[FakeGroup(id=1, name="e2e-group")],
@@ -562,7 +583,7 @@ class FakePaperless:
             ]
 
         def owned(
-            objects: list[FakeTaxonomy], link: Callable[[FakeDocument], int | None]
+            objects: Sequence[FakeTaxonomy], link: Callable[[FakeDocument], int | None]
         ) -> Callable[[], list[TaxonomyItem]]:
             return lambda: [
                 TaxonomyItem(
@@ -905,6 +926,230 @@ class FakePaperless:
             raise PermissionDenied(message)
         self.state.documents.remove(document)
         self.state.trash.append(document)
+
+    def _owned(self, kind: WritableKind) -> list[FakeTaxonomy]:
+        """The objects of a kind with owners (everything but custom fields)."""
+        state = self.state
+        return cast(
+            "list[FakeTaxonomy]",
+            {
+                "tag": state.tags,
+                "correspondent": state.correspondents,
+                "document_type": state.document_types,
+                "storage_path": state.storage_paths,
+            }[kind],
+        )
+
+    def _allowed(self, action: str, kind: WritableKind) -> None:
+        """The global permission of an action on a kind: `add_tag`, `change_documenttype`, ..."""
+        model = kind.replace("_", "")
+        if not self.user.has(f"{action}_{model}"):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+
+    def _target(self, kind: WritableKind, item_id: int) -> FakeTaxonomy | FakeCustomField:
+        """The object among those the user may see (`NotFound` otherwise), then may change."""
+        if kind == "custom_field":
+            found = [f for f in self.state.custom_fields if f.id == item_id]
+        else:
+            found = [o for o in self._owned(kind) if o.id == item_id and o.visible_to(self.user)]
+        if not found:
+            message = "The Paperless object does not exist or is not visible to this user."
+            raise NotFound(message)
+        if not isinstance(found[0], FakeCustomField) and not self.user.may_change_object(found[0]):
+            message = "The Paperless user may not perform this action."
+            raise PermissionDenied(message)
+        return found[0]
+
+    def _detail(self, kind: WritableKind, item_id: int) -> TaxonomyDetail:
+        """The object as a write answers it: the list row plus the matching rule."""
+        [row] = [r for r in self._rows(kind) if r.id == item_id]
+        extras: dict[str, object] = {}
+        if kind != "custom_field":
+            [obj] = [o for o in self._owned(kind) if o.id == item_id]
+            extras = {
+                "matching_algorithm": obj.matching_algorithm,
+                "match": obj.match,
+                "case_insensitive": obj.case_insensitive,
+            }
+            if isinstance(obj, FakeTag):
+                extras["is_inbox_tag"] = obj.is_inbox
+            if isinstance(obj, FakeStoragePath):
+                extras["path"] = obj.path
+        return TaxonomyDetail.model_validate({**row.model_dump(), **extras})
+
+    def _apply(self, obj: FakeTaxonomy, values: TaxonomyValues, *, creating: bool) -> None:
+        """Set what `values` sets on `obj`, validated like the serializers (3.4.2)."""
+        sent = values.model_fields_set
+        if {"matching_algorithm", "match"} & sent:
+            algorithm = values.matching_algorithm or obj.matching_algorithm
+            check_match(algorithm, obj.match if values.match is None else values.match)
+        if values.matching_algorithm is not None:
+            obj.matching_algorithm = values.matching_algorithm
+        if values.match is not None:
+            obj.match = values.match
+        if values.case_insensitive is not None:
+            obj.case_insensitive = values.case_insensitive
+        if isinstance(obj, FakeTag):
+            self._apply_tag(obj, values)
+        if isinstance(obj, FakeStoragePath):
+            if values.path is None and creating:
+                reject("path", "This field is required.")
+            if values.path is not None:
+                check_path(values.path)
+                obj.path = values.path
+
+    def _apply_tag(self, tag: FakeTag, values: TaxonomyValues) -> None:
+        if values.colour is not None:
+            check_colour(values.colour)
+            tag.colour = values.colour
+        if values.is_inbox_tag is not None:
+            tag.is_inbox = values.is_inbox_tag
+        if "parent" not in values.model_fields_set:
+            return
+        parent = values.parent
+        if parent is not None:
+            if parent == tag.id:
+                reject("parent", "Cannot set itself as parent.")
+            if parent not in {t.id for t in self.state.tags}:
+                reject("parent", f'Invalid pk "{parent}" - object does not exist.')
+            if parent in self._tag_tree(tag.id) - {tag.id}:
+                reject("parent", "Cannot set parent to a descendant.")
+        tag.parent = parent
+
+    def _tag_tree(self, root: int) -> set[int]:
+        """The tag and every tag below it."""
+        found = {root}
+        grew = True
+        while grew:
+            below = {t.id for t in self.state.tags if t.parent in found}
+            grew = not below <= found
+            found |= below
+        return found
+
+    @write
+    async def create_taxonomy_item(
+        self, kind: WritableKind, name: str, values: TaxonomyValues
+    ) -> TaxonomyDetail:
+        """`TaxonomyWriter.create_taxonomy_item` (the viewsets' create): owned by the creator.
+
+        Raises:
+            PermissionDenied: The user lacks the global add permission of the kind.
+            Validation: Paperless's 400 for a value, with its message.
+        """
+        self._allowed("add", kind)
+        name = check_name(name)
+        if kind == "custom_field":
+            return self._create_field(name, values)
+        objects = self._owned(kind)
+        if any(o.name == name and o.owner == self.user.id for o in objects):
+            reject("error", "Object violates owner / name unique constraint")
+        number = max((o.id for o in objects), default=0) + 1
+        made = {"tag": FakeTag, "storage_path": FakeStoragePath}.get(kind, FakeTaxonomy)
+        obj = made(id=number, name=name, owner=self.user.id, matching_algorithm="none")
+        self._apply(obj, values, creating=True)
+        objects.append(obj)
+        return self._detail(kind, number)
+
+    def _create_field(self, name: str, values: TaxonomyValues) -> TaxonomyDetail:
+        if values.data_type is None:
+            reject("data_type", "This field is required.")
+        if any(f.name == name for f in self.state.custom_fields):
+            reject("name", "custom field with this name already exists.")
+        options = self._options(values.data_type, values)
+        number = max((f.id for f in self.state.custom_fields), default=0) + 1
+        self.state.custom_fields.append(
+            FakeCustomField(
+                id=number, name=name, data_type=values.data_type, select_options=options
+            )
+        )
+        return self._detail("custom_field", number)
+
+    @staticmethod
+    def _options(data_type: str, values: TaxonomyValues) -> tuple[SelectOption, ...]:
+        """The options a select field stores; a select field needs at least one."""
+        if data_type != "select":
+            return ()
+        if not values.select_options:
+            reject("error", "extra_data.select_options must be a valid list")
+        return with_ids(values.select_options)
+
+    @write
+    async def update_taxonomy_item(
+        self, kind: WritableKind, item_id: int, values: TaxonomyValues
+    ) -> TaxonomyDetail:
+        """`TaxonomyWriter.update_taxonomy_item` (the taxonomy viewsets' partial_update).
+
+        Order in Paperless 3.4.2: the global change permission (403), the object among those
+        the user may see (404), the object permission (403), then the values (400). A select
+        field PATCHed without options is a 400 in Paperless; the adapter sends them along, so
+        the fake keeps them when `values` leaves them out.
+
+        Raises:
+            NotFound: No such object, or the user may not see it.
+            PermissionDenied: The user may not change objects of the kind, or this one.
+            Validation: Paperless's 400 for a value, with its message.
+        """
+        self._allowed("change", kind)
+        target = self._target(kind, item_id)
+        if isinstance(target, FakeCustomField):
+            self._update_field(target, values)
+            return self._detail(kind, item_id)
+        name = target.name
+        if values.name is not None:
+            name = check_name(values.name)
+            clash = (o for o in self._owned(kind) if o.name == name and o.owner == target.owner)
+            if any(o is not target for o in clash):
+                reject("non_field_errors", "The fields name, owner must make a unique set.")
+        self._apply(target, values, creating=False)
+        target.name = name
+        return self._detail(kind, item_id)
+
+    def _update_field(self, field: FakeCustomField, values: TaxonomyValues) -> None:
+        name = field.name if values.name is None else check_name(values.name)
+        if any(f.name == name and f.id != field.id for f in self.state.custom_fields):
+            reject("name", "custom field with this name already exists.")
+        data_type = values.data_type or field.data_type
+        options = field.select_options
+        if values.select_options is not None or data_type != field.data_type:
+            options = self._options(data_type, values)
+        fields = self.state.custom_fields
+        fields[fields.index(field)] = replace(
+            field, name=name, data_type=data_type, select_options=options
+        )
+
+    @write
+    async def delete_taxonomy_item(self, kind: WritableKind, item_id: int) -> None:
+        """`TaxonomyWriter.delete_taxonomy_item` (the taxonomy viewsets' destroy).
+
+        Documents lose what refers to the object; a tag takes its descendants with it.
+
+        Raises:
+            NotFound: No such object, or the user may not see it.
+            PermissionDenied: The user may not delete objects of the kind, or this one.
+        """
+        self._allowed("delete", kind)
+        _ = self._target(kind, item_id)
+        state = self.state
+        if kind == "custom_field":
+            state.custom_fields[:] = [f for f in state.custom_fields if f.id != item_id]
+            for document in state.documents:
+                _ = document.custom_fields.pop(item_id, None)
+            return
+        if kind == "tag":
+            gone = self._tag_tree(item_id)
+            state.tags[:] = [t for t in state.tags if t.id not in gone]
+            for document in state.documents:
+                document.tags = [t for t in document.tags if t not in gone]
+            return
+        self._owned(kind)[:] = [o for o in self._owned(kind) if o.id != item_id]
+        for document in state.documents:
+            if kind == "correspondent" and document.correspondent == item_id:
+                document.correspondent = None
+            if kind == "document_type" and document.document_type == item_id:
+                document.document_type = None
+            if kind == "storage_path" and document.storage_path == item_id:
+                document.storage_path = None
 
     async def get_document_content(self, document_id: int) -> str:
         """`DocumentReader.get_document_content` (retrieve with `fields=content`)."""
