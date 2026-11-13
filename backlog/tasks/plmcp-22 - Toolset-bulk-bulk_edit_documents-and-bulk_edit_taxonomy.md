@@ -1,11 +1,11 @@
 ---
 id: PLMCP-22
 title: 'Toolset bulk: bulk_edit_documents and bulk_edit_taxonomy'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:26:00Z'
-updated_date: '2026-11-13T03:45:00Z'
+updated_date: '2026-11-13T04:07:00Z'
 labels: []
 milestone: m-3
 dependencies:
@@ -25,19 +25,19 @@ Re-filing many documents at once is a common need. One wrong bulk call can damag
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 bulk_edit_documents offers typed operations (tags add/remove/modify, correspondent, document type, storage path, custom fields, delete, reprocess) instead of an untyped parameter dict
-- [ ] #2 dry_run returns the affected count and a sample without changing anything; execution requires confirm
-- [ ] #3 bulk_edit_taxonomy supports delete and permissions for taxonomy items, with confirm
-- [ ] #4 Custom-field bulk changes keep other fields (merge semantics as in update_document)
-- [ ] #5 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
-- [ ] #6 FakePaperless and the contract suite cover every new port method
+- [x] #1 bulk_edit_documents offers typed operations (tags add/remove/modify, correspondent, document type, storage path, custom fields, delete, reprocess) instead of an untyped parameter dict
+- [x] #2 dry_run returns the affected count and a sample without changing anything; execution requires confirm
+- [x] #3 bulk_edit_taxonomy supports delete and permissions for taxonomy items, with confirm
+- [x] #4 Custom-field bulk changes keep other fields (merge semantics as in update_document)
+- [x] #5 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
+- [x] #6 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Tests written first (red, then green) at every test level the change touches
+- [x] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -63,3 +63,9 @@ Gates on the final tree: just check exit 0 (1612 tests, branch coverage over 99 
 
 Review fix round 1 (all red first, then green). I1: _tag_effects no longer raises KeyError for a tag the user cannot see; it is labelled '#N (a tag you cannot see)'. I2, verified in the 3.4.2 source and live (this corrected my first assumption that bulk bypasses permissions): the value serializer of bulk modify_custom_fields checks CHANGE permission on every linked document (restricted user linking to a view-only document -> 403, also live contract test), so the service now reads the linked documents (visible AND changeable, else NotFound/PermissionDenied naming them) and the fake enforces it. Mirroring: setting a link list adds the reverse link on the targets but does NOT remove it from old targets (the field is rewritten before reflect_doclinks compares; pinned by a live contract test), removing the field does remove the reverse links. The preview and refusal name the not-selected documents that change ('and, because document links are mirrored, also changes N documents that are not selected (...)'), the report has also_changed, and the tool text says so. I3: DocumentHit.user_can_change (FIELDS now asks for it; list endpoint supports it, live contract test: owner/change grant True, view-only False; object level only, the global change permission stays invisible). dry_run reports blocked documents and says Paperless would refuse; execution refuses with PermissionDenied before sending, without needing confirm, naming the blocking documents. Only changing documents count (a view-only document that already is as asked does not block). Delete ownership is not visible in a hit, so a delete refusal still comes from Paperless. M1 sentence about child tags the user cannot see in preview/refusal; M2 modify_tags adding a child while removing its parent is refused regardless of documents; M3 merge description reworded and contract test that an owner-only change keeps grants (live too); M4 principals are resolved via the resolver (id existence, same-name hint), raw id only on PermissionDenied; M5 docstring. Fake: FakeUser.may_change_object unchanged (delete ownership), search hits use Owned.changeable_by. Rebased onto origin/main (79384ce, PLMCP-18): conflicts only in README, server.py, tools/_shared.py and mutation-equivalents.toml (both sides kept). Mutation equivalents: the _document_ids entry is gone (its mutant is killed now), the two httpx2 'post' entries remain; score 100.0 %. Surface snapshot: tools/bulk description and report schema changes only (own tools).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adds the opt-in bulk toolset (core,bulk or all; default profile and budget unchanged; hidden in read-only mode). bulk_edit_documents takes 1-100 explicit ids and a typed operation (add/remove/modify tags, correspondent, document type, storage path, custom fields, delete to trash, reprocess); it reads the selection in one id__in search (missing/hidden ids are NotFound before any write), skips documents already as asked, previews with dry_run (counts, sample with web_url, documents changed through link mirroring, documents the user cannot change), refuses before sending when a document that would change is not changeable, and executes only with confirm. Tags follow the hierarchy rules of update_document (ancestors added, parent removal with a remaining child refused, child-plus-parent contradictions refused, hidden tags labelled). Custom fields are sent only in Paperless's dict form so other fields stay; linked documents must be visible and changeable. bulk_edit_taxonomy deletes (naming affected documents and child tags) or sets owner/view/change grants by name or id on tags, correspondents, document types and storage paths, refusing contradictory owner/merge input. Caches are invalidated on every write path. Live-verified 3.4.2 semantics are in the notes (all-or-nothing validation, change implies view, merge never removes an owner, link mirroring adds but does not remove reverse links on overwrite). Gates: just check, just mutation 100 % (two httpx2 method-casing equivalents), full e2e 364 passed. Deliberate changes: surface snapshot for profile all only, two schema-guard deviation entries for the plain-text 403, synthetic toolset in test_visibility renamed from bulk to pdf.
+<!-- SECTION:FINAL_SUMMARY:END -->
