@@ -484,23 +484,23 @@ function_hash = "3421113ae662"
 reason = "httpx2 upper-cases the method when it builds the request, so \"post\" goes out as POST; the client reads only the built request's method."
 
 [[equivalent]]
-mutant = "paperless_mcp.services.filter_rules.x__json__mutmut_10"
-function_hash = "41d43766d8ce"
-reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
-
-[[equivalent]]
-mutant = "paperless_mcp.services.filter_rules.x__json__mutmut_14"
-function_hash = "41d43766d8ce"
+mutant = "paperless_mcp.services.filter_rules.x__json__mutmut_11"
+function_hash = "40d2ee714ca0"
 reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
 
 [[equivalent]]
 mutant = "paperless_mcp.services.filter_rules.x__json__mutmut_15"
-function_hash = "41d43766d8ce"
+function_hash = "40d2ee714ca0"
 reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
 
 [[equivalent]]
 mutant = "paperless_mcp.services.filter_rules.x__json__mutmut_16"
-function_hash = "41d43766d8ce"
+function_hash = "40d2ee714ca0"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.filter_rules.x__json__mutmut_17"
+function_hash = "40d2ee714ca0"
 reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
 
 [[equivalent]]

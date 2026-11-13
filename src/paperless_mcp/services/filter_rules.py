@@ -179,9 +179,14 @@ def _json(number: int, value: str | None) -> JsonValue:
     if value is None:
         raise _bad(number, "needs a value.", EDIT_HINT)
     try:
-        return cast("JsonValue", json.loads(value))
+        query = cast("JsonValue", json.loads(value))
     except ValueError:
         raise _bad(number, "has a value that is not valid JSON.", EDIT_HINT) from None
+    if not isinstance(query, list):
+        # Paperless takes only a JSON list; a dropped null would run the view unfiltered.
+        text = "has a value that is not a custom field query (a JSON list)."
+        raise _bad(number, text, EDIT_HINT)
+    return query
 
 
 def _text(number: int, value: str | None) -> str:

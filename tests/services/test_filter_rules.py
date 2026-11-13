@@ -13,7 +13,7 @@ import pytest
 from paperless_mcp.domain.documents import DocumentQuery
 from paperless_mcp.domain.errors import Validation
 from paperless_mcp.domain.views import RULE_TYPES, FilterRule
-from paperless_mcp.services.filter_rules import translate
+from paperless_mcp.services.filter_rules import EDIT_HINT, translate
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -188,6 +188,8 @@ def test_an_unknown_rule_type_is_rejected_naming_it() -> None:
         (5, "maybe", "not true or false"),
         (7, None, "needs a value"),
         (42, "[not json", "not valid JSON"),
+        (42, "null", "not a custom field query"),
+        (42, '{"due": 1}', "not a custom field query"),
         (0, None, "needs a value"),
         (8, None, "needs a value"),
         (42, None, "needs a value"),
@@ -203,6 +205,17 @@ def test_a_bad_value_is_rejected_naming_the_rule_type(
         _ = translate(rules((rule_type, value)), None, sort_reverse=False)
 
     assert message in raised.value.message
+
+
+def test_a_custom_field_query_that_is_not_a_list_says_how_to_fix_it() -> None:
+    with pytest.raises(Validation) as raised:
+        _ = translate(rules((42, "null")), None, sort_reverse=False)
+
+    assert raised.value.message == (
+        f"Filter rule type 42 ({RULE_TYPES[42]}) has a value that is not a custom field query"
+        " (a JSON list)."
+    )
+    assert raised.value.hint == EDIT_HINT
 
 
 @pytest.mark.parametrize("pair", [(2, "1", "2"), (0, "a", "b"), (5, "true", "false")])
