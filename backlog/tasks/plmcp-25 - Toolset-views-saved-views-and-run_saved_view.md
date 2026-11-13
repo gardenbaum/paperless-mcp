@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:26:00Z'
-updated_date: '2026-11-13T08:16:00Z'
+updated_date: '2026-11-13T10:15:00Z'
 labels: []
 milestone: m-3
 dependencies:
@@ -60,4 +60,6 @@ Live probe of 3.4.2 (before coding): saved view list/get rows carry id,name,icon
 Progress: DocumentQuery extended with 37 filter fields (adapter params schema-guarded; shared_by__id is declared boolean in the schema but takes a user id, added as MISTYPED_QUERY_PARAMETERS in the guard with self-tests; saved_views responses lack required 'permissions' on 3.4.2 so four WRONG_RESPONSE_SCHEMAS entries were added). ViewReader/ViewWriter ports, adapter, FakePaperless (saved views, view filters in tests/fakes/view_filters.py) and contract tests (filters + views) green on fake and live 3.4.2. Tests were written before code at each layer (adapter params, guard, views adapter, contract), run red first.
 
 Progress: services (filter_rules.translate: all 51 rule types translated, unknown/bad values/duplicate single-valued/uncombinable searches/unknown sort fields rejected naming the rule type; ViewService list/get/create/update/delete(confirm)/run), tools/views.py (6 tools, opt-in toolset), server wiring, README, surface snapshot regenerated deliberately (only the 'all' and 'read-only' profiles gain the six/three views tools; default profile unchanged, still 18 tools), E2E tests (tests/e2e/test_views.py: seeded e2e-view equals the equivalent search_documents, create/run/update/delete flow, a stored unrunnable rule). Found by the service test: DocumentService.search overwrote ids already in the query with the (empty) name-resolved ones, which would have made every view run unfiltered; fixed (given names win, otherwise the query's ids stay) with its own red-first test. Test-after-code (honest): the E2E tests were written after the code (they passed first run); the duplicate-rule message wording in filter_rules was adjusted together with its test.
+
+Gates on the tree rebased onto f3709f0: just check exit 0 (100% diff coverage); just mutation exit 0, 100.0% with 7 new reviewed equivalents (4 typing.cast first argument, 3 lowercase HTTP method); full e2e (18m13s on a shared stack): 335 passed, 2 failed: test_more_like_finds_other_documents[live] (shared-stack index, not worked around) and test_stdio selects-tools, which was mine (toolsets=all read-only now includes the 3 read-only views tools): fixed and rerun green. New live tests (e2e views + contract views + filters, 29 tests) take about 19 s.
 <!-- SECTION:NOTES:END -->

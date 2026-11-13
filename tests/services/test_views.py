@@ -5,7 +5,14 @@ from typing import TYPE_CHECKING, final, override
 
 import pytest
 from fakes.accounts import ADMIN, READER
-from fakes.paperless import FakeDocument, FakePaperless, FakeSavedView, FakeState, seeded
+from fakes.paperless import (
+    FakeDocument,
+    FakePaperless,
+    FakeSavedView,
+    FakeState,
+    FakeTaxonomy,
+    seeded,
+)
 
 from paperless_mcp.domain.documents import DocumentQuery, NameFilters
 from paperless_mcp.domain.errors import (
@@ -206,7 +213,7 @@ async def test_a_blank_name_and_a_taken_name_are_rejected_before_the_write() -> 
 
     with pytest.raises(Validation, match="name is empty"):
         _ = await setup.views.create(ViewCreate(name="  "))
-    with pytest.raises(Validation, match="already has a saved view named 'e2e-view'"):
+    with pytest.raises(Validation, match="you can see is already named 'e2e-view'"):
         _ = await setup.views.create(ViewCreate(name="E2E-VIEW"))
 
     assert setup.fake.writes == []
@@ -286,7 +293,7 @@ async def test_a_rename_to_the_name_of_another_view_is_refused_although_paperles
     setup = Setup()
     _ = await setup.views.create(ViewCreate(name="other"))
 
-    with pytest.raises(Validation, match="already has a saved view named 'e2e-view'"):
+    with pytest.raises(Validation, match="you can see is already named 'e2e-view'"):
         _ = await setup.views.update("other", ViewEdit(name="E2E-VIEW"))
     same = await setup.views.update("other", ViewEdit(name="other", page_size=3))
 
@@ -435,3 +442,59 @@ async def test_a_stored_rule_type_that_paperless_does_not_know_is_listed_by_numb
         "unknown rule type 99",
         "1",
     )
+
+
+async def test_a_range_that_ends_before_it_starts_is_refused_on_create_and_update() -> None:
+    setup = Setup()
+    backwards = (rule("created from", "2026-02-01"), rule("created to", "2026-01-01"))
+
+    with pytest.raises(Validation, match="start after it ends"):
+        _ = await setup.views.create(ViewCreate(name="r", rules=backwards))
+    with pytest.raises(Validation, match="start after it ends"):
+        _ = await setup.views.update("e2e-view", ViewEdit(rules=backwards))
+
+    assert setup.fake.writes == []
+
+
+async def test_several_names_and_ids_in_one_list_rule_are_each_resolved() -> None:
+    made = await Setup().views.create(
+        ViewCreate(
+            name="many",
+            rules=(
+                rule("has tag", "e2e-finance, 2"),
+                rule("does not have owner in", "admin,3"),
+                rule("title contains", "a,b"),
+            ),
+        )
+    )
+
+    assert [(r.rule_type, r.value) for r in made.rules] == [
+        (6, "1,2"),
+        (35, "2,3"),
+        (0, "a,b"),
+    ]
+
+
+async def test_a_view_the_user_may_not_change_is_refused_before_the_confirmation_step() -> None:
+    setup = Setup(
+        READER[0], grant=("view_savedview", "change_savedview", "delete_savedview"), writes=False
+    )
+    reader = next(u for u in setup.state.users if u.username == READER[0])
+    setup.view("e2e-view").viewers.add(reader.id)
+
+    with pytest.raises(PermissionDenied, match=r"may not change saved view 'e2e-view' \(id 1\)"):
+        _ = await setup.views.delete("e2e-view", confirm=False)
+    with pytest.raises(PermissionDenied, match="may not change saved view"):
+        _ = await setup.views.update("e2e-view", ViewEdit(name="x"))
+    assert (await setup.views.get(1)).can_change is False
+
+
+async def test_a_single_reference_rule_keeps_a_comma_in_a_name() -> None:
+    setup = Setup()
+    setup.state.correspondents.append(FakeTaxonomy(id=2, name="Doe, Jane"))
+
+    made = await setup.views.create(
+        ViewCreate(name="comma", rules=(rule("correspondent is", "Doe, Jane"),))
+    )
+
+    assert [(r.rule_type, r.value) for r in made.rules] == [(3, "2")]

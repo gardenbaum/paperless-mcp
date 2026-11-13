@@ -483,6 +483,7 @@ mutant = "paperless_mcp.paperless.bulk.xǁPaperlessBulkWriterǁ_objects__mutmut_
 function_hash = "3421113ae662"
 reason = "httpx2 upper-cases the method when it builds the request, so \"post\" goes out as POST; the client reads only the built request's method."
 
+[[equivalent]]
 mutant = "paperless_mcp.services.filter_rules.x__json__mutmut_10"
 function_hash = "41d43766d8ce"
 reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
@@ -516,3 +517,18 @@ reason = "httpx2 upper-cases the method; 'patch' sends the same PATCH."
 mutant = "paperless_mcp.paperless.views.xǁPaperlessViewWriterǁdelete_saved_view__mutmut_7"
 function_hash = "bd33043b4adc"
 reason = "httpx2 upper-cases the method; 'delete' sends the same DELETE."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.filter_rules.x__apply__mutmut_10"
+function_hash = "8df11c6d7b62"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.filter_rules.x__apply__mutmut_14"
+function_hash = "8df11c6d7b62"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."
+
+[[equivalent]]
+mutant = "paperless_mcp.services.filter_rules.x__apply__mutmut_15"
+function_hash = "8df11c6d7b62"
+reason = "typing.cast returns its second argument unchanged and never looks at the first, which only the type checker reads."

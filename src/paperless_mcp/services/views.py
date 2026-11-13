@@ -10,7 +10,13 @@ import difflib
 from typing import TYPE_CHECKING, Final
 
 from paperless_mcp.domain.documents import NameFilters
-from paperless_mcp.domain.errors import ConfirmationRequired, NotFound, Validation, quoted
+from paperless_mcp.domain.errors import (
+    ConfirmationRequired,
+    NotFound,
+    PermissionDenied,
+    Validation,
+    quoted,
+)
 from paperless_mcp.domain.taxonomy import TaxonomyItem
 from paperless_mcp.domain.views import (
     RULE_TYPES,
@@ -172,7 +178,7 @@ class ViewService:
         if edit.page_size is not None and edit.clear_page_size:
             message = "page_size and clear_page_size contradict each other."
             raise Validation(message, hint="Pass one of them.")
-        found = await self._find(view)
+        found = self._changeable(await self._find(view))
         changes: dict[str, object] = {}
         if edit.name is not None:
             changes["name"] = self._name(edit.name)
@@ -204,7 +210,7 @@ class ViewService:
             Ambiguous: The name matches several views.
             PermissionDenied: The user may not delete saved views, or this one.
         """
-        found = await self._find(view)
+        found = self._changeable(await self._find(view))
         subject = _described(found)
         if not confirm:
             rules = plural(len(found.filter_rules), "filter rule")
@@ -243,6 +249,14 @@ class ViewService:
         return next(v for v in views if v.id == wanted)
 
     @staticmethod
+    def _changeable(view: SavedView) -> SavedView:
+        """``view`` if the user may change it; else the refusal, before any confirmation step."""
+        if not view.user_can_change:
+            message = f"The user may not change {_described(view)}: it belongs to someone else."
+            raise PermissionDenied(message, hint="Ask its owner, or create a view of your own.")
+        return view
+
+    @staticmethod
     def _name(name: str) -> str:
         text = name.strip()
         if not text:
@@ -255,7 +269,7 @@ class ViewService:
         for view in await self._reader.list_saved_views():
             if view.id != except_id and fold(view.name) == fold(name):
                 message = (
-                    f"The user already has a saved view named {quoted(view.name)} (id {view.id})."
+                    f"A saved view you can see is already named {quoted(view.name)} (id {view.id})."
                 )
                 raise Validation(message, hint="Choose another name, or update that view.")
 
@@ -272,9 +286,16 @@ class ViewService:
             return FilterRule(rule_type=number, value=None if value is None else str(value))
         text = str(value).strip()
         kind = VALUE_KINDS.get(number)
-        if kind is not None and not (text.isascii() and text.isdigit()):
-            text = str((await self._taxonomy.resolve(kind, text)).id)
+        if kind is not None:
+            # The web UI joins the values of a list rule with commas; each part is an id or name.
+            parts = [part.strip() for part in text.split(",")] if number not in NULLABLE else [text]
+            text = ",".join([await self._id(kind, part) for part in parts if part])
         return FilterRule(rule_type=number, value=text)
+
+    async def _id(self, kind: TaxonomyKind, part: str) -> str:
+        if part.isascii() and part.isdigit():
+            return part
+        return str((await self._taxonomy.resolve(kind, part)).id)
 
     async def _write[T](self, write: Callable[[], Awaitable[T]]) -> T:
         try:

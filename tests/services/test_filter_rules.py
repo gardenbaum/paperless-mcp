@@ -182,7 +182,7 @@ def test_an_unknown_rule_type_is_rejected_naming_it() -> None:
     [
         (2, "seven", "not a whole number"),
         (2, None, "needs a value"),
-        (6, "tag", "not a whole number"),
+        (6, "tag", "not a list of whole numbers"),
         (8, "yesterday", "not a date"),
         (8, "2026-13-40", "not a date"),
         (5, "maybe", "not true or false"),
@@ -249,3 +249,67 @@ def test_a_simple_search_may_come_with_a_fulltext_query(
 
 def test_without_a_sort_reverse_the_ordering_is_ascending() -> None:
     assert translate([], "created").ordering == "created"
+
+
+@pytest.mark.parametrize(
+    ("rule_type", "value", "expected"),
+    [
+        (35, "2,3", DocumentQuery(owner_none=(2, 3))),
+        (33, " 2 , 3 ", DocumentQuery(owner_in=(2, 3))),
+        (6, "3,1", DocumentQuery(tags_all=(3, 1))),
+        (22, "3,,1,", DocumentQuery(tags_any=(3, 1))),
+        (38, "4,5", DocumentQuery(custom_fields_all=(4, 5))),
+        (27, "4,5", DocumentQuery(correspondent_none=(4, 5))),
+    ],
+)
+def test_the_web_ui_writes_several_ids_into_one_rule_comma_joined(
+    rule_type: int, value: str, expected: DocumentQuery
+) -> None:
+    assert translate(rules((rule_type, value))) == expected
+
+
+@pytest.mark.parametrize("value", ["", "  ", ",", " , "])
+def test_a_list_rule_without_ids_filters_nothing(value: str) -> None:
+    assert translate(rules((33, value), (5, "true"))) == DocumentQuery(inbox=True)
+
+
+def test_ids_of_several_rules_and_of_comma_joined_values_add_up() -> None:
+    assert translate(rules((6, "1,2"), (6, "3"))).tags_all == (1, 2, 3)
+
+
+def test_one_bad_id_in_a_list_is_rejected_naming_the_rule_type() -> None:
+    with pytest.raises(
+        Validation, match=r"Filter rule type 35 \(does not have owner in\)"
+    ) as raised:
+        _ = translate(rules((35, "2,x")))
+
+    assert "'2,x'" in raised.value.message
+
+
+def test_shared_by_stays_a_single_user_id() -> None:
+    with pytest.raises(Validation, match=r"Filter rule type 37"):
+        _ = translate(rules((37, "2,3")))
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "named"),
+    [
+        ((44, "2026-02-01"), (43, "2026-01-01"), "44 (created from) and 43 (created to)"),
+        ((46, "2026-02-01"), (45, "2026-01-01"), "46 (added from) and 45 (added to)"),
+    ],
+)
+def test_a_range_that_ends_before_it_starts_is_rejected_naming_both_rule_types(
+    first: tuple[int, str], second: tuple[int, str], named: str
+) -> None:
+    with pytest.raises(Validation, match="start after it ends") as raised:
+        _ = translate(rules(first, second))
+
+    assert named in raised.value.message
+    assert raised.value.hint is not None
+
+
+def test_a_range_of_one_day_and_open_ranges_are_fine() -> None:
+    day = "2026-02-01"
+
+    _ = translate(rules((44, day), (43, day), (46, day)))
+    _ = translate(rules((43, day), (45, day)))

@@ -53,6 +53,8 @@ SPECS: Final[dict[int, Spec]] = {
     2: Spec("archive_serial_number", "int"),
     3: Spec("correspondent", "ref"),
     4: Spec("document_type", "ref"),
+    # Sent as true/false, unlike the 3.4.2 web UI, which sends 1/0: InboxFilter only understands
+    # "true" and "false" and ignores 1/0 (a bug of the UI), so following it would drop the rule.
     5: Spec("inbox", "bool"),
     6: Spec("tags_all", "ids"),
     7: Spec("tagged", "bool"),
@@ -138,6 +140,22 @@ def _whole(number: int, value: str | None) -> int:
         raise _bad(number, text, EDIT_HINT) from None
 
 
+def _ids(number: int, value: str | None) -> tuple[int, ...]:
+    """The ids of a list rule: the web UI joins several with commas and writes none as "".
+
+    Raises:
+        Validation: There is no value, or a part is not a whole number.
+    """
+    if value is None:
+        raise _bad(number, "needs a value.", EDIT_HINT)
+    parts = [part.strip() for part in value.split(",")]
+    try:
+        return tuple(int(part) for part in parts if part)
+    except ValueError:
+        text = f"has the value {value!r}, which is not a list of whole numbers."
+        raise _bad(number, text, EDIT_HINT) from None
+
+
 def _flag(number: int, value: str | None) -> bool:
     if value is None:
         raise _bad(number, "needs a value.", EDIT_HINT)
@@ -213,6 +231,7 @@ def translate(
             )
         _apply(fields, setters, number, spec, rule.value)
     _check_searches(setters)
+    _check_ranges(fields, setters)
     return DocumentQuery.model_validate(
         {**fields, "ordering": _ordering(sort_field, sort_reverse=sort_reverse)}
     )
@@ -223,7 +242,9 @@ def _apply(
 ) -> None:
     """Add one rule to ``fields``; ``setters`` remembers which rule set which single filter."""
     if spec.kind == "ids":
-        fields[spec.field] = (*(fields.get(spec.field) or ()), _whole(number, value))  # pyright: ignore[reportGeneralTypeIssues] -- tuple of ints
+        found = _ids(number, value)
+        if found:
+            fields[spec.field] = (*cast("tuple[int, ...]", fields.get(spec.field) or ()), *found)
         return
     if spec.field in setters:
         other = setters[spec.field]
@@ -266,3 +287,19 @@ def _check_searches(setters: dict[str, int]) -> None:
     raise Validation(
         message, hint=f"Keep one of them (or a simple search with a fulltext query). {EDIT_HINT}"
     )
+
+
+# (from field, to field, label) of the ranges whose ends the search itself compares.
+RANGES: Final = (("created_from", "created_to", "created"), ("added_from", "added_to", "added"))
+
+
+def _check_ranges(fields: dict[str, object], setters: dict[str, int]) -> None:
+    for start, end, label in RANGES:
+        first, last = fields.get(start), fields.get(end)
+        if isinstance(first, date) and isinstance(last, date) and first > last:
+            first_type, last_type = setters[start], setters[end]
+            named = (
+                f"{first_type} ({RULE_TYPES[first_type]}) and {last_type} ({RULE_TYPES[last_type]})"
+            )
+            message = f"Filter rule types {named} make the {label} range start after it ends."
+            raise Validation(message, hint=f"Swap the dates, or drop one of them. {EDIT_HINT}")

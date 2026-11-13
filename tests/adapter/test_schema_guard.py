@@ -394,3 +394,69 @@ def test_a_viewer_merging_is_answered_with_html() -> None:
     )
 
     check_response(request, httpx2.Response(403, text="Insufficient permissions", headers=HTML))
+
+
+VIEW = {
+    "id": 1,
+    "name": "v",
+    "icon": "funnel",
+    "sort_field": None,
+    "sort_reverse": False,
+    "filter_rules": [{"rule_type": 6, "value": "1"}],
+    "page_size": None,
+    "display_mode": None,
+    "display_fields": None,
+    "owner": 2,
+    "user_can_change": True,
+}
+VIEW_PAGE = {"count": 1, "next": None, "previous": None, "results": [VIEW]}
+
+
+@pytest.mark.parametrize(
+    ("request_", "status", "body"),
+    [
+        (get("/api/saved_views/"), 200, VIEW_PAGE),
+        (get("/api/saved_views/1/"), 200, VIEW),
+        (
+            httpx2.Request(
+                "POST",
+                BASE_URL + "/api/saved_views/",
+                json={"name": "v", "filter_rules": []},
+                headers=HEADERS,
+            ),
+            201,
+            VIEW,
+        ),
+        (
+            httpx2.Request(
+                "PATCH", BASE_URL + "/api/saved_views/1/", json={"name": "w"}, headers=HEADERS
+            ),
+            200,
+            VIEW,
+        ),
+    ],
+    ids=["list", "get", "create", "update"],
+)
+def test_a_saved_view_without_the_permissions_the_schema_requires_passes(
+    request_: httpx2.Request, status: int, body: dict[str, object]
+) -> None:
+    check_response(request_, httpx2.Response(status, json=body))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {**VIEW, "name": 5},
+        {**VIEW, "filter_rules": [{"rule_type": 99, "value": "1"}]},
+        {key: value for key, value in VIEW.items() if key != "name"},
+    ],
+    ids=["wrong type", "unknown rule type", "missing name"],
+)
+def test_the_rest_of_a_saved_view_is_still_checked(body: dict[str, object]) -> None:
+    with pytest.raises(SchemaViolationError):
+        check_response(get("/api/saved_views/1/"), httpx2.Response(200, json=body))
+    with pytest.raises(SchemaViolationError):
+        check_response(
+            get("/api/saved_views/"),
+            httpx2.Response(200, json={**VIEW_PAGE, "results": [body]}),
+        )

@@ -107,6 +107,10 @@ async def test_owner_sharing_mime_and_duplicate_filters(backend: Backend) -> Non
 
     assert await titles(ports, owner_in=(admin, 9999)) == {PRIVATE}
     assert await titles(ports, owner_none=(admin,)) == {PUBLIC}
+    users = await ids(ports, "user")
+    both = (admin, users["e2e-reader"])
+    assert await titles(ports, owner_in=both) == {PRIVATE}
+    assert await titles(ports, owner_none=both) == {PUBLIC}
     assert await titles(ports, owner_isnull=True) == {PUBLIC}
     assert await titles(ports, owner_isnull=False) == {PRIVATE}
     assert await titles(ports, shared_by=admin) == NONE

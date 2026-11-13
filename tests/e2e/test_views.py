@@ -117,3 +117,20 @@ async def test_a_stored_rule_that_cannot_be_run_is_an_error_naming_its_type(
 
     assert result.is_error
     assert "Filter rule type 2 (ASN is)" in str(result.content)
+
+
+async def test_a_rule_with_comma_joined_ids_as_the_web_ui_writes_it_runs(
+    client: Connected, stack: Stack
+) -> None:
+    name = f"{SCRATCH}{uuid.uuid4().hex[:8]}"
+    users = {str(row["username"]): row["id"] for row in results(stack.admin.get("/api/users/"))}
+    ids = f"{users['admin']},{users['e2e-reader']}"
+    rules = [{"rule_type": 35, "value": ids}, {"rule_type": 33, "value": ""}]
+    _ = stack.admin.post(
+        "/api/saved_views/", json={"name": name, "filter_rules": rules}
+    ).raise_for_status()
+
+    found = titles(await call(client, "run_saved_view", view=name))
+
+    assert PUBLIC in found
+    assert PRIVATE not in found

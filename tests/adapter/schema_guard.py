@@ -131,22 +131,6 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
     ("GET", "/api/document_types/{id}/", 200): (
         "3.4.2 answers a document type without the `permissions` the schema requires (PLMCP-19)"
     ),
-    ("GET", "/api/saved_views/", 200): (
-        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
-        "list asks for `full_perms` (PLMCP-25)"
-    ),
-    ("GET", "/api/saved_views/{id}/", 200): (
-        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
-        "list asks for `full_perms` (PLMCP-25)"
-    ),
-    ("POST", "/api/saved_views/", 201): (
-        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
-        "list asks for `full_perms` (PLMCP-25)"
-    ),
-    ("PATCH", "/api/saved_views/{id}/", 200): (
-        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
-        "list asks for `full_perms` (PLMCP-25)"
-    ),
     ("GET", "/api/documents/{id}/history/", 200): (
         "3.4.2 answers a bare list, not the paginated envelope of the schema, and a null actor "
         "for system changes (PLMCP-11)"
@@ -195,6 +179,25 @@ WRONG_RESPONSE_SCHEMAS: Mapping[tuple[str, str, int], str] = {
         "3.4.2 answers {user, settings, permissions}; the schema has {id, settings} (PLMCP-7)"
     ),
 }
+# Responses that lack a property the schema requires, which is filled in (as an empty object)
+# before the body is validated, so that the rest of the body is still checked: (method, path
+# template, status) -> (property, reason). A paged list is filled in each of its results.
+_SAVED_VIEW_ENDPOINTS = (
+    ("GET", "/api/saved_views/", 200),
+    ("GET", "/api/saved_views/{id}/", 200),
+    ("POST", "/api/saved_views/", 201),
+    ("PATCH", "/api/saved_views/{id}/", 200),
+)
+_NO_PERMISSIONS = (
+    "permissions",
+    (
+        "3.4.2 answers saved views without the `permissions` the schema requires unless the "
+        "list asks for `full_perms` (PLMCP-25)"
+    ),
+)
+OMITTED_RESPONSE_PROPERTIES: Mapping[tuple[str, str, int], tuple[str, str]] = dict.fromkeys(
+    _SAVED_VIEW_ENDPOINTS, _NO_PERMISSIONS
+)
 # Endpoints that answer a file: (method, path template) -> reason. The schema declares their 200 as
 # application/json (format binary), but Paperless sends the file with its own content type, so
 # openapi-core cannot match it. Their 200 is checked for what every file response has instead: a
@@ -457,6 +460,24 @@ def _check_file_response(request: httpx2.Request, response: httpx2.Response) -> 
         raise SchemaViolationError(message)
 
 
+def _with_omitted_properties(
+    request: httpx2.Request, template: str, response: httpx2.Response
+) -> httpx2.Response:
+    """The response with the properties of `OMITTED_RESPONSE_PROPERTIES` filled in."""
+    listed = OMITTED_RESPONSE_PROPERTIES.get((request.method, template, response.status_code))
+    body = _json_or_none(response)
+    if listed is None or not isinstance(body, dict):
+        return response
+    name = listed[0]
+    objects = cast("Json", body)
+    rows = objects.get("results")
+    for row in cast("list[Json]", rows) if isinstance(rows, list) else [objects]:
+        _ = row.setdefault(name, {})
+    return httpx2.Response(
+        response.status_code, json=body, headers={"Content-Type": "application/json"}
+    )
+
+
 def check_response(request: httpx2.Request, response: httpx2.Response) -> None:
     """Raise `SchemaViolationError` unless the response is one the schema allows for the request."""
     template = _template(request)
@@ -474,6 +495,7 @@ def check_response(request: httpx2.Request, response: httpx2.Response) -> None:
             message = f"{request.method} {request.url.path}: not a DRF error body: {response.text}"
             raise SchemaViolationError(message)
         return
+    response = _with_omitted_properties(request, template, response)
     errors = list(_OPENAPI.iter_response_errors(_Request(request), _Response(response)))
     if errors:
         raise _fail(request, f"{response.status_code} response does not match the schema", errors)

@@ -57,6 +57,10 @@ TRANSLATIONS: dict[str, list[FilterRule]] = {
     "same type twice": rules((2, "1"), (2, "2")),
     "same filter by two types": rules((19, "a"), (49, "b")),
     "two searches": rules((19, "a"), (0, "b")),
+    "bad id list": rules((35, "2,x")),
+    "no id list value": rules((35, None)),
+    "created range backwards": rules((44, "2026-02-01"), (43, "2026-01-01")),
+    "added range backwards": rules((46, "2026-02-01"), (45, "2026-01-01")),
     "three searches": rules((0, "a"), (20, "b"), (21, "5")),
 }
 
@@ -111,6 +115,13 @@ async def test_view_service_errors(snapshot: SnapshotAssertion) -> None:
     )
     found["get, near miss"] = await said_later(lambda: views.get("e2e-vew"))
     found["get, missing id"] = await said_later(lambda: views.get(99))
+    setup.state.saved_views[0].viewers.add(3)
+    other = Setup("e2e-reader", grant=("view_savedview", "delete_savedview", "change_savedview"))
+    other.state.saved_views[0].viewers.add(3)
+    found["delete, not allowed"] = await said_later(lambda: other.views.delete(1, confirm=False))
+    found["update, not allowed"] = await said_later(
+        lambda: other.views.update(1, ViewEdit(name="x"))
+    )
     found["delete, unconfirmed"] = await said_later(lambda: views.delete("odd", confirm=False))
     found["delete, one rule"] = await said_later(lambda: views.delete("e2e-view", confirm=False))
     found["run, unknown type"] = await said_later(lambda: views.run("odd", page=1, page_size=5))
