@@ -90,7 +90,10 @@ jobs:
   # Readiness waiting and seeding live in the test session, so `just e2e` is the whole job.
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 35, not 20: each toolset adds live tests. main took 11-12 minutes, and PR runs with one new
+    # toolset passed 20 on slower runs. This only guards against hangs and is no quality gate;
+    # PLMCP-39 brings the suite back under 20 minutes and lowers it again.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
