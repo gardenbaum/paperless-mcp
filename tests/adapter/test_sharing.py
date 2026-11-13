@@ -10,16 +10,20 @@ import httpx2
 import pytest
 
 from paperless_mcp.domain.errors import (
-    FeatureUnavailable,
+    DeliveryUnknown,
     NotFound,
     PaperlessMcpError,
     PermissionDenied,
-    UpstreamTimeout,
+    UpstreamUnavailable,
     Validation,
 )
 from paperless_mcp.domain.sharing import ShareBundle, ShareLink
 from paperless_mcp.paperless.pagination import MAX_ITEMS
-from paperless_mcp.paperless.sharing import PaperlessSharingReader, PaperlessSharingWriter
+from paperless_mcp.paperless.sharing import (
+    EMAIL_TIMEOUT,
+    PaperlessSharingReader,
+    PaperlessSharingWriter,
+)
 
 if TYPE_CHECKING:
     from adapter.conftest import ClientFactory
@@ -27,6 +31,23 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.anyio
 
 type Json = dict[str, object]
+
+SETTINGS: Json = {
+    "update_checking": {"backend_setting": "default"},
+    "trash_delay": 30,
+    "version": "3.4.2",
+    "app_title": None,
+    "app_logo": None,
+    "auditlog_enabled": True,
+    "remote_ocr": {"configured": False, "mode": "always"},
+    "email_enabled": False,
+    "ai_enabled": False,
+}
+UI_SETTINGS: Json = {
+    "user": {"id": 2, "username": "admin", "is_staff": True, "is_superuser": True, "groups": []},
+    "settings": SETTINGS,
+    "permissions": ["view_documenttype"],
+}
 
 LINK_WIRE: Json = {
     "id": 4,
@@ -398,9 +419,9 @@ async def test_an_email_sends_the_documents_addresses_text_and_file_choice(
 async def test_an_email_is_never_sent_twice_on_a_transient_failure(
     make_client: ClientFactory,
 ) -> None:
-    server = Recording(httpx2.Response(503, text="busy"), httpx2.Response(200, json={}))
+    server = Recording(httpx2.Response(502, text="bad gateway"), httpx2.Response(200, json={}))
 
-    with pytest.raises(FeatureUnavailable):
+    with pytest.raises(DeliveryUnknown):
         await PaperlessSharingWriter(make_client(server)).email_documents(
             [12], addresses=["a@example.com"], subject="s", message="m", use_archive_version=True
         )
@@ -408,31 +429,100 @@ async def test_an_email_is_never_sent_twice_on_a_transient_failure(
     assert len(server.sent) == 1
 
 
-async def test_an_email_that_fails_in_paperless_says_the_mail_server_may_be_missing(
-    make_client: ClientFactory,
+@pytest.mark.parametrize("status", [500, 502, 504])
+async def test_a_failure_while_sending_says_it_is_unknown_whether_it_was_sent(
+    make_client: ClientFactory, status: int
 ) -> None:
-    server = Recording(httpx2.Response(500, json="Error emailing documents, check logs."))
+    server = Recording(httpx2.Response(status, json="Error emailing documents, check logs."))
 
-    with pytest.raises(FeatureUnavailable, match="could not send") as raised:
+    with pytest.raises(DeliveryUnknown) as raised:
         await PaperlessSharingWriter(make_client(server)).email_documents(
             [12], addresses=["a@example.com"], subject="s", message="m", use_archive_version=True
         )
 
-    assert raised.value.hint is not None
-    assert "PAPERLESS_EMAIL_HOST" in raised.value.hint
+    assert raised.value.describe() == (
+        "Paperless failed while sending the e-mail; whether any recipient got it is unknown. "
+        "Hint: Check the Paperless log and ask the user before sending again: Paperless sends "
+        "synchronously, so a repeat can send it twice."
+    )
 
 
-async def test_an_email_that_times_out_is_not_called_unconfigured(
-    make_client: ClientFactory,
+@pytest.mark.parametrize("status", [429, 503])
+async def test_a_refusal_before_sending_stays_a_temporary_failure(
+    make_client: ClientFactory, status: int
 ) -> None:
-    def timing_out(request: httpx2.Request) -> httpx2.Response:
-        message = "slow"
-        raise httpx2.ReadTimeout(message, request=request)
+    server = Recording(httpx2.Response(status, json={"detail": "Request was throttled."}))
 
-    with pytest.raises(UpstreamTimeout):
-        await PaperlessSharingWriter(make_client(timing_out)).email_documents(
+    with pytest.raises(UpstreamUnavailable) as raised:
+        await PaperlessSharingWriter(make_client(server)).email_documents(
             [12], addresses=["a@example.com"], subject="s", message="m", use_archive_version=True
         )
+
+    assert not isinstance(raised.value, DeliveryUnknown)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(httpx2.ReadTimeout, id="timeout"),
+        pytest.param(httpx2.ConnectError, id="unreachable"),
+    ],
+)
+async def test_an_email_without_an_answer_says_it_is_unknown_whether_it_was_sent(
+    make_client: ClientFactory, failure: type[httpx2.TransportError]
+) -> None:
+    def failing(request: httpx2.Request) -> httpx2.Response:
+        message = "no answer"
+        raise failure(message, request=request)
+
+    with pytest.raises(DeliveryUnknown) as raised:
+        await PaperlessSharingWriter(make_client(failing)).email_documents(
+            [12], addresses=["a@example.com"], subject="s", message="m", use_archive_version=True
+        )
+
+    assert raised.value.describe() == (
+        "Paperless did not answer; whether the e-mail was sent is unknown. "
+        "Hint: Check with the user and the Paperless log before sending again: Paperless sends "
+        "synchronously, so a repeat can send it twice."
+    )
+
+
+async def test_an_email_gets_a_longer_timeout_than_ordinary_requests(
+    make_client: ClientFactory,
+) -> None:
+    seen: list[float] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(cast("float", request.extensions["timeout"]["read"]))
+        return httpx2.Response(200, json={"message": "ok"})
+
+    await PaperlessSharingWriter(make_client(handler)).email_documents(
+        [12], addresses=["a@example.com"], subject="s", message="m", use_archive_version=True
+    )
+
+    assert seen == [EMAIL_TIMEOUT]
+
+
+@pytest.mark.parametrize("flag", [True, False, None])
+async def test_the_mail_setting_is_read_from_the_ui_settings(
+    make_client: ClientFactory, *, flag: bool | None
+) -> None:
+    settings = {k: v for k, v in SETTINGS.items() if k != "email_enabled"}
+    settings.update({} if flag is None else {"email_enabled": flag})
+    server = Recording(httpx2.Response(200, json={**UI_SETTINGS, "settings": settings}))
+
+    found = await PaperlessSharingReader(make_client(server)).get_email_enabled()
+
+    assert found is flag
+    assert server.sent == [("GET", "/api/ui_settings/", None, {})]
+
+
+async def test_a_user_who_may_not_view_the_ui_settings_has_an_unknown_mail_setting(
+    make_client: ClientFactory,
+) -> None:
+    server = Recording(httpx2.Response(403, json={"detail": "no"}))
+
+    assert await PaperlessSharingReader(make_client(server)).get_email_enabled() is None
 
 
 @pytest.mark.parametrize(

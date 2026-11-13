@@ -11,12 +11,20 @@ is refused first, so the caller is never asked to confirm what cannot happen.
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from paperless_mcp.domain.errors import ConfirmationRequired, NotFound, Validation, quoted
+from paperless_mcp.domain.errors import (
+    ConfirmationRequired,
+    FeatureUnavailable,
+    NotFound,
+    PermissionDenied,
+    Validation,
+    quoted,
+)
 from paperless_mcp.domain.sharing import (
     SHARE_ROUTE,
     EmailSent,
     ShareBundleInfo,
     ShareBundleListing,
+    SharedDocument,
     ShareDeletion,
     ShareLinkInfo,
     ShareLinkListing,
@@ -24,7 +32,7 @@ from paperless_mcp.domain.sharing import (
 from paperless_mcp.services.documents import document_link
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from paperless_mcp.domain.ports import DocumentReader, SharingReader, SharingWriter
     from paperless_mcp.domain.sharing import FileVersionKind, ShareBundle, ShareLink
@@ -35,6 +43,8 @@ MAX_DAYS: Final = 3650
 MAX_DOCUMENTS: Final = 50
 MAX_RECIPIENTS: Final = 20
 RECIPIENT_HINT: Final = "Give plain addresses such as name@example.com."
+PUBLIC_WARNING: Final = "anyone with the URL can download it without logging in"
+EXCERPT: Final = 80
 
 
 def share_url(web_url: str, slug: str) -> str:
@@ -56,10 +66,31 @@ def joined(parts: Sequence[str]) -> str:
     return f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
+def mail_disabled() -> FeatureUnavailable:
+    """The error for an e-mail when Paperless has no mail server set up."""
+    return FeatureUnavailable(
+        "Paperless has no mail server set up, so it cannot send e-mail.",
+        hint="An administrator sets PAPERLESS_EMAIL_HOST and the related variables.",
+    )
+
+
+def file_phrase(kind: FileVersionKind, count: int) -> str:
+    """The files a share or e-mail hands out, in words."""
+    noun = "file" if count == 1 else "files"
+    if kind == "archive":
+        return f"archive {noun} (the original where there is none)"
+    return f"original {noun}"
+
+
+def expiry_phrase(days: int | None) -> str:
+    """When a link or bundle stops working, in words."""
+    return "never expires" if days is None else f"expires in {plural(days, 'day')}"
+
+
 def _days(days: int | None) -> int | None:
     if days is not None and not 1 <= days <= MAX_DAYS:
         message = f"expires_in_days must be between 1 and {MAX_DAYS}; {days} is not."
-        raise Validation(message, hint="Leave it out for a link that never expires.")
+        raise Validation(message, hint="Leave it out for no expiry.")
     return days
 
 
@@ -119,12 +150,28 @@ class SharingService:
             expired=self._expired(link.expiration),
         )
 
-    def _bundle(self, bundle: ShareBundle) -> ShareBundleInfo:
+    async def _bundles(self, bundles: Sequence[ShareBundle]) -> tuple[ShareBundleInfo, ...]:
+        """The bundles with their documents named, by one read of all the titles."""
+        ids = sorted({number for bundle in bundles for number in bundle.document_ids})
+        try:
+            titles = await self._documents.get_document_titles(ids) if ids else {}
+        except PermissionDenied:
+            titles = {}  # a user who may not view documents still sees the ids
+        return tuple(self._bundle(bundle, titles) for bundle in bundles)
+
+    def _bundle(self, bundle: ShareBundle, titles: Mapping[int, str]) -> ShareBundleInfo:
         return ShareBundleInfo(
             id=bundle.id,
             url=share_url(self._web_url, bundle.slug),
             status=bundle.status,
-            document_ids=bundle.document_ids,
+            documents=tuple(
+                SharedDocument(
+                    id=number,
+                    title=titles.get(number),
+                    web_url=document_link(self._web_url, number),
+                )
+                for number in bundle.document_ids
+            ),
             document_count=len(bundle.document_ids),
             file_version=bundle.file_version,
             size_bytes=bundle.size_bytes,
@@ -175,17 +222,30 @@ class SharingService:
         )
 
     async def create_link(
-        self, document_id: int, *, expires_in_days: int | None, file_version: FileVersionKind
+        self,
+        document_id: int,
+        *,
+        expires_in_days: int | None,
+        file_version: FileVersionKind,
+        confirm: bool,
     ) -> ShareLinkInfo:
-        """Publish the file of a document under a new public link.
+        """Publish the file of a document under a new public link; confirm names what is public.
 
         Raises:
+            ConfirmationRequired: ``confirm`` is false. Nothing was published.
             Validation: ``expires_in_days`` is out of range.
             NotFound: The document does not exist or is hidden from the user.
             PermissionDenied: The user may not add share links.
         """
         days = _days(expires_in_days)
-        _ = await self._titles([document_id])
+        titles = await self._titles([document_id])
+        if not confirm:
+            effect = (
+                f"publish the {file_phrase(file_version, 1)} of "
+                f"{quoted(titles[document_id])} (id {document_id}) under a public share link "
+                f"that {expiry_phrase(days)}; {PUBLIC_WARNING}"
+            )
+            raise ConfirmationRequired.for_effect(effect)
         expiration = None if days is None else self._now() + timedelta(days=days)
         made = await self._writer.create_share_link(
             document_id, expiration=expiration, file_version=file_version
@@ -224,7 +284,7 @@ class SharingService:
             count=len(bundles),
             page=page,
             next_page=following,
-            bundles=tuple(self._bundle(b) for b in shown),
+            bundles=await self._bundles(shown),
         )
 
     async def create_bundle(
@@ -233,11 +293,14 @@ class SharingService:
         *,
         expires_in_days: int | None,
         file_version: FileVersionKind,
+        confirm: bool,
     ) -> ShareBundleInfo:
-        """Publish the files of several documents as one public archive.
+        """Publish the files of several documents as one public archive; confirm names them.
 
         Raises:
-            Validation: No documents, too many, an unknown one, or ``expires_in_days`` out of range.
+            ConfirmationRequired: ``confirm`` is false. Nothing was published.
+            Validation: No documents, too many, or ``expires_in_days`` out of range.
+            NotFound: A document does not exist or is hidden from the user.
             PermissionDenied: The user may not add bundles.
         """
         ids = _unique(document_ids)
@@ -245,15 +308,24 @@ class SharingService:
             message = "A bundle needs at least one document."
             raise Validation(message, hint="Find the documents with search_documents.")
         if len(ids) > MAX_DOCUMENTS:
-            message = (
-                f"A bundle takes at most {plural(MAX_DOCUMENTS, 'document')}; {len(ids)} given."
-            )
+            count = plural(MAX_DOCUMENTS, "document")
+            message = f"A bundle takes at most {count}; {len(ids)} given."
             raise Validation(message, hint="Split it into several bundles.")
         days = _days(expires_in_days)
+        titles = await self._titles(ids)
+        if not confirm:
+            named = joined([f"{quoted(titles[number])} (id {number})" for number in ids])
+            effect = (
+                f"publish the {file_phrase(file_version, len(ids))} of {named} as one ZIP "
+                f"archive under a public share link that {expiry_phrase(days)}; "
+                f"{PUBLIC_WARNING}"
+            )
+            raise ConfirmationRequired.for_effect(effect)
         made = await self._writer.create_share_bundle(
             ids, expiration_days=days, file_version=file_version
         )
-        return self._bundle(made)
+        [shown] = await self._bundles([made])
+        return shown
 
     async def rebuild_bundle(self, bundle_id: int) -> ShareBundleInfo:
         """Build the archive of a bundle again; the URL stays the same.
@@ -263,7 +335,8 @@ class SharingService:
             Validation: Paperless refused the rebuild, with its reason.
             PermissionDenied: The user may not change this bundle.
         """
-        return self._bundle(await self._writer.rebuild_share_bundle(bundle_id))
+        [shown] = await self._bundles([await self._writer.rebuild_share_bundle(bundle_id)])
+        return shown
 
     async def delete_bundle(self, bundle_id: int, *, confirm: bool) -> ShareDeletion:
         """Delete a bundle with its archive; without ``confirm`` refuse and say what ends.
@@ -301,20 +374,28 @@ class SharingService:
             Validation: No or too many documents or recipients, an address that is none, an empty
                 subject or message.
             NotFound: A document does not exist or is hidden from the user.
-            FeatureUnavailable: Paperless could not send the message (usually no mail server).
+            FeatureUnavailable: Paperless has no mail server set up.
+            DeliveryUnknown: Paperless failed while sending; whether anyone got it is unknown.
             PermissionDenied: The user may not view documents.
         """
         ids = _unique(document_ids)
         addresses = self._addresses(recipients)
         self._check_text(ids, subject, message)
+        if await self._reader.get_email_enabled() is False:
+            raise mail_disabled()
         titles = await self._titles(ids)
-        kind = "archive" if use_archive_version else "original"
-        files = f"{kind} {'file' if len(ids) == 1 else 'files'}"
+        kind: FileVersionKind = "archive" if use_archive_version else "original"
         if not confirm:
             named = joined([f"{quoted(titles[number])} (id {number})" for number in ids])
+            together = (
+                " (all of them in one To: header, so each sees the others)"
+                if len(addresses) > 1
+                else ""
+            )
             effect = (
-                f"send an e-mail with the {files} of {named} to {joined(addresses)}; "
-                "it leaves Paperless and cannot be recalled"
+                f"send an e-mail with the {file_phrase(kind, len(ids))} of {named} to "
+                f"{joined(addresses)}{together}, subject {quoted(subject)}, message "
+                f"{quoted(message, EXCERPT)}; it leaves Paperless and cannot be recalled"
             )
             raise ConfirmationRequired.for_effect(effect)
         await self._writer.email_documents(
@@ -324,6 +405,7 @@ class SharingService:
             message=message.strip(),
             use_archive_version=use_archive_version,
         )
+        files = f"{kind} {'file' if len(ids) == 1 else 'files'}"
         done = f"Sent the {files} of {plural(len(ids), 'document')}"
         return EmailSent(
             recipients=tuple(addresses),

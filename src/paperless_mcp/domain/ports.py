@@ -684,6 +684,13 @@ class SharingReader(Protocol):
         """
         ...
 
+    async def get_email_enabled(self) -> bool | None:
+        """Whether Paperless has a mail server set up (``email_enabled`` of the UI settings).
+
+        None means unknown: the user may not view the UI settings.
+        """
+        ...
+
     async def get_share_bundle(self, bundle_id: int) -> ShareBundle:
         """One bundle with its current build status.
 
@@ -729,7 +736,8 @@ class SharingWriter(Protocol):
         The result is usually still ``pending``. ``expiration_days`` counts from now (None: never).
 
         Raises:
-            Validation: No documents, an unknown document, or a bad value.
+            Validation: No documents, a duplicate or unknown document, one the user may not
+                share, or a bad value.
             PermissionDenied: The user may not add bundles.
         """
         ...
@@ -737,7 +745,8 @@ class SharingWriter(Protocol):
     async def rebuild_share_bundle(self, bundle_id: int) -> ShareBundle:
         """Build the archive of a bundle again (for a failed build, or after documents changed).
 
-        The result is ``pending``; the URL stays the same.
+        The result is ``pending``; the URL stays the same and then serves the documents' current
+        files.
 
         Raises:
             NotFound: No such bundle, or the user may not see it.
@@ -767,10 +776,11 @@ class SharingWriter(Protocol):
         """E-mail the files of the documents as attachments through Paperless's mail server.
 
         Raises:
-            Validation: No documents, an unknown document, an invalid address or an empty
-                subject or message.
-            FeatureUnavailable: Paperless could not send the message (no mail server set up, or
-                it refused). Whether anyone received it is unknown.
+            Validation: No documents, an unknown or duplicate document, an invalid address or an
+                empty subject or message.
+            DeliveryUnknown: Paperless failed while sending, or did not answer (it sends
+                synchronously and without a mail server answers 500). Whether anyone received
+                the message is unknown; the request is never repeated.
             PermissionDenied: The user may not see a document.
         """
         ...

@@ -86,6 +86,16 @@ class ShareLinkListing(BaseModel):
     links: tuple[ShareLinkInfo, ...]
 
 
+class SharedDocument(BaseModel):
+    """A document in a bundle."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
+
+    id: int
+    title: Annotated[str | None, Field(description="Null if the user may not see the document.")]
+    web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+
+
 class ShareBundleInfo(BaseModel):
     """A share-link bundle: one URL for a ZIP archive of several documents."""
 
@@ -105,7 +115,7 @@ class ShareBundleInfo(BaseModel):
             )
         ),
     ]
-    document_ids: tuple[int, ...]
+    documents: tuple[SharedDocument, ...]
     document_count: int
     file_version: FileVersionKind
     size_bytes: Annotated[int | None, Field(description="The archive size once built.")]

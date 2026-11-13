@@ -95,8 +95,13 @@ def destructive(tool: Tool) -> bool:
     )
 
 
-def unconfirmed(tools: list[Tool]) -> list[str]:
-    """Destructive tools without an optional `confirm: bool = False` (described or not)."""
+# Tools that publish documents to anyone with a URL (decision-17): they need confirm although
+# they are not destructive.
+PUBLISHING = frozenset({"create_share_link", "create_share_bundle"})
+
+
+def unconfirmed(tools: list[Tool], publishing: frozenset[str] = PUBLISHING) -> list[str]:
+    """Destructive or publishing tools without an optional `confirm: bool = False`."""
 
     def confirmed(tool: Tool) -> bool:
         properties = cast("dict[str, dict[str, object]]", tool.parameters.get("properties", {}))
@@ -107,7 +112,7 @@ def unconfirmed(tools: list[Tool]) -> list[str]:
             and "confirm" not in cast("list[str]", tool.parameters.get("required", []))
         )
 
-    return [t.name for t in tools if destructive(t) and not confirmed(t)]
+    return [t.name for t in tools if (destructive(t) or t.name in publishing) and not confirmed(t)]
 
 
 def formats(schema: object) -> set[str]:
@@ -213,6 +218,21 @@ async def test_destructive_tools_need_confirm_defaulting_to_false() -> None:
     assert unconfirmed(await server_tools()) == []
 
 
+@pytest.mark.decision("decision-17")
+async def test_the_publishing_tools_exist_and_need_confirm() -> None:
+    tools = await server_tools()
+
+    assert {t.name for t in tools} >= PUBLISHING
+    assert unconfirmed(tools, PUBLISHING) == []
+
+
+@pytest.mark.decision("decision-17")
+async def test_self_test_a_publishing_tool_without_a_false_confirm_is_found() -> None:
+    found = set(unconfirmed(await offending_tools(), frozenset({"publish_without_confirm"})))
+
+    assert "publish_without_confirm" in found
+
+
 @pytest.mark.decision("decision-6")
 async def test_the_confirm_check_has_destructive_tools_to_check() -> None:
     # Guards the check above against passing for want of a destructive tool.
@@ -314,6 +334,13 @@ async def delete_everything(*, confirm: bool = True) -> bool:
 @boundary
 async def drop_without_confirm() -> None:
     """Not read-only and not marked non-destructive: destructive by MCP's default."""
+
+
+@offenders.tool(
+    annotations=ToolAnnotations(title="Publish", destructive_hint=False, open_world_hint=True)
+)
+async def publish_without_confirm() -> None:
+    """Publishes without a confirm; not destructive, which only the publishing list catches."""
 
 
 @offenders.tool(annotations=ToolAnnotations(title="Empty trash", destructive_hint=True))

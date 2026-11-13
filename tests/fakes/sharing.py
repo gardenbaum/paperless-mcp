@@ -9,10 +9,12 @@ write guard), so `paperless.py` does not grow further.
   for a hidden document is a 403, a bundle's is a 400 "Documents not found"). Owning them is not
   required: probed on 3.4.2, a user with only a view grant can share a document (the docs say
   only owners can, which the API does not enforce).
+- Duplicate bundle or e-mail documents are a 400; a bundle with a document the user cannot see is
+  a 400 "Insufficient permissions to share document N", an e-mail with one a 403.
 - A bundle is `pending` when created or rebuilt and `ready` from its next read on: Paperless
   builds the archive in the background, a moment later.
 - The fake has no mail server unless a test sets `data.email_enabled`, like the E2E stack:
-  a valid message then fails the way Paperless 3.4.2 does (a 500, here `FeatureUnavailable`).
+  a valid message then fails the way Paperless 3.4.2 does (a 500, here `DeliveryUnknown`).
 """
 
 import secrets
@@ -23,7 +25,7 @@ from typing import TYPE_CHECKING
 from fakes.document_values import reject
 from paperless_mcp.domain.errors import PermissionDenied
 from paperless_mcp.domain.sharing import ShareBundle, ShareLink
-from paperless_mcp.paperless.sharing import not_sent, unseen_bundle, unseen_link
+from paperless_mcp.paperless.sharing import send_failed, unseen_bundle, unseen_link
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -242,9 +244,14 @@ def create_bundle(
         reject("document_ids", "This list may not be empty.")
     if expiration_days is not None and expiration_days < 1:
         reject("expiration_days", "Ensure this value is greater than or equal to 1.")
-    unknown = sorted(set(document_ids) - user.visible)
+    if len(set(document_ids)) != len(document_ids):
+        reject("document_ids", "Duplicate document identifiers are not allowed.")
+    unknown = sorted(set(document_ids) - set(user.titles))
     if unknown:
         reject("document_ids", f"Documents not found: {', '.join(map(str, unknown))}")
+    for number in document_ids:
+        if number not in user.visible:
+            reject("document_ids", f"Insufficient permissions to share document {number}")
     row = FakeShareBundle(
         id=_next(data.bundles),
         documents=tuple(sorted(set(document_ids))),
@@ -296,10 +303,12 @@ def email(  # noqa: PLR0913 -- the port's arguments
         reject("subject", "This field may not be blank.")
     if not message:
         reject("message", "This field may not be blank.")
-    if len(set(document_ids)) != len(document_ids) or not set(document_ids) <= user.visible:
+    if len(set(document_ids)) != len(document_ids) or not set(document_ids) <= set(user.titles):
         reject("documents", "Some documents in documents don't exist or were specified twice.")
+    if not set(document_ids) <= user.visible:
+        raise denied()
     if not data.email_enabled:
-        raise not_sent()
+        raise send_failed()
     data.outbox.append(
         SentEmail(
             documents=tuple(document_ids),

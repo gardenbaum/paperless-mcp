@@ -127,7 +127,9 @@ def error_for_status(response: httpx2.Response) -> PaperlessMcpError:
         return error(message, hint=hint)
     if status == HTTPStatus.TOO_MANY_REQUESTS or status >= HTTPStatus.INTERNAL_SERVER_ERROR:
         return UpstreamUnavailable(
-            f"Paperless is temporarily unavailable (HTTP {status}).", hint=RETRY_LATER
+            f"Paperless is temporarily unavailable (HTTP {status}).",
+            hint=RETRY_LATER,
+            status=status,
         )
     return PaperlessMcpError(f"Paperless answered with HTTP {status}.")
 

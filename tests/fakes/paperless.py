@@ -2382,6 +2382,10 @@ class FakePaperless:
         """`SharingReader.list_share_bundles`."""
         return sharing.list_bundles(self._sharing(), self._viewer())
 
+    async def get_email_enabled(self) -> bool | None:
+        """`SharingReader.get_email_enabled` (UiSettingsView; 403 without `view_uisettings`)."""
+        return self.state.email_enabled if self.user.has("view_uisettings") else None
+
     async def get_share_bundle(self, bundle_id: int) -> ShareBundle:
         """`SharingReader.get_share_bundle`."""
         return sharing.get_bundle(self._sharing(), self._viewer(), bundle_id)

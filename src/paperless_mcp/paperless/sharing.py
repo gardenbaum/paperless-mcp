@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING, Final
 from pydantic import BaseModel
 
 from paperless_mcp.domain.errors import (
-    FeatureUnavailable,
+    DeliveryUnknown,
     NotFound,
     PaperlessMcpError,
+    PermissionDenied,
     UpstreamTimeout,
     UpstreamUnavailable,
     UpstreamUnreachable,
@@ -34,6 +35,11 @@ if TYPE_CHECKING:
 LINKS: Final = "/api/share_links/"
 BUNDLES: Final = "/api/share_link_bundles/"
 EMAIL: Final = "/api/documents/email/"
+UI_SETTINGS: Final = "/api/ui_settings/"
+# Paperless sends the mail inside the request, so it can take long (seconds per attachment).
+EMAIL_TIMEOUT: Final = 120.0
+# Statuses that mean the request was refused before anything was sent.
+NOT_SENT: Final = frozenset({429, 503})
 MAX_ERROR = 200
 
 
@@ -60,6 +66,14 @@ class _BundleRow(BaseModel):
     documents: list[int]
 
 
+class _MailSettings(BaseModel):
+    email_enabled: bool | None = None
+
+
+class _Ui(BaseModel):
+    settings: _MailSettings
+
+
 class _Sent(BaseModel):
     message: str | None = None
 
@@ -76,14 +90,24 @@ def unseen_bundle(bundle_id: int) -> NotFound:
     return NotFound(message, hint="Call list_share_bundles to see the bundles you can use.")
 
 
-def not_sent() -> FeatureUnavailable:
-    """The error for an e-mail that Paperless failed to send."""
-    return FeatureUnavailable(
-        "Paperless could not send the e-mail; whether any recipient got it is unknown.",
+def send_failed() -> DeliveryUnknown:
+    """The error for an e-mail during whose sending Paperless failed."""
+    return DeliveryUnknown(
+        "Paperless failed while sending the e-mail; whether any recipient got it is unknown.",
         hint=(
-            "The usual cause is a Paperless without a mail server: an administrator sets "
-            "PAPERLESS_EMAIL_HOST and the related variables. Check the Paperless log before "
-            "sending again."
+            "Check the Paperless log and ask the user before sending again: Paperless sends "
+            "synchronously, so a repeat can send it twice."
+        ),
+    )
+
+
+def no_answer() -> DeliveryUnknown:
+    """The error for an e-mail request that got no answer."""
+    return DeliveryUnknown(
+        "Paperless did not answer; whether the e-mail was sent is unknown.",
+        hint=(
+            "Check with the user and the Paperless log before sending again: Paperless sends "
+            "synchronously, so a repeat can send it twice."
         ),
     )
 
@@ -164,6 +188,13 @@ class PaperlessSharingReader:
             raise PaperlessMcpError(message)
         return tuple(_bundle(row) for row in collected.items)
 
+    async def get_email_enabled(self) -> bool | None:
+        """See ``SharingReader.get_email_enabled``."""
+        try:
+            return (await self._client.get(UI_SETTINGS, _Ui)).settings.email_enabled
+        except PermissionDenied:
+            return None
+
     async def get_share_bundle(self, bundle_id: int) -> ShareBundle:
         """See ``SharingReader.get_share_bundle``."""
         try:
@@ -243,7 +274,7 @@ class PaperlessSharingWriter:
         message: str,
         use_archive_version: bool,
     ) -> None:
-        """See ``SharingWriter.email_documents``: a failure on Paperless's side is not retried."""
+        """See ``SharingWriter.email_documents``: never retried, with a longer timeout."""
         body = {
             "documents": list(document_ids),
             "addresses": ",".join(addresses),
@@ -252,8 +283,12 @@ class PaperlessSharingWriter:
             "use_archive_version": use_archive_version,
         }
         try:
-            _ = await self._client.call("POST", EMAIL, _Sent, json=body, retry=False)
+            _ = await self._client.call(
+                "POST", EMAIL, _Sent, json=body, timeout=EMAIL_TIMEOUT, retry=False
+            )
         except UpstreamTimeout, UpstreamUnreachable:
-            raise
-        except UpstreamUnavailable:
-            raise not_sent() from None
+            raise no_answer() from None
+        except UpstreamUnavailable as error:
+            if error.status in NOT_SENT:
+                raise
+            raise send_failed() from None

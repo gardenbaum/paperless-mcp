@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from paperless_mcp.domain.errors import FeatureUnavailable, NotFound, PermissionDenied, Validation
+from paperless_mcp.domain.errors import DeliveryUnknown, NotFound, PermissionDenied, Validation
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -28,6 +28,7 @@ LIST_BUNDLES, GET_BUNDLE = "SharingReader.list_share_bundles", "SharingReader.ge
 CREATE_LINK, DELETE_LINK = "SharingWriter.create_share_link", "SharingWriter.delete_share_link"
 CREATE_BUNDLE, REBUILD = "SharingWriter.create_share_bundle", "SharingWriter.rebuild_share_bundle"
 DELETE_BUNDLE, EMAIL = "SharingWriter.delete_share_bundle", "SharingWriter.email_documents"
+GET_EMAIL = "SharingReader.get_email_enabled"
 EXPIRY = datetime(2030, 1, 1, tzinfo=UTC)
 ADDRESS = "someone@example.com"
 LINKING = frozenset({"view_document", "view_sharelink", "add_sharelink", "delete_sharelink"})
@@ -284,7 +285,9 @@ async def test_a_user_bundles_the_documents_it_can_see_and_no_others(backend: Ba
     )
     try:
         assert made.document_ids == (seen,)
-        with pytest.raises(Validation, match=str(hidden)):
+        with pytest.raises(
+            Validation, match=f"Insufficient permissions to share document {hidden}"
+        ):
             _ = await sharer.sharing_writes.create_share_bundle(
                 [seen, hidden], expiration_days=None, file_version="archive"
             )
@@ -411,7 +414,7 @@ async def test_an_email_needs_existing_documents(backend: Backend) -> None:
 async def test_an_email_fails_where_paperless_has_no_mail_server(backend: Backend) -> None:
     [document] = backend.new_documents(1)
 
-    with pytest.raises(FeatureUnavailable, match="could not send"):
+    with pytest.raises(DeliveryUnknown, match="failed while sending"):
         await backend.admin.sharing_writes.email_documents(
             [document],
             addresses=[ADDRESS],
@@ -419,3 +422,52 @@ async def test_an_email_fails_where_paperless_has_no_mail_server(backend: Backen
             message="m",
             use_archive_version=True,
         )
+
+
+@pytest.mark.contract(EMAIL)
+async def test_an_email_for_a_document_the_user_cannot_see_is_denied(backend: Backend) -> None:
+    [document] = backend.new_documents(1)
+    sender = backend.restricted(frozenset({"view_document"}))
+
+    with pytest.raises(PermissionDenied):
+        await sender.sharing_writes.email_documents(
+            [document],
+            addresses=[ADDRESS],
+            subject="s",
+            message="m",
+            use_archive_version=True,
+        )
+
+
+@pytest.mark.contract(EMAIL)
+async def test_an_email_names_each_document_once(backend: Backend) -> None:
+    [document] = backend.new_documents(1)
+
+    with pytest.raises(Validation, match="documents"):
+        await backend.admin.sharing_writes.email_documents(
+            [document, document],
+            addresses=[ADDRESS],
+            subject="s",
+            message="m",
+            use_archive_version=True,
+        )
+
+
+@pytest.mark.contract(CREATE_BUNDLE)
+async def test_a_bundle_names_each_document_once(backend: Backend) -> None:
+    [document] = backend.new_documents(1)
+
+    with pytest.raises(Validation, match="Duplicate document identifiers"):
+        _ = await backend.admin.sharing_writes.create_share_bundle(
+            [document, document], expiration_days=None, file_version="archive"
+        )
+
+
+@pytest.mark.contract(GET_EMAIL)
+async def test_the_mail_setting_is_off_on_the_test_stack_and_unknown_without_ui_rights(
+    backend: Backend,
+) -> None:
+    assert await backend.admin.sharing.get_email_enabled() is False
+    assert await backend.blind.sharing.get_email_enabled() is False
+    nobody = backend.restricted(frozenset({"view_document"}))
+    assert await nobody.sharing.get_email_enabled() is None

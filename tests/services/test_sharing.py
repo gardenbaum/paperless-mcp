@@ -5,17 +5,18 @@ on any write, so a passing test proves nothing was written or sent.
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import final
+from typing import TYPE_CHECKING, final, override
 
 import pytest
 from fakes.accounts import ADMIN
-from fakes.paperless import FakeDocument, FakePaperless, FakeState, seeded
+from fakes.paperless import FakeDocument, FakePaperless, FakeState, FakeUser, seeded
 
 from paperless_mcp.domain.errors import (
     CONFIRM_HINT,
     ConfirmationRequired,
     FeatureUnavailable,
     NotFound,
+    PermissionDenied,
     Validation,
 )
 from paperless_mcp.services.sharing import (
@@ -30,6 +31,9 @@ pytestmark = [
     pytest.mark.decision("decision-6"),
     pytest.mark.decision("decision-15"),
 ]
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 WEB = "https://docs.example.org/paperless"
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=UTC)
@@ -64,7 +68,9 @@ def test_a_share_url_is_the_public_url_the_share_route_and_the_slug() -> None:
 async def test_a_created_link_is_a_full_url_on_the_public_url_with_its_expiry() -> None:
     setup = Setup()
 
-    made = await setup.service.create_link(1, expires_in_days=7, file_version="original")
+    made = await setup.service.create_link(
+        1, expires_in_days=7, file_version="original", confirm=True
+    )
 
     stored = setup.state.share_links[0]
     assert made.url == f"{WEB}/share/{stored.slug}"
@@ -78,7 +84,9 @@ async def test_a_created_link_is_a_full_url_on_the_public_url_with_its_expiry() 
 async def test_a_link_without_days_never_expires() -> None:
     setup = Setup()
 
-    made = await setup.service.create_link(1, expires_in_days=None, file_version="archive")
+    made = await setup.service.create_link(
+        1, expires_in_days=None, file_version="archive", confirm=True
+    )
 
     assert (made.expiration, made.expired) == (None, False)
 
@@ -88,14 +96,18 @@ async def test_days_outside_the_range_are_refused_before_anything_is_sent(days: 
     setup = Setup(writes=False)
 
     with pytest.raises(Validation, match="expires_in_days"):
-        _ = await setup.service.create_link(1, expires_in_days=days, file_version="archive")
+        _ = await setup.service.create_link(
+            1, expires_in_days=days, file_version="archive", confirm=True
+        )
 
 
 async def test_a_link_for_a_document_the_user_cannot_see_says_so() -> None:
     setup = Setup()
 
     with pytest.raises(NotFound, match="No document 99 exists") as raised:
-        _ = await setup.service.create_link(99, expires_in_days=None, file_version="archive")
+        _ = await setup.service.create_link(
+            99, expires_in_days=None, file_version="archive", confirm=True
+        )
 
     assert raised.value.hint == "Use search_documents to find the document."
 
@@ -104,7 +116,9 @@ async def test_the_links_are_listed_in_pages_and_can_be_limited_to_a_document() 
     setup = Setup()
     [other] = setup.documents(1)
     for document in (1, 1, other):
-        _ = await setup.service.create_link(document, expires_in_days=None, file_version="archive")
+        _ = await setup.service.create_link(
+            document, expires_in_days=None, file_version="archive", confirm=True
+        )
     setup.state.share_links[0].expiration = NOW - timedelta(days=1)
 
     first = await setup.service.list_links(None, page=1, page_size=2)
@@ -127,7 +141,9 @@ async def test_a_page_beyond_the_last_is_not_found() -> None:
 
 async def test_deleting_a_link_without_confirm_says_who_loses_access_and_deletes_nothing() -> None:
     setup = Setup()
-    made = await setup.service.create_link(1, expires_in_days=None, file_version="archive")
+    made = await setup.service.create_link(
+        1, expires_in_days=None, file_version="archive", confirm=True
+    )
     guarded = SharingService(
         FakePaperless(setup.state, user=ADMIN[0]),
         FakePaperless(setup.state, user=ADMIN[0]),
@@ -149,7 +165,9 @@ async def test_deleting_a_link_without_confirm_says_who_loses_access_and_deletes
 
 async def test_a_confirmed_delete_removes_the_link_and_says_so() -> None:
     setup = Setup()
-    made = await setup.service.create_link(1, expires_in_days=None, file_version="archive")
+    made = await setup.service.create_link(
+        1, expires_in_days=None, file_version="archive", confirm=True
+    )
 
     gone = await setup.service.delete_link(made.id, confirm=True)
 
@@ -167,11 +185,17 @@ async def test_a_confirmed_delete_removes_the_link_and_says_so() -> None:
 async def test_a_created_bundle_is_pending_with_a_full_url_and_the_documents() -> None:
     setup = Setup()
 
-    made = await setup.service.create_bundle([2, 1, 2], expires_in_days=2, file_version="original")
+    made = await setup.service.create_bundle(
+        [2, 1, 2], expires_in_days=2, file_version="original", confirm=True
+    )
 
     stored = setup.state.share_bundles[0]
     assert made.url == f"{WEB}/share/{stored.slug}"
-    assert (made.status, made.document_ids, made.document_count) == ("pending", (1, 2), 2)
+    assert (made.status, made.document_count) == ("pending", 2)
+    assert [(d.id, d.title, d.web_url) for d in made.documents] == [
+        (1, PUBLIC_TITLE, f"{WEB}/documents/1/details"),
+        (2, "e2e-private-note", f"{WEB}/documents/2/details"),
+    ]
     assert made.file_version == "original"
     assert made.expiration == NOW + timedelta(days=2)
     assert stored.documents == (1, 2)
@@ -189,14 +213,16 @@ async def test_a_bundle_needs_one_to_the_most_documents(documents: list[int], me
 
     with pytest.raises(Validation, match=message):
         _ = await setup.service.create_bundle(
-            documents, expires_in_days=None, file_version="archive"
+            documents, expires_in_days=None, file_version="archive", confirm=True
         )
 
 
 async def test_the_bundle_listing_shows_the_build_state_in_pages() -> None:
     setup = Setup()
     for _ in range(3):
-        _ = await setup.service.create_bundle([1], expires_in_days=None, file_version="archive")
+        _ = await setup.service.create_bundle(
+            [1], expires_in_days=None, file_version="archive", confirm=True
+        )
 
     first = await setup.service.list_bundles(page=1, page_size=2)
     second = await setup.service.list_bundles(page=2, page_size=2)
@@ -209,7 +235,9 @@ async def test_the_bundle_listing_shows_the_build_state_in_pages() -> None:
 
 async def test_a_rebuilt_bundle_comes_back_pending_with_the_same_url() -> None:
     setup = Setup()
-    made = await setup.service.create_bundle([1], expires_in_days=None, file_version="archive")
+    made = await setup.service.create_bundle(
+        [1], expires_in_days=None, file_version="archive", confirm=True
+    )
     _ = await setup.service.list_bundles(page=1, page_size=25)  # the build completes
 
     rebuilt = await setup.service.rebuild_bundle(made.id)
@@ -219,7 +247,9 @@ async def test_a_rebuilt_bundle_comes_back_pending_with_the_same_url() -> None:
 
 async def test_a_failed_bundle_shows_why() -> None:
     setup = Setup()
-    made = await setup.service.create_bundle([1], expires_in_days=None, file_version="archive")
+    made = await setup.service.create_bundle(
+        [1], expires_in_days=None, file_version="archive", confirm=True
+    )
     setup.state.share_bundles[0].status = "failed"
     setup.state.share_bundles[0].last_error = "disk full"
 
@@ -230,7 +260,9 @@ async def test_a_failed_bundle_shows_why() -> None:
 
 async def test_deleting_a_bundle_without_confirm_says_what_stops_working() -> None:
     setup = Setup()
-    made = await setup.service.create_bundle([1, 2], expires_in_days=None, file_version="archive")
+    made = await setup.service.create_bundle(
+        [1, 2], expires_in_days=None, file_version="archive", confirm=True
+    )
     guarded = SharingService(
         FakePaperless(setup.state, user=ADMIN[0]),
         FakePaperless(setup.state, user=ADMIN[0]),
@@ -251,7 +283,9 @@ async def test_deleting_a_bundle_without_confirm_says_what_stops_working() -> No
 
 async def test_a_confirmed_bundle_delete_removes_it() -> None:
     setup = Setup()
-    made = await setup.service.create_bundle([1], expires_in_days=None, file_version="archive")
+    made = await setup.service.create_bundle(
+        [1], expires_in_days=None, file_version="archive", confirm=True
+    )
 
     gone = await setup.service.delete_bundle(made.id, confirm=True)
 
@@ -280,9 +314,11 @@ async def test_an_unconfirmed_email_names_the_recipients_and_the_documents_and_s
         )
 
     assert raised.value.message == (
-        "Nothing was changed. Confirming would send an e-mail with the archive files of "
+        "Nothing was changed. Confirming would send an e-mail with the archive files (the "
+        "original where there is none) of "
         "'e2e-public-invoice' (id 1) and 'e2e-private-note' (id 2) to a@example.com and "
-        "b@example.com; it leaves Paperless and cannot be recalled."
+        "b@example.com (all of them in one To: header, so each sees the others), "
+        "subject 'Invoices', message 'Attached.'; it leaves Paperless and cannot be recalled."
     )
     assert raised.value.hint == CONFIRM_HINT
     assert setup.state.outbox == []
@@ -343,7 +379,7 @@ async def test_an_email_with_one_document_and_one_recipient_reads_in_the_singula
 async def test_an_email_where_paperless_has_no_mail_server_is_reported() -> None:
     setup = Setup(mail=False)
 
-    with pytest.raises(FeatureUnavailable, match="could not send"):
+    with pytest.raises(FeatureUnavailable, match="no mail server set up"):
         _ = await setup.service.email(
             [1],
             recipients=["a@example.com"],
@@ -409,6 +445,164 @@ async def test_an_email_for_a_document_the_user_cannot_see_names_it() -> None:
     with pytest.raises(NotFound, match="No document 99 exists"):
         _ = await setup.service.email(
             [1, 99],
+            recipients=["a@example.com"],
+            subject="s",
+            message="m",
+            use_archive_version=True,
+            confirm=False,
+        )
+
+
+# --- confirmation of publishing (decision-17) ----------------------------------------------------
+
+
+async def test_creating_a_link_without_confirm_says_what_becomes_public() -> None:
+    setup = Setup(writes=False)
+
+    with pytest.raises(ConfirmationRequired) as raised:
+        _ = await setup.service.create_link(
+            1, expires_in_days=7, file_version="archive", confirm=False
+        )
+
+    assert raised.value.message == (
+        "Nothing was changed. Confirming would publish the archive file (the original where "
+        "there is none) of 'e2e-public-invoice' (id 1) under a public share link that expires "
+        "in 7 days; anyone with the URL can download it without logging in."
+    )
+    assert raised.value.hint == CONFIRM_HINT
+
+
+async def test_the_refusal_for_a_link_says_when_it_never_expires_and_which_file_goes_out() -> None:
+    setup = Setup(writes=False)
+
+    with pytest.raises(
+        ConfirmationRequired, match=r"the original file of 'e2e-public-invoice'.*never"
+    ):
+        _ = await setup.service.create_link(
+            1, expires_in_days=None, file_version="original", confirm=False
+        )
+
+
+async def test_creating_a_bundle_without_confirm_names_every_document_and_publishes_nothing() -> (
+    None
+):
+    setup = Setup(writes=False)
+
+    with pytest.raises(ConfirmationRequired) as raised:
+        _ = await setup.service.create_bundle(
+            [1, 2], expires_in_days=1, file_version="original", confirm=False
+        )
+
+    assert raised.value.message == (
+        "Nothing was changed. Confirming would publish the original files of "
+        "'e2e-public-invoice' (id 1) and 'e2e-private-note' (id 2) as one ZIP archive under a "
+        "public share link that expires in 1 day; anyone with the URL can download it without "
+        "logging in."
+    )
+    assert setup.state.share_bundles == []
+
+
+async def test_the_confirmation_is_asked_only_for_documents_the_user_can_see() -> None:
+    setup = Setup(writes=False)
+
+    with pytest.raises(NotFound, match="No document 99"):
+        _ = await setup.service.create_bundle(
+            [1, 99], expires_in_days=None, file_version="archive", confirm=False
+        )
+
+
+# --- bundle documents, mail setting ---------------------------------------------------------------
+
+
+@final
+class Counting(FakePaperless):
+    """A Paperless that counts the title reads."""
+
+    reads: int = 0
+
+    @override
+    async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
+        self.reads += 1
+        return await super().get_document_titles(document_ids)
+
+
+@final
+class Blind(FakePaperless):
+    """A Paperless that does not let the user read titles."""
+
+    @override
+    async def get_document_titles(self, document_ids: Collection[int]) -> dict[int, str]:
+        message = "no"
+        raise PermissionDenied(message)
+
+
+async def test_the_titles_of_all_the_listed_bundles_are_read_in_one_call() -> None:
+    setup = Setup()
+    for documents in ([1], [1, 2]):
+        _ = await setup.service.create_bundle(
+            documents, expires_in_days=None, file_version="archive", confirm=True
+        )
+    counting = Counting(setup.state, user=ADMIN[0])
+    service = SharingService(counting, counting, counting, web_url=WEB, now=lambda: NOW)
+
+    listing = await service.list_bundles(page=1, page_size=25)
+
+    assert counting.reads == 1
+    assert [[d.title for d in b.documents] for b in listing.bundles] == [
+        [PUBLIC_TITLE],
+        [PUBLIC_TITLE, "e2e-private-note"],
+    ]
+
+
+async def test_an_empty_bundle_listing_reads_no_titles() -> None:
+    setup = Setup()
+    counting = Counting(setup.state, user=ADMIN[0])
+    service = SharingService(counting, counting, counting, web_url=WEB, now=lambda: NOW)
+
+    assert (await service.list_bundles(page=1, page_size=25)).bundles == ()
+    assert counting.reads == 0
+
+
+async def test_a_user_who_may_not_read_titles_still_sees_the_documents_by_id() -> None:
+    setup = Setup()
+    _ = await setup.service.create_bundle(
+        [1], expires_in_days=None, file_version="archive", confirm=True
+    )
+    blind = Blind(setup.state, user=ADMIN[0])
+    service = SharingService(blind, blind, blind, web_url=WEB, now=lambda: NOW)
+
+    [bundle] = (await service.list_bundles(page=1, page_size=25)).bundles
+
+    assert [(d.id, d.title) for d in bundle.documents] == [(1, None)]
+
+
+async def test_an_email_is_refused_before_the_confirmation_when_paperless_has_no_mail_server() -> (
+    None
+):
+    setup = Setup(writes=False, mail=False)
+
+    with pytest.raises(FeatureUnavailable) as raised:
+        _ = await setup.service.email(
+            [1],
+            recipients=["a@example.com"],
+            subject="s",
+            message="m",
+            use_archive_version=True,
+            confirm=False,
+        )
+
+    assert not isinstance(raised.value, ConfirmationRequired)
+
+
+async def test_an_unknown_mail_setting_does_not_stop_the_confirmation() -> None:
+    setup = Setup(writes=False, mail=False)
+    setup.state.users.append(FakeUser(id=9, username="no-ui", permissions=frozenset()))
+    nobody = FakePaperless(setup.state, user="no-ui")
+    service = SharingService(nobody, nobody, setup.fake, web_url=WEB, now=lambda: NOW)
+
+    with pytest.raises(ConfirmationRequired):
+        _ = await service.email(
+            [1],
             recipients=["a@example.com"],
             subject="s",
             message="m",

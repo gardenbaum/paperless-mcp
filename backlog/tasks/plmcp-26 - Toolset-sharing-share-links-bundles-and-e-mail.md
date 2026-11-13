@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:26:00Z'
-updated_date: '2026-11-13T21:18:00Z'
+updated_date: '2026-11-13T23:19:00Z'
 labels: []
 milestone: m-3
 dependencies:
@@ -69,4 +69,14 @@ Live finding: despite the docs ('only document owners can create share links'), 
 Gates so far: just check green (2487 tests, total coverage 99.96 %, diff coverage 100 %); just mutation 100.0 % (8423 killed, 4 timeout, 0 survived; 119 reviewed equivalents, 14 of them new for sharing: mutmut's method-case and retry=None/True/omitted variants on POST/DELETE calls, each with its reason in mutation-equivalents.toml). Tests not written red first: tool-level tests (tests/tools/test_sharing.py) and the fake-side contract run were written after the code they exercise (the live contract run was the red check for the fake); the message snapshot and boundary tests were added after the first mutation run to kill surviving mutants.
 
 Full just e2e: 435 passed, 6 skipped, 1 failed (test_more_like_finds_other_documents[live], the known PLMCP-40 failure, not worked around); all sharing contract (live) and E2E tests pass.
+
+Fix round (review findings), after rebasing onto origin/main 715c32b (trash toolset; conflicts resolved keeping both sides, ports.py rebuilt from main plus the sharing ports; the surface snapshot taken from main and regenerated: line-multiset comparison shows additions only).
+- I1: the e-mail POST has its own timeout (120 s) and is never retried. Timeout and transport errors become DeliveryUnknown ('whether the e-mail was sent is unknown', hint: check with the user and the Paperless log before sending again, a repeat can send it twice); so do 500/502/504 ('Paperless failed while sending'); 429/503 stay UpstreamUnavailable (UpstreamUnavailable now carries the HTTP status).
+- I2: create_share_link and create_share_bundle require confirm; the refusal (ConfirmationRequired.for_effect) names each title with id, the file, the expiry or never expires, and that anyone with the URL can download without logging in. New decision-17 (accepted) records it; the registry test requires confirm on both tools (PUBLISHING set, with a synthetic self-test). decision-17, not 16: 16 was taken.
+- M1: SharingReader.get_email_enabled reads ui_settings email_enabled (separate from the instance overview, so no core output change); false refuses before the confirmation with FeatureUnavailable (PAPERLESS_EMAIL_HOST hint only there), null (no UI rights) lets the flow go on. Live contract covers it: the stack has email disabled.
+- M2/M3: the e-mail confirmation shows the quoted subject and a message excerpt (80 chars) and, with several recipients, that they share one To: header; archive wording is 'archive file (the original where there is none)'.
+- M4: fake follows live: bundle with a hidden document 400 'Insufficient permissions to share document N', e-mail with a hidden document 403, duplicate ids 400 (probed live: 'Duplicate document identifiers are not allowed.'); contract cases added. Correction of an earlier note: a hidden document gives 403 for LINKS (400 for unknown ones), the bundle case is the 400 above.
+- M5: rebuild description says the same public URL then serves the current files; open_world true. M6: bundle results list documents with id, title and web_url (one get_document_titles call per listing; titles null if the user may not read them). M7: parameters are document_id/document_ids, link_id, bundle_id, PositiveId, min/max length on lists as in trash. M8: the expiry hint no longer says link.
+
+Fix round gates (rebased onto bd69553, pdf toolset; conflicts resolved keeping both sides, surface snapshot diff against main is additions only): just check green (2819 tests, total coverage 99.97 %, diff coverage 100 %); just mutation 100.0 % (10299 killed, 11 timeout, 0 survived, 125 reviewed equivalents; the four email_documents entries renumbered); full just e2e 469 passed, 6 skipped, 1 failed (test_more_like_finds_other_documents[live], PLMCP-40). Tests not written red first in the fix round: service, tool, registry, fake/contract and E2E changes were written alongside or after the code (the adapter changes for I1/M1 were red first).
 <!-- SECTION:NOTES:END -->

@@ -81,7 +81,9 @@ def served(stack: Stack, url: object) -> httpx2.Response:
 async def test_a_link_is_created_served_listed_and_deleted(client: Connected, stack: Stack) -> None:
     ids = await document_ids(client)
 
-    made = await call(client, "create_share_link", document=ids[PUBLIC], expires_in_days=2)
+    made = await call(
+        client, "create_share_link", document_id=ids[PUBLIC], expires_in_days=2, confirm=True
+    )
 
     assert str(made["url"]).startswith(f"{PUBLIC_URL}/share/")
     assert made["document_title"] == PUBLIC
@@ -90,23 +92,29 @@ async def test_a_link_is_created_served_listed_and_deleted(client: Connected, st
     fetched = served(stack, made["url"])
     assert fetched.status_code == httpx2.codes.OK
     assert fetched.headers["content-type"] == "application/pdf"
-    listed = await call(client, "list_share_links", document=ids[PUBLIC])
+    listed = await call(client, "list_share_links", document_id=ids[PUBLIC])
     assert made["url"] in {link["url"] for link in cast("list[Json]", listed["links"])}
 
-    text = await error(client, "delete_share_link", link=made["id"])
+    text = await error(client, "delete_share_link", link_id=made["id"])
     assert "Nothing was changed" in text
     assert f"delete share link {made['id']} for the document '{PUBLIC}'" in text
     assert served(stack, made["url"]).status_code == httpx2.codes.OK
-    gone = await call(client, "delete_share_link", link=made["id"], confirm=True)
+    gone = await call(client, "delete_share_link", link_id=made["id"], confirm=True)
     assert gone["id"] == made["id"]
-    after = await call(client, "list_share_links", document=ids[PUBLIC])
+    after = await call(client, "list_share_links", document_id=ids[PUBLIC])
     assert made["url"] not in {link["url"] for link in cast("list[Json]", after["links"])}
 
 
 async def test_a_link_for_the_original_file_and_without_expiry(client: Connected) -> None:
     ids = await document_ids(client)
 
-    made = await call(client, "create_share_link", document=ids[PRIVATE], file_version="original")
+    made = await call(
+        client,
+        "create_share_link",
+        document_id=ids[PRIVATE],
+        file_version="original",
+        confirm=True,
+    )
 
     assert (made["file_version"], made["expiration"]) == ("original", None)
 
@@ -119,24 +127,26 @@ async def test_a_bundle_is_built_served_rebuilt_and_deleted(
     made = await call(
         client,
         "create_share_bundle",
-        documents=[ids[PUBLIC], ids[PRIVATE]],
+        document_ids=[ids[PUBLIC], ids[PRIVATE]],
         expires_in_days=1,
+        confirm=True,
     )
 
     assert made["status"] in {"pending", "processing", "ready"}
     assert made["document_count"] == 2
+    assert {d["title"] for d in cast("list[Json]", made["documents"])} == {PUBLIC, PRIVATE}
     ready = await ready_bundle(client, made["id"])
     assert (ready["status"], ready["url"]) == ("ready", made["url"])
     fetched = served(stack, made["url"])
     assert fetched.headers["content-type"] == "application/zip"
 
-    rebuilt = await call(client, "rebuild_share_bundle", bundle=made["id"])
+    rebuilt = await call(client, "rebuild_share_bundle", bundle_id=made["id"])
     assert (rebuilt["url"], rebuilt["status"]) == (made["url"], "pending")
     assert (await ready_bundle(client, made["id"]))["status"] == "ready"
 
-    text = await error(client, "delete_share_bundle", bundle=made["id"])
+    text = await error(client, "delete_share_bundle", bundle_id=made["id"])
     assert f"delete share-link bundle {made['id']} of 2 documents" in text
-    _ = await call(client, "delete_share_bundle", bundle=made["id"], confirm=True)
+    _ = await call(client, "delete_share_bundle", bundle_id=made["id"], confirm=True)
     rows = cast("list[Json]", (await call(client, "list_share_bundles", page_size=100))["bundles"])
     assert made["id"] not in {row["id"] for row in rows}
 
@@ -152,41 +162,47 @@ async def ready_bundle(client: Connected, bundle_id: object) -> Json:
         await asyncio.sleep(0.5)
 
 
-async def test_an_email_asks_for_confirmation_naming_recipients_and_documents(
+async def test_creating_without_confirm_publishes_nothing_and_says_what_is_public(
+    client: Connected, stack: Stack
+) -> None:
+    ids = await document_ids(client)
+    before = len(results(stack.admin.get("/api/share_links/")))
+
+    link = await error(client, "create_share_link", document_id=ids[PUBLIC], expires_in_days=3)
+    bundle = await error(
+        client,
+        "create_share_bundle",
+        document_ids=[ids[PUBLIC], ids[PRIVATE]],
+        file_version="original",
+    )
+
+    assert f"'{PUBLIC}' (id {ids[PUBLIC]}) under a public share link that expires in 3 days" in link
+    assert "anyone with the URL can download it without logging in" in link
+    assert f"'{PRIVATE}' (id {ids[PRIVATE]})" in bundle
+    assert "the original files of" in bundle
+    assert len(results(stack.admin.get("/api/share_links/"))) == before
+
+
+async def test_an_email_is_refused_up_front_where_paperless_has_no_mail_server(
     client: Connected,
 ) -> None:
     ids = await document_ids(client)
 
-    text = await error(
-        client,
-        "email_documents",
-        documents=[ids[PUBLIC]],
-        recipients=["someone@example.com"],
-        subject="Invoice",
-        message="Attached.",
-    )
+    # The stack has no mail server (ui_settings email_enabled is false): no confirmation is asked.
+    for confirm in (False, True):
+        text = await error(
+            client,
+            "email_documents",
+            document_ids=[ids[PUBLIC]],
+            recipients=["someone@example.com"],
+            subject="Invoice",
+            message="Attached.",
+            confirm=confirm,
+        )
 
-    assert "Nothing was changed" in text
-    assert f"'{PUBLIC}' (id {ids[PUBLIC]})" in text
-    assert "someone@example.com" in text
-
-
-async def test_an_email_without_a_mail_server_fails_and_says_so(client: Connected) -> None:
-    ids = await document_ids(client)
-
-    text = await error(
-        client,
-        "email_documents",
-        documents=[ids[PUBLIC]],
-        recipients=["someone@example.com"],
-        subject="Invoice",
-        message="Attached.",
-        confirm=True,
-    )
-
-    # No mail server on the stack: Paperless answers 500 and the tool says the send failed.
-    assert "could not send the e-mail" in text
-    assert "PAPERLESS_EMAIL_HOST" in text
+        assert "no mail server set up" in text
+        assert "PAPERLESS_EMAIL_HOST" in text
+        assert "Nothing was changed" not in text
 
 
 async def test_an_email_to_an_invalid_address_is_refused_before_the_confirmation(
@@ -197,7 +213,7 @@ async def test_an_email_to_an_invalid_address_is_refused_before_the_confirmation
     text = await error(
         client,
         "email_documents",
-        documents=[ids[PUBLIC]],
+        document_ids=[ids[PUBLIC]],
         recipients=["nobody"],
         subject="Invoice",
         message="Attached.",

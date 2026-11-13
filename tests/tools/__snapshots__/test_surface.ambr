@@ -1536,18 +1536,27 @@
         
         ANYONE WHO HAS THE URL can download the archive without logging in, until the bundle expires
         or is deleted with delete_share_bundle. Paperless builds the archive after this returns, so
-        the status is usually pending: the URL works once list_share_bundles shows ready. Create one
-        only when the user asked to share these documents. Needs the add permission
-        for bundles and documents the user can see.
+        the status is usually pending: the URL works once list_share_bundles shows ready. Without
+        confirm it publishes nothing and fails with an error that names the documents, the files,
+        the expiry and what is public; show that to the user and call again with confirm=true only
+        once they agree. Needs the add permission for bundles and documents the user can see.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
-          'documents': dict({
-            'description': 'Document ids, from search_documents; at most 50.',
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'document_ids': dict({
+            'description': 'Document ids, from search_documents; at most 50, each once.',
             'items': dict({
+              'minimum': 1,
               'type': 'integer',
             }),
+            'maxItems': 50,
+            'minItems': 1,
             'type': 'array',
           }),
           'expires_in_days': dict({
@@ -1562,11 +1571,11 @@
               }),
             ]),
             'default': None,
-            'description': 'The link stops working this many days from now; leave out: it never expires.',
+            'description': 'It stops working this many days from now; leave out: it never expires.',
           }),
           'file_version': dict({
             'default': 'archive',
-            'description': 'archive: the searchable PDF/A Paperless made (the original if it made none); original: the file as it was uploaded.',
+            'description': 'archive: the searchable PDF/A Paperless made (the original where there is none); original: the file as it was uploaded.',
             'enum': list([
               'archive',
               'original',
@@ -1575,7 +1584,7 @@
           }),
         }),
         'required': list([
-          'documents',
+          'document_ids',
         ]),
         'type': 'object',
       }),
@@ -1601,9 +1610,35 @@
           'document_count': dict({
             'type': 'integer',
           }),
-          'document_ids': dict({
+          'documents': dict({
             'items': dict({
-              'type': 'integer',
+              'description': 'A document in a bundle.',
+              'properties': dict({
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'title': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'Null if the user may not see the document.',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'web_url',
+              ]),
+              'type': 'object',
             }),
             'type': 'array',
           }),
@@ -1674,7 +1709,7 @@
           'id',
           'url',
           'status',
-          'document_ids',
+          'documents',
           'document_count',
           'file_version',
           'size_bytes',
@@ -1708,15 +1743,23 @@
         
         ANYONE WHO HAS THE URL can open the file without logging in, until the link expires or is
         deleted with delete_share_link; it can be passed on and cannot be recalled from people who
-        saved the file. Create one only when the user asked to share this document. Needs the add
-        permission for share links and a document the user can see. Creating again makes another
-        link. Use create_share_bundle for several documents at once.
+        saved the file. Without confirm it publishes nothing and fails with an error that names the
+        document, the file, the expiry and what is public; show that to the user and call again with
+        confirm=true only once they agree. Needs the add permission for share links and a document
+        the user can see. Creating again makes another link. Use create_share_bundle for several
+        documents at once.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
-          'document': dict({
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'document_id': dict({
             'description': 'Document id, from search_documents.',
+            'minimum': 1,
             'type': 'integer',
           }),
           'expires_in_days': dict({
@@ -1731,11 +1774,11 @@
               }),
             ]),
             'default': None,
-            'description': 'The link stops working this many days from now; leave out: it never expires.',
+            'description': 'It stops working this many days from now; leave out: it never expires.',
           }),
           'file_version': dict({
             'default': 'archive',
-            'description': 'archive: the searchable PDF/A Paperless made (the original if it made none); original: the file as it was uploaded.',
+            'description': 'archive: the searchable PDF/A Paperless made (the original where there is none); original: the file as it was uploaded.',
             'enum': list([
               'archive',
               'original',
@@ -1744,7 +1787,7 @@
           }),
         }),
         'required': list([
-          'document',
+          'document_id',
         ]),
         'type': 'object',
       }),
@@ -2723,8 +2766,9 @@
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
-          'bundle': dict({
+          'bundle_id': dict({
             'description': 'Bundle id, from list_share_bundles.',
+            'minimum': 1,
             'type': 'integer',
           }),
           'confirm': dict({
@@ -2734,7 +2778,7 @@
           }),
         }),
         'required': list([
-          'bundle',
+          'bundle_id',
         ]),
         'type': 'object',
       }),
@@ -2787,13 +2831,14 @@
             'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
             'type': 'boolean',
           }),
-          'link': dict({
+          'link_id': dict({
             'description': 'Share link id, from list_share_links.',
+            'minimum': 1,
             'type': 'integer',
           }),
         }),
         'required': list([
-          'link',
+          'link_id',
         ]),
         'type': 'object',
       }),
@@ -3258,11 +3303,13 @@
       'description': '''
         Send the files of documents by e-mail through the mail server of Paperless.
         
-        This SENDS THE FILES to outside addresses and cannot be recalled. Without confirm it sends
-        nothing and fails with an error that names the recipients and the documents; show that to
-        the user and call again with confirm=true only once they agree. Paperless needs a mail
-        server configured by its administrator; without one the call fails and says so (whether
-        any recipient got a message is then unknown, so check with the user before sending again).
+        This SENDS THE FILES to outside addresses and cannot be recalled. All recipients appear in
+        one To: header, so each sees the others. Without confirm it sends nothing and fails with an
+        error that names the recipients, the documents, the subject and the start of the message;
+        show that to the user and call again with confirm=true only once they agree. Paperless needs
+        a mail server set up by its administrator; without one the call fails before asking. If it
+        fails while sending, whether anyone got the mail is unknown: check with the user and the
+        Paperless log before sending again, because a repeat can send it twice.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -3272,11 +3319,14 @@
             'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
             'type': 'boolean',
           }),
-          'documents': dict({
-            'description': 'Document ids, from search_documents; at most 50.',
+          'document_ids': dict({
+            'description': 'Document ids, from search_documents; at most 50, each once.',
             'items': dict({
+              'minimum': 1,
               'type': 'integer',
             }),
+            'maxItems': 50,
+            'minItems': 1,
             'type': 'array',
           }),
           'message': dict({
@@ -3289,6 +3339,8 @@
             'items': dict({
               'type': 'string',
             }),
+            'maxItems': 20,
+            'minItems': 1,
             'type': 'array',
           }),
           'subject': dict({
@@ -3303,7 +3355,7 @@
           }),
         }),
         'required': list([
-          'documents',
+          'document_ids',
           'recipients',
           'subject',
           'message',
@@ -5415,9 +5467,35 @@
                 'document_count': dict({
                   'type': 'integer',
                 }),
-                'document_ids': dict({
+                'documents': dict({
                   'items': dict({
-                    'type': 'integer',
+                    'description': 'A document in a bundle.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'title': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                        'description': 'Null if the user may not see the document.',
+                      }),
+                      'web_url': dict({
+                        'description': 'Link to the document in the Paperless web UI.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'title',
+                      'web_url',
+                    ]),
+                    'type': 'object',
                   }),
                   'type': 'array',
                 }),
@@ -5488,7 +5566,7 @@
                 'id',
                 'url',
                 'status',
-                'document_ids',
+                'documents',
                 'document_count',
                 'file_version',
                 'size_bytes',
@@ -5556,9 +5634,10 @@
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
-          'document': dict({
+          'document_id': dict({
             'anyOf': list([
               dict({
+                'minimum': 1,
                 'type': 'integer',
               }),
               dict({
@@ -5566,7 +5645,7 @@
               }),
             ]),
             'default': None,
-            'description': 'Only the links of this document id; default: all.',
+            'description': 'Only the links of this document; default: all.',
           }),
           'page': dict({
             'default': 1,
@@ -6391,26 +6470,28 @@
       'annotations': dict({
         'destructiveHint': False,
         'idempotentHint': True,
-        'openWorldHint': False,
+        'openWorldHint': True,
         'readOnlyHint': False,
         'title': 'Rebuild share bundle',
       }),
       'description': '''
         Build the archive of a bundle again, for example after a failed build.
         
-        The URL and the expiry stay as they are; the status goes back to pending until Paperless has
-        built the archive (check list_share_bundles).
+        The URL and the expiry stay as they are, and the same public URL then serves the documents'
+        current files (a changed document is published again in its new form); the status goes back
+        to pending until Paperless has built the archive (check list_share_bundles).
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
-          'bundle': dict({
+          'bundle_id': dict({
             'description': 'Bundle id, from list_share_bundles.',
+            'minimum': 1,
             'type': 'integer',
           }),
         }),
         'required': list([
-          'bundle',
+          'bundle_id',
         ]),
         'type': 'object',
       }),
@@ -6436,9 +6517,35 @@
           'document_count': dict({
             'type': 'integer',
           }),
-          'document_ids': dict({
+          'documents': dict({
             'items': dict({
-              'type': 'integer',
+              'description': 'A document in a bundle.',
+              'properties': dict({
+                'id': dict({
+                  'type': 'integer',
+                }),
+                'title': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'string',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'Null if the user may not see the document.',
+                }),
+                'web_url': dict({
+                  'description': 'Link to the document in the Paperless web UI.',
+                  'type': 'string',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'web_url',
+              ]),
+              'type': 'object',
             }),
             'type': 'array',
           }),
@@ -6509,7 +6616,7 @@
           'id',
           'url',
           'status',
-          'document_ids',
+          'documents',
           'document_count',
           'file_version',
           'size_bytes',
@@ -17451,9 +17558,35 @@
                 'document_count': dict({
                   'type': 'integer',
                 }),
-                'document_ids': dict({
+                'documents': dict({
                   'items': dict({
-                    'type': 'integer',
+                    'description': 'A document in a bundle.',
+                    'properties': dict({
+                      'id': dict({
+                        'type': 'integer',
+                      }),
+                      'title': dict({
+                        'anyOf': list([
+                          dict({
+                            'type': 'string',
+                          }),
+                          dict({
+                            'type': 'null',
+                          }),
+                        ]),
+                        'description': 'Null if the user may not see the document.',
+                      }),
+                      'web_url': dict({
+                        'description': 'Link to the document in the Paperless web UI.',
+                        'type': 'string',
+                      }),
+                    }),
+                    'required': list([
+                      'id',
+                      'title',
+                      'web_url',
+                    ]),
+                    'type': 'object',
                   }),
                   'type': 'array',
                 }),
@@ -17524,7 +17657,7 @@
                 'id',
                 'url',
                 'status',
-                'document_ids',
+                'documents',
                 'document_count',
                 'file_version',
                 'size_bytes',
@@ -17592,9 +17725,10 @@
       'inputSchema': dict({
         'additionalProperties': False,
         'properties': dict({
-          'document': dict({
+          'document_id': dict({
             'anyOf': list([
               dict({
+                'minimum': 1,
                 'type': 'integer',
               }),
               dict({
@@ -17602,7 +17736,7 @@
               }),
             ]),
             'default': None,
-            'description': 'Only the links of this document id; default: all.',
+            'description': 'Only the links of this document; default: all.',
           }),
           'page': dict({
             'default': 1,

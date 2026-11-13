@@ -355,7 +355,8 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
     ),
     # Publishing: a link or bundle opens the files to anyone who holds the URL, outside Paperless
     # (open world). Not destructive and not idempotent: it takes nothing away, but every call
-    # makes another public URL. The call is the request, so there is no confirm.
+    # makes another public URL. They still need confirm, like an owner change (decision-12,
+    # decision-6, decision-17): what they publish cannot be taken back from those who saved it.
     "create_share_link": ToolAnnotations(
         title="Create share link",
         read_only_hint=False,
@@ -370,13 +371,14 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=False,
         open_world_hint=True,
     ),
-    # Builds the same archive again under the same URL: nothing new is published or lost.
+    # Builds the archive again under the same public URL, which then serves the documents'
+    # current files: what the URL publishes can change (open world), nothing is lost.
     "rebuild_share_bundle": ToolAnnotations(
         title="Rebuild share bundle",
         read_only_hint=False,
         destructive_hint=False,
         idempotent_hint=True,
-        open_world_hint=False,
+        open_world_hint=True,
     ),
     # Destructive (decision-6): a deleted link has no trash; the URL stops working for people who
     # rely on it. Deleting again leaves the state as it is (idempotent), though the call fails.
