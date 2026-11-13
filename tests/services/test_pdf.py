@@ -63,13 +63,27 @@ class Slow(FakePaperless):
         self.read_error: Exception | None = None
         self.failing: str | None = None
         self.lose_tasks: int = 0
+        self.lose_first: bool = False
+        self.hide_sources: bool = False
         self.lookup_problem: Literal["forbidden", "failed"] | None = None
         self.keep_documents: bool = False
 
     @override
-    def _seen_tasks(self, task_ids: tuple[str, ...], expected: int | None = None) -> StartedTasks:
+    def _seen_tasks(
+        self,
+        task_ids: tuple[str, ...],
+        expected: int | None = None,
+        sources: tuple[int | None, ...] = (),
+    ) -> StartedTasks:
+        total = len(task_ids)
+        if self.hide_sources:
+            sources = tuple(None for _ in task_ids)
+        if self.lose_first:
+            task_ids, sources = task_ids[1:], sources[1:]
         kept = task_ids[: len(task_ids) - self.lose_tasks]
-        started = super()._seen_tasks(kept, len(task_ids) if expected is None else expected)
+        started = super()._seen_tasks(
+            kept, total if expected is None else expected, sources[: len(kept)]
+        )
         if self.lookup_problem:
             return StartedTasks(
                 ids=started.ids, expected=started.expected, problem=self.lookup_problem
@@ -1330,3 +1344,58 @@ async def test_the_count_of_missing_tasks_is_worded_for_one_or_several_found() -
         "Paperless accepted the request, but only 2 of the 3 tasks it starts showed up: the "
         "state covers those only."
     )
+
+
+async def test_a_partly_found_rotation_links_each_version_to_its_own_document() -> None:
+    setup = Setup()
+    setup.fake.lose_first = True
+    first, second = setup.pdf(1), setup.pdf(1)
+
+    result = await setup.service.rotate([first, second], 90, wait_seconds=1)
+
+    assert len(result.produced_ids) == 1
+    assert result.produced_links == (f"{WEB}/documents/{second}/details",)
+    assert result.state == "unknown"
+
+
+async def test_a_task_whose_document_is_not_known_gets_no_link_among_several_sources() -> None:
+    setup = Setup()
+    setup.fake.hide_sources = True
+    first, second = setup.pdf(1), setup.pdf(1)
+
+    result = await setup.service.rotate([first, second], 90, wait_seconds=1)
+
+    assert len(result.produced_ids) == 2
+    assert result.produced_links == ()
+
+
+async def test_a_task_still_running_does_not_stop_the_links_of_the_ones_after_it() -> None:
+    setup = Setup(slow_reads=1)
+    first, second = setup.pdf(1), setup.pdf(1)
+
+    result = await setup.service.rotate([first, second], 90, wait_seconds=1)
+
+    assert [t.state for t in result.tasks] == ["started", "success"]
+    assert result.produced_links == (f"{WEB}/documents/{second}/details",)
+
+
+async def test_the_documents_of_every_file_of_a_split_are_linked() -> None:
+    setup = Setup()
+    document = setup.pdf(4)
+
+    result = await setup.service.split(document, ["1-2", "3-4"], wait_seconds=1)
+
+    assert result.produced_links == tuple(
+        f"{WEB}/documents/{n}/details" for n in result.produced_ids
+    )
+    assert len(result.produced_links) == 2
+
+
+async def test_with_one_source_a_task_that_does_not_name_it_still_gets_its_link() -> None:
+    setup = Setup()
+    setup.fake.hide_sources = True
+    document = setup.pdf(1)
+
+    result = await setup.service.rotate([document], 90, wait_seconds=1)
+
+    assert result.produced_links == (f"{WEB}/documents/{document}/details",)

@@ -68,6 +68,12 @@ class _Task(BaseModel):
         name = data.get("filename") if isinstance(data, dict) else None
         return name if isinstance(name, str) else ""
 
+    @property
+    def source(self) -> int | None:
+        """The document the task works on: the number a ``{id}_...`` file name starts with."""
+        head = self.filename.partition("_")[0]
+        return int(head) if head.isascii() and head.isdigit() else None
+
 
 class _User(BaseModel):
     id: int
@@ -164,7 +170,9 @@ class PaperlessPdfWriter:
             "metadata_document_id": metadata_document_id,
             "delete_originals": delete_originals,
         }
-        return await self._run("merge", body, CONSUME, _merged(document_ids), 1)
+        started = await self._run("merge", body, CONSUME, _merged(document_ids), 1)
+        # The file name starts with the first document, but the result is a document of its own.
+        return started.model_copy(update={"sources": ()})
 
     async def edit_pdf(
         self, document_id: int, pages: Sequence[PageSlot], *, output: Output
@@ -249,11 +257,19 @@ class PaperlessPdfWriter:
                     found = await self._tasks_after(mark, kind, user, match)
                 except PaperlessMcpError:
                     # Fewer than expected were found, or the loop would have ended.
-                    ids = tuple(task.task_id for task in found)
-                    return StartedTasks(ids=ids, expected=expected, problem="failed")
+                    return StartedTasks(
+                        ids=tuple(task.task_id for task in found),
+                        expected=expected,
+                        sources=tuple(task.source for task in found),
+                        problem="failed",
+                    )
                 left = deadline - self._clock()
                 if len(found) >= expected or left <= 0:
-                    return StartedTasks(ids=_ids(found, expected), expected=expected)
+                    return StartedTasks(
+                        ids=_ids(found, expected),
+                        expected=expected,
+                        sources=_sources(found, expected),
+                    )
                 await self._sleep(min(self._poll, left))
 
     async def _mark(self, kind: str, user: int | None) -> tuple[_Task | None, LookupProblem | None]:
@@ -310,3 +326,8 @@ class PaperlessPdfWriter:
 def _ids(found: list[_Task], expected: int) -> tuple[str, ...]:
     """The ids of the oldest ``expected`` tasks: later ones belong to other requests."""
     return tuple(task.task_id for task in found[:expected])
+
+
+def _sources(found: list[_Task], expected: int) -> tuple[int | None, ...]:
+    """The documents of the oldest ``expected`` tasks, in step with ``_ids``."""
+    return tuple(task.source for task in found[:expected])

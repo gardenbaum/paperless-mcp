@@ -58,6 +58,8 @@ class StartedTasks(BaseModel):
     Attributes:
         ids: Their ids, oldest first, at most ``expected`` of them.
         expected: How many tasks the request starts.
+        sources: The document each task belongs to, parallel to ``ids``; None where Paperless
+            does not say (reprocessing). Empty when the caller does not know.
         problem: Why the lookup is incomplete beyond tasks that did not show up: the user may not
             view tasks (forbidden), or reading them failed after the request was accepted (failed).
     """
@@ -66,6 +68,7 @@ class StartedTasks(BaseModel):
 
     ids: tuple[str, ...]
     expected: int
+    sources: tuple[int | None, ...] = ()
     problem: LookupProblem | None = None
 
 

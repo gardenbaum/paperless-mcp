@@ -79,6 +79,7 @@ async def test_rotating_adds_a_version_to_each_document_and_names_a_task_for_eac
     tasks = await backend.admin.pdf_writes.rotate_documents((first, second), 90)
 
     assert (len(tasks.ids), tasks.expected, tasks.problem) == (2, 2, None)
+    assert sorted(s for s in tasks.sources if s is not None) == sorted([first, second])
     produced = await finished(backend, tasks)
     for document, version in zip((first, second), produced, strict=True):
         assert await version_ids(backend, document) == [version, document]

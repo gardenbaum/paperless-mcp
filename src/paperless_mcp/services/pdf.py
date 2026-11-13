@@ -559,16 +559,34 @@ class PdfService:
             message=" ".join(notes) or None,
             tasks=tuple(tasks),
             produced_ids=produced,
-            produced_links=self._produced_links(sources, produced, version=version),
+            produced_links=self._produced_links(sources, tasks, started, version=version),
             wait=wait,
             waited_seconds=round(waited, 1),
         )
 
     def _produced_links(
-        self, sources: Sequence[int], produced: Sequence[int], *, version: bool
+        self,
+        sources: Sequence[int],
+        tasks: Sequence[PdfTask],
+        started: StartedTasks,
+        *,
+        version: bool,
     ) -> tuple[str, ...]:
-        """Links to what was made; a new version is made on its source, which gets the link."""
-        if not produced:
-            return ()
-        numbers = sources if version else produced
-        return tuple(document_link(self._web_url, n) for n in numbers[: len(produced)])
+        """Links to what the tasks made.
+
+        A new version is made on its source, which gets the link: the document its own task
+        names (so a task that was not found takes nothing from another's), or the only source
+        when the request has one. Where neither is known there is no link.
+        """
+        links: list[str] = []
+        for index, task in enumerate(tasks):
+            if not task.document_ids:
+                continue
+            if not version:
+                links.extend(document_link(self._web_url, n) for n in task.document_ids)
+                continue
+            known = started.sources[index] if index < len(started.sources) else None
+            source = known if known is not None else sources[0] if len(sources) == 1 else None
+            if source is not None:
+                links.append(document_link(self._web_url, source))
+        return tuple(links)

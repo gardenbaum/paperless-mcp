@@ -721,6 +721,7 @@ async def test_matches_are_capped_at_the_expected_number_oldest_first(
     tasks = await writer(make_client, server).rotate_documents((7,), 90)
 
     assert (tasks.ids, tasks.expected, tasks.problem) == ((task_id(12),), 1, None)
+    assert tasks.sources == (7,)
 
 
 async def test_a_task_of_another_user_is_not_taken_even_if_the_server_ignores_the_filter(
@@ -828,6 +829,7 @@ async def test_a_lookup_that_fails_later_keeps_what_was_found(make_client: Clien
     tasks = await pdf_writer.rotate_documents((7, 9), 90)
 
     assert (tasks.ids, tasks.problem) == ((task_id(12),), "failed")
+    assert tasks.sources == (7,)
 
 
 async def test_a_failing_mark_does_not_stop_the_request(make_client: ClientFactory) -> None:
@@ -870,3 +872,41 @@ async def test_a_rotation_does_not_take_an_older_task_of_another_document(
     tasks = await writer(make_client, server).rotate_documents((7,), 90)
 
     assert tasks.ids == (task_id(13),)
+
+
+async def test_each_rotation_task_names_the_document_it_belongs_to(
+    make_client: ClientFactory,
+) -> None:
+    server = Paperless(
+        OLD,
+        [*OLD, row(12, "consume_file", "7_rotated.pdf"), row(13, "consume_file", "4_rotated.pdf")],
+    )
+
+    tasks = await writer(make_client, server).rotate_documents((4, 7), 90)
+
+    assert (tasks.ids, tasks.sources) == ((task_id(12), task_id(13)), (7, 4))
+
+
+async def test_tasks_of_other_operations_know_their_one_document_and_reprocess_none(
+    make_client: ClientFactory,
+) -> None:
+    edit = Paperless(OLD, [*OLD, row(12, "consume_file", "8_edited.pdf")])
+    reprocess = Paperless(OLD, [*OLD, row(12, "reprocess_document")])
+
+    edited = await writer(make_client, edit).edit_pdf(8, (PageSlot(page=1),), output="new_version")
+    again = await writer(make_client, reprocess).reprocess_documents((8,), remote_ocr=False)
+
+    assert edited.sources == (8,)
+    assert again.sources == (None,)
+
+
+async def test_a_merge_names_no_source_because_its_result_is_a_document_of_its_own(
+    make_client: ClientFactory,
+) -> None:
+    server = Paperless(OLD, [*OLD, row(12, "consume_file", "5_9_merged.pdf")])
+
+    tasks = await writer(make_client, server).merge_documents(
+        (5, 9), metadata_document_id=None, delete_originals=False
+    )
+
+    assert (tasks.ids, tasks.sources) == ((task_id(12),), ())

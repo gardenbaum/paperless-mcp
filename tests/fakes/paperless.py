@@ -1509,11 +1509,20 @@ class FakePaperless:
         if not allowed:
             raise self._denied()
 
-    def _seen_tasks(self, task_ids: tuple[str, ...], expected: int | None = None) -> StartedTasks:
-        """The tasks the adapter can find: none for a user who may not view tasks."""
+    def _seen_tasks(
+        self,
+        task_ids: tuple[str, ...],
+        expected: int | None = None,
+        sources: tuple[int | None, ...] = (),
+    ) -> StartedTasks:
+        """The tasks the adapter can find: none for a user who may not view tasks.
+
+        ``sources`` is the document of each task where the file name tells it (rotating,
+        editing as a new version, unlocking).
+        """
         count = len(task_ids) if expected is None else expected
         if self.user.has("view_paperlesstask"):
-            return StartedTasks(ids=task_ids, expected=count)
+            return StartedTasks(ids=task_ids, expected=count, sources=sources)
         return StartedTasks(ids=(), expected=count, problem="forbidden")
 
     def _pdf_task(self, task_type: str, produced: tuple[int, ...]) -> str:
@@ -1595,7 +1604,8 @@ class FakePaperless:
                     ),
                 )
                 for d in documents
-            )
+            ),
+            sources=tuple(d.id for d in documents),
         )
 
     @write
@@ -1655,7 +1665,9 @@ class FakePaperless:
         )
         if output == "new_version":
             version = self._new_version(document, pages=len(pages), marker=b"\n%edited")
-            return self._seen_tasks((self._pdf_task("consume_file", (version,)),))
+            return self._seen_tasks(
+                (self._pdf_task("consume_file", (version,)),), sources=(document.id,)
+            )
         tasks = tuple(
             self._pdf_task(
                 "consume_file",
@@ -1700,7 +1712,9 @@ class FakePaperless:
         if output == "new_version":
             version = self._new_version(document, pages=pages, marker=b"\n%unlocked")
             document.password = None
-            return self._seen_tasks((self._pdf_task("consume_file", (version,)),))
+            return self._seen_tasks(
+                (self._pdf_task("consume_file", (version,)),), sources=(document.id,)
+            )
         made = self._new_document(document, document.title, pages)
         task = self._pdf_task("consume_file", (made.id,))
         if output == "replace_original":
@@ -1722,7 +1736,10 @@ class FakePaperless:
         documents = self._pdf_documents(document_ids)
         self._pdf_allowed(documents, adds=False, deletes=False, owner_only=False)
         self.state.reprocessed.extend(d.id for d in documents)
-        return self._seen_tasks(tuple(self._pdf_task("reprocess_document", ()) for _ in documents))
+        return self._seen_tasks(
+            tuple(self._pdf_task("reprocess_document", ()) for _ in documents),
+            sources=tuple(None for _ in documents),
+        )
 
     def _owned(self, kind: WritableKind) -> list[FakeTaxonomy]:
         """The objects of a kind with owners (everything but custom fields)."""
