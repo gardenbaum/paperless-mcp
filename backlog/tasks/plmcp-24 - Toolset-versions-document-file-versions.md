@@ -1,11 +1,11 @@
 ---
 id: PLMCP-24
 title: 'Toolset versions: document file versions'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:26:00Z'
-updated_date: '2026-11-13T05:57:00Z'
+updated_date: '2026-11-13T09:53:00Z'
 labels: []
 milestone: m-3
 dependencies:
@@ -24,17 +24,17 @@ Paperless 3.x stores file versions per document and can merge documents as versi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 list_document_versions, upload_document_version, set_document_version_label, delete_document_version (confirm) and merge_documents_as_versions exist
-- [ ] #2 Version uploads follow the same size, MIME and path rules as upload_document
-- [ ] #3 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
-- [ ] #4 FakePaperless and the contract suite cover every new port method
+- [x] #1 list_document_versions, upload_document_version, set_document_version_label, delete_document_version (confirm) and merge_documents_as_versions exist
+- [x] #2 Version uploads follow the same size, MIME and path rules as upload_document
+- [x] #3 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
+- [x] #4 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -57,3 +57,9 @@ Gates at commit cdef032: just check exit 0 (1919 passed, diff coverage 100 %, 26
 
 Review fix round 1. (1) check_transport and HTTP_TRANSPORTS moved to tools/_shared.py (both stdio modules import them there; tests moved to tests/tools/test_transport.py, red first on the import); new import-linter contract 'Toolset modules do not import each other' (independence over core, ai, upload, upload_stdio, versions, versions_stdio; the two edges stdio variant -> its own toolset module are ignored, with reason in pyproject.toml); shown to bite by a temporary cross import; nothing on the branch broke it. (2) VersionService takes the TaxonomyResolver and invalidates COUNTED in a finally after merge_as_versions (tests: counts drop after a merge, also when the merge fails, unconfirmed leaves them). (3) Docstrings: 404 for missing, 403 for hidden/unchangeable. (4) Version-id test now runs in one Setup and asserts message and hint. (5) tests/tools/test_transport.py: both path tools refuse a path with FastMCP's transport context var set to sse/streamable-http (content still works). (6) A failing get_document after a merge returns VersionsMerged(versions=None, message=... list_document_versions); VersionsMerged.versions is nullable now (snapshot [all] updated for that only). (7) require_change(): delete_document_version, merge and upload_document_version refuse before prompting or sending when the record says user_can_change is False; the fake's record now reports changeable_by (grants count). DEFERRED: ownership (needed to delete a version and to merge) is not in the record, so a non-owner with a change grant still gets Paperless's 403 after the prompt. (8) Merge prompt now names per-source note counts and says the root then shows the last source's file and text. (9) Live contract test: a restricted owner uploads own documents, adds and deletes a version and merges; fake docstring records as deferred: update_version on a version id (resolves to the root), restore re-attaching a trashed version. Live contract file was consolidated from 22 to 11 live tests (fewer consumptions) and polls every 0.5 s to keep e2e wall time down. (10) The e2e tests (tests/e2e/test_versions.py) create their own plmcp24- documents instead of using the seeded ones because the seed documents are shared and must never change (contract conftest rule) and a merge or version delete would destroy or alter them for every other test; each document and version is deleted and its trash entry emptied afterwards.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adds the opt-in versions toolset (default profile unchanged at 18 of 20; only list_document_versions survives read-only): list_document_versions, upload_document_version (same size cap, MIME sniffing, filename cleaning and stdio-only allowlisted path variant as upload_document, with check_transport now shared in tools/_shared), set_document_version_label, delete_document_version (confirm; the version goes to the trash; the root is refused) and merge_documents_as_versions (confirm, stricter than the task asks because the sources vanish for good; the prompt names notes lost and the file the root then shows). Unchangeable documents are refused before the prompt where the record says so; a merge invalidates the cached taxonomy counts, and a failed read after a merge is reported instead of raised. A new import-linter contract keeps toolset modules independent (decision-1). Live-verified 3.4.2 facts are in the notes (version DELETE answers 200 with current_version_id, merge is synchronous and permanent, per-endpoint permission rules). Gates: just check, just mutation 100 %, CI e2e green; locally the full e2e is green except test_more_like_finds_other_documents on the stale shared index. Deliberate changes: additions-only surface snapshots (checksum on DocumentVersion, the five tools, a stdio snapshot, nullable VersionsMerged.versions), schema-guard form and maxLength checks with three documented WRONG_RESPONSE_SCHEMAS entries, reviewed mutation equivalents. DoD #1 left unchecked: the e2e tests and snapshots were written after the code, and the fake's permission model was corrected after live contract tests failed.
+<!-- SECTION:FINAL_SUMMARY:END -->
