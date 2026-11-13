@@ -33,6 +33,8 @@ if TYPE_CHECKING:
         DocumentWriter,
         InstanceReader,
         PdfWriter,
+        SharingReader,
+        SharingWriter,
         TaskReader,
         TaxonomyReader,
         TaxonomyWriter,
@@ -92,6 +94,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
     trash: TrashReader | None = None,
     trash_writes: TrashWriter | None = None,
     pdf_writes: PdfWriter | None = None,
+    sharing: SharingReader | None = None,
+    sharing_writes: SharingWriter | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
     startup_timeout: float = 2.0,
@@ -106,9 +110,9 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
 ) -> FastMCP:
     """The assembled server, with `reader` in place of the Paperless adapter.
 
-    `taxonomy`, `documents`, `tasks`, `ai`, `views` and the writers default to `reader` if that is a
-    `taxonomy`, `documents`, `tasks`, `ai`, `trash` and the writers default to `reader` if that is a
-    fake, else to the seeded admin's fake (which refuses writes unless created to allow them).
+    `taxonomy`, `documents`, `tasks`, `ai`, `views`, `trash`, `sharing` and the writers default
+    to `reader` if that is a fake, else to the seeded admin's fake (which refuses writes unless
+    created to allow them).
     `sleep` and `clock` replace the real ones the task wait uses. `toolsets`, `read_only` and
     `disabled_tools` go to the server settings; `catalogue` replaces the tools the server
     offers, to try toolsets that do not exist yet. `max_download_bytes` replaces the download
@@ -143,6 +147,8 @@ def serve(  # noqa: PLR0913 -- one keyword per seam of the server
             trash=trash or fake,
             trash_writes=trash_writes or fake,
             pdf_writes=pdf_writes or fake,
+            sharing=sharing or fake,
+            sharing_writes=sharing_writes or fake,
         ),
         sleep=sleep,
         clock=clock,

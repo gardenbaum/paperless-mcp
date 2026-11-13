@@ -25,6 +25,7 @@ from paperless_mcp.paperless.client import RetryPolicy, connect
 from paperless_mcp.paperless.documents import PaperlessDocumentReader, PaperlessDocumentWriter
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.pdf import PaperlessPdfWriter
+from paperless_mcp.paperless.sharing import PaperlessSharingReader, PaperlessSharingWriter
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
 from paperless_mcp.paperless.trash import PaperlessTrashReader, PaperlessTrashWriter
@@ -39,6 +40,7 @@ from paperless_mcp.services.instance import InstanceService
 from paperless_mcp.services.notes import NoteService
 from paperless_mcp.services.pdf import PdfService
 from paperless_mcp.services.removal import DocumentRemoval
+from paperless_mcp.services.sharing import SharingService
 from paperless_mcp.services.tasks import TaskService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
 from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
@@ -52,6 +54,7 @@ from paperless_mcp.tools import (
     bulk,
     core,
     pdf,
+    sharing,
     trash,
     upload,
     upload_stdio,
@@ -88,6 +91,8 @@ if TYPE_CHECKING:
         DocumentWriter,
         InstanceReader,
         PdfWriter,
+        SharingReader,
+        SharingWriter,
         TaskReader,
         TaxonomyReader,
         TaxonomyWriter,
@@ -153,6 +158,7 @@ CATALOGUE: Final = Catalogue(
         views.provider,
         trash.provider,
         pdf.provider,
+        sharing.provider,
     ),
     annotations=ANNOTATIONS,
     tool_toolsets=TOOL_TOOLSETS,
@@ -180,6 +186,8 @@ class Ports:
     trash: TrashReader
     trash_writes: TrashWriter
     pdf_writes: PdfWriter
+    sharing: SharingReader
+    sharing_writes: SharingWriter
 
 
 def paperless_ports(client: PaperlessClient) -> Ports:
@@ -198,6 +206,8 @@ def paperless_ports(client: PaperlessClient) -> Ports:
         trash=PaperlessTrashReader(client),
         trash_writes=PaperlessTrashWriter(client),
         pdf_writes=PaperlessPdfWriter(client),
+        sharing=PaperlessSharingReader(client),
+        sharing_writes=PaperlessSharingWriter(client),
     )
 
 
@@ -285,6 +295,9 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                 ai=AiService(adapters.ai, taxonomy, web_url=web_url),
                 views=ViewService(adapters.views, adapters.view_writes, taxonomy, documents),
                 pdf=PdfService(adapters.documents, adapters.pdf_writes, tasks, web_url=web_url),
+                sharing=SharingService(
+                    adapters.sharing, adapters.sharing_writes, adapters.documents, web_url=web_url
+                ),
                 uploads=UploadService(
                     adapters.documents,
                     adapters.document_writes,

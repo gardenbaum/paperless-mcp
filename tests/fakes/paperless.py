@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Concatenate, cast
 
 from pydantic import JsonValue
 
+from fakes import sharing
 from fakes.accounts import (
     ADMIN,
     BLIND,
@@ -41,6 +42,7 @@ from fakes.accounts import (
 )
 from fakes.custom_field_query import compile_query
 from fakes.document_values import coerce, reject, tag_closure
+from fakes.sharing import FakeShareBundle, FakeShareLink, SentEmail, SharingData, Viewer
 from fakes.taxonomy_rules import check_colour, check_match, check_name, check_path, with_ids
 from fakes.view_filters import ONLY_ONE_SEARCH, combines, searches, view_filters
 from fakes.view_rules import check_page_size, check_rules
@@ -107,6 +109,7 @@ if TYPE_CHECKING:
     )
     from paperless_mcp.domain.documents import FileVersion
     from paperless_mcp.domain.pdf import Output, PageSlot
+    from paperless_mcp.domain.sharing import FileVersionKind, ShareBundle, ShareLink
     from paperless_mcp.domain.taxonomy import (
         MatchingAlgorithm,
         TaxonomyKind,
@@ -407,6 +410,12 @@ class FakeState:
     custom_fields: list[FakeCustomField] = field(default_factory=list[FakeCustomField])
     saved_views: list[FakeSavedView] = field(default_factory=list[FakeSavedView])
     groups: list[FakeGroup] = field(default_factory=list[FakeGroup])
+    share_links: list[FakeShareLink] = field(default_factory=list[FakeShareLink])
+    share_bundles: list[FakeShareBundle] = field(default_factory=list[FakeShareBundle])
+    # The e-mails sent, oldest first. Like the E2E stack, the fake has no mail server until a test
+    # sets `email_enabled`; a valid message then fails like 3.4.2 does without one.
+    outbox: list[SentEmail] = field(default_factory=list[SentEmail])
+    email_enabled: bool = False
     tasks: list[FakeTask] = field(default_factory=list[FakeTask])
     # Deleted documents, newest last; reads no longer see them, the Paperless trash does.
     trash: list[FakeDocument] = field(default_factory=list[FakeDocument])
@@ -2340,6 +2349,103 @@ class FakePaperless:
             owner=view.owner,
             user_can_change=self.user.may_change_object(view),
             filter_rules=view.filter_rules,
+        )
+
+    # --- SharingReader and SharingWriter (the logic is in fakes/sharing.py)
+
+    def _sharing(self) -> SharingData:
+        state = self.state
+        return SharingData(
+            state.share_links, state.share_bundles, state.outbox, state.email_enabled
+        )
+
+    def _viewer(self) -> Viewer:
+        """The user and the documents as the sharing functions need them."""
+        user, documents = self.user, [*self.state.documents, *self.state.trash]
+        return Viewer(
+            id=user.id,
+            is_superuser=user.is_superuser,
+            has=user.has,
+            titles={d.id: d.title for d in documents},
+            visible=frozenset(d.id for d in self.state.documents if d.visible_to(user)),
+        )
+
+    async def list_share_links(self) -> tuple[ShareLink, ...]:
+        """`SharingReader.list_share_links`."""
+        return sharing.list_links(self._sharing(), self._viewer())
+
+    async def get_share_link(self, link_id: int) -> ShareLink:
+        """`SharingReader.get_share_link`."""
+        return sharing.get_link(self._sharing(), self._viewer(), link_id)
+
+    async def list_share_bundles(self) -> tuple[ShareBundle, ...]:
+        """`SharingReader.list_share_bundles`."""
+        return sharing.list_bundles(self._sharing(), self._viewer())
+
+    async def get_email_enabled(self) -> bool | None:
+        """`SharingReader.get_email_enabled` (UiSettingsView; 403 without `view_uisettings`)."""
+        return self.state.email_enabled if self.user.has("view_uisettings") else None
+
+    async def get_share_bundle(self, bundle_id: int) -> ShareBundle:
+        """`SharingReader.get_share_bundle`."""
+        return sharing.get_bundle(self._sharing(), self._viewer(), bundle_id)
+
+    @write
+    async def create_share_link(
+        self, document_id: int, *, expiration: datetime | None, file_version: FileVersionKind
+    ) -> ShareLink:
+        """`SharingWriter.create_share_link`."""
+        return sharing.create_link(
+            self._sharing(), self._viewer(), document_id, expiration, file_version
+        )
+
+    @write
+    async def delete_share_link(self, link_id: int) -> None:
+        """`SharingWriter.delete_share_link`."""
+        sharing.delete_link(self._sharing(), self._viewer(), link_id)
+
+    @write
+    async def create_share_bundle(
+        self,
+        document_ids: Sequence[int],
+        *,
+        expiration_days: int | None,
+        file_version: FileVersionKind,
+    ) -> ShareBundle:
+        """`SharingWriter.create_share_bundle`."""
+        return sharing.create_bundle(
+            self._sharing(), self._viewer(), document_ids, expiration_days, file_version
+        )
+
+    @write
+    async def rebuild_share_bundle(self, bundle_id: int) -> ShareBundle:
+        """`SharingWriter.rebuild_share_bundle`."""
+        return sharing.rebuild_bundle(self._sharing(), self._viewer(), bundle_id)
+
+    @write
+    async def delete_share_bundle(self, bundle_id: int) -> None:
+        """`SharingWriter.delete_share_bundle`."""
+        sharing.delete_bundle(self._sharing(), self._viewer(), bundle_id)
+
+    @write
+    async def email_documents(
+        self,
+        document_ids: Sequence[int],
+        *,
+        addresses: Sequence[str],
+        subject: str,
+        message: str,
+        use_archive_version: bool,
+    ) -> None:
+        """`SharingWriter.email_documents`."""
+        sharing.email(
+            self._sharing(),
+            self._viewer(),
+            document_ids,
+            addresses,
+            subject=subject,
+            message=message,
+            use_archive_version=use_archive_version,
         )
 
     async def get_document_content(self, document_id: int) -> str:

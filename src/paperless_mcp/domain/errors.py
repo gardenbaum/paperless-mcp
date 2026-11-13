@@ -108,7 +108,16 @@ class Conflict(PaperlessMcpError):
 
 
 class UpstreamUnavailable(PaperlessMcpError):
-    """Paperless is unreachable, too slow or temporarily failing."""
+    """Paperless is unreachable, too slow or temporarily failing.
+
+    Attributes:
+        status: The HTTP status Paperless (or a proxy before it) answered, if there was an answer.
+    """
+
+    def __init__(self, message: str, *, hint: str | None = None, status: int | None = None) -> None:
+        """Create the error; ``status`` is the HTTP status of the answer, if any."""
+        super().__init__(message, hint=hint)
+        self.status: int | None = status
 
 
 class UpstreamTimeout(UpstreamUnavailable):
@@ -117,6 +126,10 @@ class UpstreamTimeout(UpstreamUnavailable):
 
 class UpstreamUnreachable(UpstreamUnavailable):
     """No connection to Paperless could be made."""
+
+
+class DeliveryUnknown(PaperlessMcpError):
+    """A request that sends something out failed in a way that does not say whether it was sent."""
 
 
 class FeatureUnavailable(PaperlessMcpError):
