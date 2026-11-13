@@ -22,6 +22,8 @@ TOOLSET = "trash"
 
 provider = LocalProvider()
 
+type PositiveId = Annotated[int, Field(ge=1)]
+
 LIST_LIMIT = 100
 PAGE_SIZE = 25
 
@@ -41,8 +43,9 @@ async def list_trash(
     An entry has an id (pass it to restore_from_trash or empty_trash), the title and the time it
     was deleted. A version deleted from a document is an entry of its own, with version_of set
     to the document; while the document itself is in the trash, its entry covers the versions.
-    You see the entries of documents you own or that have no owner. count is the total; pass
-    next_page as page to see more. Needs the permission to view documents.
+    You see the entries of documents you own or that have no owner; a superuser sees every entry.
+    web_url is the trash page of the web UI. count is the total; pass next_page as page to see
+    more. Needs the permission to view documents.
     """
     return await services(ctx).trash.list(page=page, page_size=page_size)
 
@@ -52,7 +55,7 @@ async def list_trash(
 async def restore_from_trash(
     ctx: Context,
     document_ids: Annotated[
-        list[int],
+        list[PositiveId],
         Field(
             min_length=1,
             max_length=MAX_IDS,
@@ -78,12 +81,14 @@ async def empty_trash(
     ctx: Context,
     *,
     document_ids: Annotated[
-        list[int] | None,
+        list[PositiveId] | None,
         Field(
+            min_length=1,
+            max_length=MAX_IDS,
             description=(
                 f"Entry ids from list_trash to delete for good; at most {MAX_IDS}. Use this or "
                 "all, never both."
-            )
+            ),
         ),
     ] = None,
     all: Annotated[  # noqa: A002 -- the parameter's name in the tool schema
@@ -99,9 +104,12 @@ async def empty_trash(
     This cannot be undone. It never empties everything by default: name document_ids from
     list_trash, or pass all=true for the whole trash, and in both cases confirm. Two steps: call
     without confirm first. Nothing is deleted and the error lists the entries that would go
-    (the first ten, then a count), with confirm=true to pass. Only name what the user asked to
-    delete; to get documents back, use restore_from_trash. All or none: an id that is not in the
-    trash is an error. Needs the permission to delete documents and ownership of every document
-    (or no owner).
+    (the first ten, then a count), with confirm=true to pass. all=true empties whatever the trash
+    holds when the confirmed call runs, which can differ from what the refusal listed: when the
+    trash holds at most 100 entries, list it with list_trash and pass their ids as document_ids
+    instead, so exactly the reviewed entries go. Only name what the user asked to delete; to get
+    documents back, use restore_from_trash. All or none: an id that is not in the trash is an
+    error. Needs the permission to delete documents and ownership of every document (or no
+    owner).
     """
     return await services(ctx).trash.empty(document_ids, everything=all, confirm=confirm)

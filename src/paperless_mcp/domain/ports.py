@@ -510,7 +510,7 @@ class TrashReader(Protocol):
     """The Paperless trash: deleted documents and versions the current user may see."""
 
     async def list_trash(self, *, page: int, page_size: int) -> TrashPage:
-        """One page of the trash, in Paperless order.
+        """One page of the trash, in Paperless order (by creation date, newest first).
 
         A version deleted from a document is an entry of its own, but not while its document is
         in the trash too (the document's entry covers it). The user sees the entries of
@@ -546,9 +546,10 @@ class TrashWriter(Protocol):
     async def empty_trash(self, document_ids: Sequence[int]) -> None:
         """Remove the entries from the trash for good: files, text, notes and metadata are lost.
 
-        Only ids that are in the trash and distinct are accepted, all or none. This port always
-        names ids: Paperless reads a request without them as "everything" and an empty list as
-        nothing, which is why callers deduplicate and never pass none.
+        Emptying a document also removes its versions that are in the trash, those deleted
+        earlier too. Only ids that are in the trash and distinct are accepted, all or none. This
+        port always names ids: Paperless reads a request without them as "everything" and an
+        empty list as nothing, which is why callers deduplicate and never pass none.
 
         Raises:
             PermissionDenied: As for ``restore_from_trash``.

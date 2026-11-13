@@ -17,6 +17,7 @@ from harness import paperless_settings, server_settings
 
 from e2e.helpers import consume_text, parse, seq
 from paperless_mcp.server import create_server
+from paperless_mcp.services.trash import MAX_ALL
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -113,6 +114,8 @@ async def test_a_deleted_document_is_listed_restored_and_emptied_only_with_confi
         assert restored["message"] == (
             f"Restored 1 document from the trash: document {kept} {kept_title!r}."
         )
+        [entry] = cast("list[Json]", restored["restored"])
+        assert str(entry["web_url"]).endswith(f"/documents/{kept}/details")
         assert not live_in_trash(stack, kept)
         assert note_count(stack, kept) == 1
         assert "Not in the trash" in await refused(admin, "restore_from_trash", document_ids=[kept])
@@ -123,8 +126,14 @@ async def test_a_deleted_document_is_listed_restored_and_emptied_only_with_confi
         assert f"document {gone} {gone_title!r}" in asked
         assert f"document {other} {other_title!r}" in asked
         assert "for good" in asked
+        # all=true is refused without confirm either way; which refusal depends on the size of
+        # the shared stack's trash, which is read first.
+        total = (await run(admin, "list_trash", page_size=1))["count"]
         everything = await refused(admin, "empty_trash", all=True)
-        assert "permanently delete ALL " in everything
+        if cast("int", total) > MAX_ALL:
+            assert f"all=true handles at most {MAX_ALL} at once" in everything
+        else:
+            assert "Nothing was changed. Confirming would permanently delete ALL " in everything
         assert live_in_trash(stack, gone)
         assert live_in_trash(stack, other)
 

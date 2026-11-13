@@ -11,8 +11,15 @@ what cannot happen, and Paperless is only ever sent explicit ids: a request with
 from typing import TYPE_CHECKING, Final
 
 from paperless_mcp.domain.errors import ConfirmationRequired, NotFound, Validation, quoted
-from paperless_mcp.domain.trash import TrashedDocument, TrashEmptied, TrashList, TrashRestored
+from paperless_mcp.domain.trash import (
+    RestoredEntry,
+    TrashedDocument,
+    TrashEmptied,
+    TrashList,
+    TrashRestored,
+)
 from paperless_mcp.services.document_edits import COUNTED
+from paperless_mcp.services.documents import document_link
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -32,6 +39,13 @@ SCAN_SIZE: Final = 100
 LOST = (
     "They cannot be restored afterwards: the files, text, notes and metadata of documents, and "
     "the deleted versions, are lost for good"
+)
+
+
+# What an ``all=true`` confirmation adds: it empties what is there when it is confirmed.
+WHEN_CONFIRMED = (
+    "Confirming empties whatever the trash holds at that moment; pass document_ids instead to "
+    "delete exactly these entries"
 )
 
 
@@ -63,16 +77,18 @@ class TrashService:
         writer: TrashWriter,
         taxonomy: TaxonomyResolver,
         *,
+        web_url: str,
         max_all: int = MAX_ALL,
     ) -> None:
         """Read through ``reader``, change through ``writer``.
 
-        ``taxonomy`` forgets the document counts after a restore. ``max_all`` is the most entries
-        ``all=true`` empties at once.
+        ``taxonomy`` forgets the document counts after a restore; ``web_url`` is the Paperless
+        web UI, for links. ``max_all`` is the most entries ``all=true`` empties at once.
         """
         self._reader: TrashReader = reader
         self._writer: TrashWriter = writer
         self._taxonomy: TaxonomyResolver = taxonomy
+        self._web_url: str = web_url
         self._max_all: int = max_all
 
     async def list(self, *, page: int, page_size: int) -> TrashList:
@@ -84,7 +100,11 @@ class TrashService:
         """
         found = await self._reader.list_trash(page=page, page_size=page_size)
         return TrashList(
-            count=found.count, page=page, next_page=found.next_page, entries=found.entries
+            web_url=f"{self._web_url.rstrip('/')}/trash",
+            count=found.count,
+            page=page,
+            next_page=found.next_page,
+            entries=found.entries,
         )
 
     async def restore(self, document_ids: Sequence[int]) -> TrashRestored:
@@ -111,7 +131,17 @@ class TrashService:
             for e in entries
         ]
         message = f"Restored {' and '.join(counts)} from the trash: {_joined(parts)}."
-        return TrashRestored(restored=tuple(entries), message=message)
+        restored = tuple(
+            RestoredEntry(
+                id=e.id,
+                title=e.title,
+                deleted_at=e.deleted_at,
+                version_of=e.version_of,
+                web_url=document_link(self._web_url, e.version_of or e.id),
+            )
+            for e in entries
+        )
+        return TrashRestored(restored=restored, message=message)
 
     async def empty(
         self, document_ids: Sequence[int] | None, *, everything: bool, confirm: bool = False
@@ -150,7 +180,10 @@ class TrashService:
         await self._writer.empty_trash([e.id for e in entries])
         deleted = tuple(e.id for e in entries)
         if everything:
-            message = f"Permanently deleted ALL {len(entries)} entries of the trash."
+            message = (
+                f"Permanently deleted ALL {_counted(len(entries), 'entry')} of the trash (every "
+                "entry the user can see) as it was when you confirmed."
+            )
         else:
             message = (
                 f"Permanently deleted {_counted(len(entries), 'entry')} from the trash: "
@@ -198,24 +231,20 @@ class TrashService:
         return [found[number] for number in ids]
 
     async def _everything(self) -> list[TrashedDocument]:
-        """Every entry the user sees, over all pages.
+        """Every entry the user sees, in one request, so that the count and the ids agree.
 
         Raises:
             Validation: The trash holds more than ``max_all`` entries.
         """
-        entries: list[TrashedDocument] = []
-        page: int | None = 1
-        while page is not None:
-            listed = await self._reader.list_trash(page=page, page_size=SCAN_SIZE)
-            if listed.count > self._max_all:
-                message = (
-                    f"The trash holds {listed.count} entries; all=true handles at most "
-                    f"{self._max_all} at once."
-                )
-                raise Validation(message, hint="Empty in steps with document_ids from list_trash.")
-            entries.extend(listed.entries)
-            page = listed.next_page
-        return entries
+        listed = await self._reader.list_trash(page=1, page_size=self._max_all + 1)
+        if listed.count > self._max_all:
+            message = (
+                f"The trash holds {listed.count} entries; all=true handles at most "
+                f"{self._max_all} at once."
+            )
+            raise Validation(message, hint="Empty in steps with document_ids from list_trash.")
+        # Offset paging has no tie-breaker in Paperless, so a read may repeat an entry.
+        return list({e.id: e for e in listed.entries}.values())
 
     @staticmethod
     def _effect(entries: Sequence[TrashedDocument], *, everything: bool) -> str:
@@ -225,9 +254,10 @@ class TrashService:
             shown.append(f"{len(entries) - SHOWN} more")
         if everything:
             head = (
-                f"permanently delete ALL {len(entries)} entries of the Paperless trash (every "
-                "entry the user can see)"
+                f"permanently delete ALL {_counted(len(entries), 'entry')} of the Paperless "
+                "trash (every entry the user can see)"
             )
         else:
             head = f"permanently delete {_counted(len(entries), 'entry')} from the Paperless trash"
-        return f"{head}: {_joined(shown)}. {LOST}"
+        tail = f". {WHEN_CONFIRMED}" if everything else ""
+        return f"{head}: {_joined(shown)}. {LOST}{tail}"

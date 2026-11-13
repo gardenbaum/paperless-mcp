@@ -100,7 +100,10 @@ async def test_empty_trash_takes_a_described_confirm_that_defaults_to_false() ->
     assert schema.get("required", []) == []  # nothing is required, and nothing defaults to all
     assert properties["all"]["default"] is False
     assert properties["document_ids"]["default"] is None
-    assert "never empties everything by default" in (tools["empty_trash"].description or "")
+    description = " ".join((tools["empty_trash"].description or "").split())
+    assert "never empties everything by default" in description
+    assert "whatever the trash holds when the confirmed call runs" in description
+    assert "at most 100" in description
 
 
 async def test_the_descriptions_say_where_ids_come_from_and_what_is_lost() -> None:
@@ -108,6 +111,7 @@ async def test_the_descriptions_say_where_ids_come_from_and_what_is_lost() -> No
         tools = {t.name: t.description or "" for t in await client.list_tools()}
 
     assert "version" in tools["list_trash"]
+    assert "a superuser sees every entry" in tools["list_trash"]
     assert "list_trash" in tools["restore_from_trash"]
     assert "for good" in tools["empty_trash"]
     assert "confirm" in tools["empty_trash"]
@@ -124,10 +128,13 @@ async def test_a_deleted_document_is_listed_and_then_restored() -> None:
     restored = await call(source, "restore_from_trash", document_ids=[1])
 
     assert (listed["count"], listed["page"], listed["next_page"]) == (1, 1, None)
+    assert listed["web_url"] == "http://paperless.test/trash"
     [entry] = cast("list[Json]", listed["entries"])
     assert (entry["id"], entry["title"], entry["version_of"]) == (1, "e2e-public-invoice", None)
     assert str(entry["deleted_at"]).startswith("20")
-    assert [e["id"] for e in cast("list[Json]", restored["restored"])] == [1]
+    assert [(e["id"], e["web_url"]) for e in cast("list[Json]", restored["restored"])] == [
+        (1, "http://paperless.test/documents/1/details")
+    ]
     assert restored["message"] == (
         "Restored 1 document from the trash: document 1 'e2e-public-invoice'."
     )
@@ -173,13 +180,24 @@ async def test_emptying_with_nothing_named_is_a_tool_error_even_with_confirm() -
     nothing: list[Json] = [
         {},
         {"confirm": True},
-        {"document_ids": []},
         {"all": False, "confirm": True},
     ]
     for arguments in nothing:
         text = await refusal(source, "empty_trash", **arguments)
         assert "Name what to empty: nothing was emptied." in text
         assert "Pass document_ids from list_trash, or all=true" in text
+
+
+async def test_ids_must_be_positive_and_at_most_100_and_not_empty_in_both_tools() -> None:
+    async with Client(server(fake(writes=False))) as client:
+        for tool in ("restore_from_trash", "empty_trash"):
+            for ids in ([], [0], list(range(1, 102))):
+                result = await client.call_tool(tool, {"document_ids": ids}, raise_on_error=False)
+                assert result.is_error, (tool, ids)
+        tools = {t.name: t for t in await client.list_tools()}
+    for name in ("restore_from_trash", "empty_trash"):
+        properties = cast("dict[str, Json]", tools[name].input_schema["properties"])
+        assert "100" in str(properties["document_ids"]), name
 
 
 async def test_emptying_ids_without_confirm_names_what_would_be_lost_and_changes_nothing() -> None:

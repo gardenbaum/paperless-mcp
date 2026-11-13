@@ -1138,6 +1138,7 @@ class FakePaperless:
             id=version.id,
             title=document.title,
             owner=document.owner,
+            created=document.created,
             versions=[version],
             deleted_at=now,
             root_id=document.id,
@@ -1147,7 +1148,10 @@ class FakePaperless:
         )
 
     async def list_trash(self, *, page: int, page_size: int) -> TrashPage:
-        """`TrashReader.list_trash` (TrashView.get), newest deletion first.
+        """`TrashReader.list_trash` (TrashView.get), ordered like the document list.
+
+        Paperless sorts by `-created`, a date, with no tie-breaker: on 3.4.2 equal dates came
+        back by id, newest first, which is what this does (an order callers must not rely on).
 
         Needs the global `view_document` permission (403). A user sees the entries of documents
         they own or that have no owner (a view grant is not enough), a superuser all of them. A
@@ -1167,9 +1171,7 @@ class FakePaperless:
             if d.root_id not in covered
             and (self.user.is_superuser or d.owner in {None, self.user.id})
         ]
-        seen.sort(
-            key=lambda d: (d.deleted_at or datetime.min.replace(tzinfo=UTC), d.id), reverse=True
-        )
+        seen.sort(key=lambda d: (d.created, d.id), reverse=True)
         start = (page - 1) * page_size
         if page > 1 and start >= len(seen):
             raise beyond_trash(page)

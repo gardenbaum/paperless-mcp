@@ -48,10 +48,26 @@ class TrashList(BaseModel):
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
+    web_url: Annotated[
+        str,
+        Field(description="Link to the trash page of the Paperless web UI (entries have none)."),
+    ]
+
     count: Annotated[int, Field(description="How many entries the trash holds in total.")]
     page: int
     next_page: Annotated[int | None, Field(description="The next page, null on the last one.")]
     entries: tuple[TrashedDocument, ...]
+
+
+class RestoredEntry(TrashedDocument):
+    """An entry that was taken out of the trash, with the link to its document."""
+
+    web_url: Annotated[
+        str,
+        Field(
+            description="Link to the document in the Paperless web UI (a version's: its document)."
+        ),
+    ]
 
 
 class TrashRestored(BaseModel):
@@ -60,7 +76,7 @@ class TrashRestored(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
 
     restored: Annotated[
-        tuple[TrashedDocument, ...], Field(description="The entries as they were in the trash.")
+        tuple[RestoredEntry, ...], Field(description="The entries as they were in the trash.")
     ]
     message: Annotated[str, Field(description="What happened to documents and versions.")]
 

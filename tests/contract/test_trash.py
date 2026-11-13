@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from contract.test_document_versions import add_version
+from paperless_mcp.domain.documents import DocumentPatch
 from paperless_mcp.domain.errors import NotFound, PermissionDenied, Validation
 
 if TYPE_CHECKING:
@@ -56,12 +57,25 @@ async def trashed(backend: Backend, count: int) -> list[int]:
     return documents
 
 
+async def everything(ports: Ports) -> list[TrashedDocument]:
+    """Every entry the user sees, page by page."""
+    entries: list[TrashedDocument] = []
+    page: int | None = 1
+    while page is not None:
+        listed = await ports.trash.list_trash(page=page, page_size=SCAN_SIZE)
+        entries += listed.entries
+        page = listed.next_page
+    return entries
+
+
 @pytest.mark.contract(LIST)
 async def test_deleted_documents_are_listed_paged_and_only_to_those_who_may_view_them(
     backend: Backend,
 ) -> None:
     ports = backend.admin
     first, second = backend.new_documents(2)
+    # An entry nobody owns is visible to every user who may view documents.
+    _ = await ports.document_writes.update_document(second, DocumentPatch(owner=None))
     titles = {d: (await ports.documents.get_document(d)).title for d in (first, second)}
     before = datetime.now(UTC) - timedelta(minutes=5)
     for document in (first, second):
@@ -80,9 +94,11 @@ async def test_deleted_documents_are_listed_paged_and_only_to_those_who_may_view
     with pytest.raises(NotFound):
         _ = await ports.trash.list_trash(page=one.count + 1, page_size=1)
 
-    # The reader sees owned and unowned entries only, and a user without view_document none.
-    shown = await backend.reader.trash.list_trash(page=1, page_size=SCAN_SIZE)
-    assert not {first, second} & {e.id for e in shown.entries}
+    # The reader sees owned and unowned entries only (the admin's `first` stays hidden from it),
+    # and a user without view_document none.
+    seen = await find(backend.reader, {second})
+    assert seen.keys() == {second}
+    assert first not in {e.id for e in await everything(backend.reader)}
     with pytest.raises(PermissionDenied):
         _ = await backend.blind.trash.list_trash(page=1, page_size=SCAN_SIZE)
 
@@ -202,3 +218,14 @@ async def test_a_deleted_version_is_an_entry_of_its_document_and_restored_onto_i
     await ports.trash_writes.empty_trash([version])
     assert not await find(ports, {version})
     assert [v.id for v in (await ports.documents.get_document(document)).versions] == [document]
+
+    # An emptied document takes its trashed versions along, also one deleted earlier.
+    earlier = await add_version(backend, document, "plmcp27 earlier version")
+    _ = await ports.document_writes.delete_version(document, earlier)
+    await ports.document_writes.delete_document(document)
+    await ports.trash_writes.empty_trash([document])
+    assert not await find(ports, {document, earlier})
+    with pytest.raises(Validation):
+        await ports.trash_writes.restore_from_trash([earlier])
+    with pytest.raises(NotFound):
+        _ = await ports.documents.get_document(document)

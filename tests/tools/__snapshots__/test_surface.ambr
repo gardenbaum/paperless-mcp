@@ -2357,10 +2357,13 @@
         This cannot be undone. It never empties everything by default: name document_ids from
         list_trash, or pass all=true for the whole trash, and in both cases confirm. Two steps: call
         without confirm first. Nothing is deleted and the error lists the entries that would go
-        (the first ten, then a count), with confirm=true to pass. Only name what the user asked to
-        delete; to get documents back, use restore_from_trash. All or none: an id that is not in the
-        trash is an error. Needs the permission to delete documents and ownership of every document
-        (or no owner).
+        (the first ten, then a count), with confirm=true to pass. all=true empties whatever the trash
+        holds when the confirmed call runs, which can differ from what the refusal listed: when the
+        trash holds at most 100 entries, list it with list_trash and pass their ids as document_ids
+        instead, so exactly the reviewed entries go. Only name what the user asked to delete; to get
+        documents back, use restore_from_trash. All or none: an id that is not in the trash is an
+        error. Needs the permission to delete documents and ownership of every document (or no
+        owner).
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -2379,8 +2382,11 @@
             'anyOf': list([
               dict({
                 'items': dict({
+                  'minimum': 1,
                   'type': 'integer',
                 }),
+                'maxItems': 100,
+                'minItems': 1,
                 'type': 'array',
               }),
               dict({
@@ -4546,8 +4552,9 @@
         An entry has an id (pass it to restore_from_trash or empty_trash), the title and the time it
         was deleted. A version deleted from a document is an entry of its own, with version_of set
         to the document; while the document itself is in the trash, its entry covers the versions.
-        You see the entries of documents you own or that have no owner. count is the total; pass
-        next_page as page to see more. Needs the permission to view documents.
+        You see the entries of documents you own or that have no owner; a superuser sees every entry.
+        web_url is the trash page of the web UI. count is the total; pass next_page as page to see
+        more. Needs the permission to view documents.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -4627,8 +4634,13 @@
           'page': dict({
             'type': 'integer',
           }),
+          'web_url': dict({
+            'description': 'Link to the trash page of the Paperless web UI (entries have none).',
+            'type': 'string',
+          }),
         }),
         'required': list([
+          'web_url',
           'count',
           'page',
           'next_page',
@@ -4831,6 +4843,7 @@
           'document_ids': dict({
             'description': 'Entry ids from list_trash; at most 100, each in the trash.',
             'items': dict({
+              'minimum': 1,
               'type': 'integer',
             }),
             'maxItems': 100,
@@ -4854,7 +4867,7 @@
           'restored': dict({
             'description': 'The entries as they were in the trash.',
             'items': dict({
-              'description': 'An entry of the trash: a deleted document, or a version deleted from a document.',
+              'description': 'An entry that was taken out of the trash, with the link to its document.',
               'properties': dict({
                 'deleted_at': dict({
                   'format': 'date-time',
@@ -4878,12 +4891,17 @@
                   ]),
                   'description': 'Set when the entry is a version (a file) deleted from the document with this id; restoring it re-attaches it to that document. Null for a deleted document.',
                 }),
+                'web_url': dict({
+                  'description': "Link to the document in the Paperless web UI (a version's: its document).",
+                  'type': 'string',
+                }),
               }),
               'required': list([
                 'id',
                 'title',
                 'deleted_at',
                 'version_of',
+                'web_url',
               ]),
               'type': 'object',
             }),
@@ -14994,8 +15012,9 @@
         An entry has an id (pass it to restore_from_trash or empty_trash), the title and the time it
         was deleted. A version deleted from a document is an entry of its own, with version_of set
         to the document; while the document itself is in the trash, its entry covers the versions.
-        You see the entries of documents you own or that have no owner. count is the total; pass
-        next_page as page to see more. Needs the permission to view documents.
+        You see the entries of documents you own or that have no owner; a superuser sees every entry.
+        web_url is the trash page of the web UI. count is the total; pass next_page as page to see
+        more. Needs the permission to view documents.
       ''',
       'inputSchema': dict({
         'additionalProperties': False,
@@ -15075,8 +15094,13 @@
           'page': dict({
             'type': 'integer',
           }),
+          'web_url': dict({
+            'description': 'Link to the trash page of the Paperless web UI (entries have none).',
+            'type': 'string',
+          }),
         }),
         'required': list([
+          'web_url',
           'count',
           'page',
           'next_page',

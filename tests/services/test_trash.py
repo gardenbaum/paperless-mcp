@@ -5,8 +5,8 @@ any write, so a passing test proves nothing was written. `everything` is tested 
 on the shared live stack it would destroy other tests' entries.
 """
 
-from datetime import UTC, datetime
-from typing import final
+from datetime import UTC, date, datetime
+from typing import TYPE_CHECKING, final, override
 
 import pytest
 from fakes.accounts import ADMIN, READER
@@ -22,11 +22,15 @@ from paperless_mcp.domain.errors import (
 from paperless_mcp.domain.versions import VersionUpload
 from paperless_mcp.paperless.auth import StaticTokenProvider
 from paperless_mcp.services.taxonomy import TaxonomyResolver
-from paperless_mcp.services.trash import LOST, MAX_IDS, SHOWN, TrashService
+from paperless_mcp.services.trash import LOST, MAX_IDS, SHOWN, WHEN_CONFIRMED, TrashService
+
+if TYPE_CHECKING:
+    from paperless_mcp.domain.trash import TrashPage
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
 DAY = datetime(2026, 11, 10, 8, 0, tzinfo=UTC)
+WEB = "https://paperless.example"
 
 
 @final
@@ -39,7 +43,7 @@ class Setup:
             self.fake, StaticTokenProvider("t"), ttl=3600.0
         )
         self.service: TrashService = TrashService(
-            self.fake, self.fake, self.taxonomy, max_all=max_all
+            self.fake, self.fake, self.taxonomy, web_url=WEB, max_all=max_all
         )
 
     def document(self, title: str, *, owner: int | None = 2) -> int:
@@ -77,20 +81,23 @@ class Setup:
 # --- list ---------------------------------------------------------------------------------------
 
 
-async def test_the_trash_is_listed_newest_first_with_a_page_and_the_total() -> None:
+async def test_the_trash_is_listed_with_a_page_the_total_and_the_trash_page_link() -> None:
     setup = Setup()
     older = await setup.trashed("older")
     newer = await setup.trashed("newer")
-    [entry] = [d for d in setup.state.trash if d.id == newer]
-    entry.deleted_at = datetime(2026, 11, 11, tzinfo=UTC)
 
     result = await setup.service.list(page=1, page_size=10)
 
     assert (result.count, result.page, result.next_page) == (2, 1, None)
-    assert [(e.id, e.title, e.deleted_at, e.version_of) for e in result.entries] == [
-        (newer, "newer", datetime(2026, 11, 11, tzinfo=UTC), None),
+    assert result.web_url == "https://paperless.example/trash"
+    slashed = TrashService(setup.fake, setup.fake, setup.taxonomy, web_url=WEB + "/pX/")
+    listed = await slashed.list(page=1, page_size=10)
+    assert listed.web_url == "https://paperless.example/pX/trash"
+    # The order is Paperless's (by creation date); only the content is pinned here.
+    assert {(e.id, e.title, e.deleted_at, e.version_of) for e in result.entries} == {
+        (newer, "newer", DAY, None),
         (older, "older", DAY, None),
-    ]
+    }
 
 
 async def test_a_page_of_the_trash_names_the_next_one() -> None:
@@ -132,6 +139,17 @@ async def test_restoring_brings_documents_back_and_says_what_each_was() -> None:
     )
     assert setup.ids() == []
     assert {one, two} <= set(setup.alive())
+    assert [(e.title, e.version_of) for e in result.restored] == [
+        ("Invoice one", None),
+        ("Report", document),
+        ("Invoice two", None),
+    ]
+    # Every restored entry links to its document; a version links to the document it belongs to.
+    assert [e.web_url for e in result.restored] == [
+        f"{WEB}/documents/{one}/details",
+        f"{WEB}/documents/{document}/details",
+        f"{WEB}/documents/{two}/details",
+    ]
 
 
 async def test_restoring_one_document_reads_in_the_singular() -> None:
@@ -190,7 +208,7 @@ async def test_entries_on_later_pages_of_the_trash_are_found_too() -> None:
     for number in range(119):
         _ = await setup.trashed(f"Doc {number}")
     [entry] = [d for d in setup.state.trash if d.id == oldest]
-    entry.deleted_at = datetime(2026, 1, 1, tzinfo=UTC)
+    entry.created = date(2026, 1, 1)
     newest = max(setup.ids())
 
     result = await setup.service.restore([oldest, newest])
@@ -303,6 +321,56 @@ async def test_emptying_one_entry_reads_in_the_singular() -> None:
         _ = await setup.service.empty([one], everything=False)
 
 
+async def test_all_asks_for_one_entry_more_than_it_handles_to_see_a_larger_trash() -> None:
+    setup = Setup(writes=False, max_all=5)
+    sizes: list[int] = []
+
+    class Recording(FakePaperless):
+        @override
+        async def list_trash(self, *, page: int, page_size: int) -> TrashPage:
+            sizes.append(page_size)
+            return await super().list_trash(page=page, page_size=page_size)
+
+    recording = Recording(setup.state, user=setup.fake.user.username)
+    service = TrashService(recording, recording, setup.taxonomy, web_url=WEB, max_all=5)
+
+    result = await service.empty(None, everything=True)
+
+    assert result.count == 0
+    assert sizes == [6]
+
+
+async def test_all_for_a_single_entry_reads_properly() -> None:
+    setup = Setup(writes=False)
+    _ = await setup.trashed("Single")
+
+    with pytest.raises(ConfirmationRequired, match=r"delete ALL 1 entry of the Paperless trash"):
+        _ = await setup.service.empty(None, everything=True)
+
+
+async def test_an_entry_a_page_read_returns_twice_is_emptied_once() -> None:
+    # Paging by creation date has no tie-breaker, so a read can repeat an entry.
+    setup = Setup()
+    fake = setup.fake
+
+    class Repeating(FakePaperless):
+        @override
+        async def list_trash(self, *, page: int, page_size: int) -> TrashPage:
+            found = await super().list_trash(page=page, page_size=page_size)
+            return found.model_copy(update={"entries": (*found.entries, *found.entries[:1])})
+
+    repeating = Repeating(setup.state, user=fake.user.username, allow_writes=True)
+    service = TrashService(repeating, repeating, setup.taxonomy, web_url=WEB)
+    for number in range(3):
+        _ = await setup.trashed(f"Doc {number}")
+
+    result = await service.empty(None, everything=True, confirm=True)
+
+    assert result.count == 3
+    assert len(set(result.document_ids)) == 3
+    assert setup.ids() == []
+
+
 async def test_a_confirmed_empty_removes_exactly_the_named_entries() -> None:
     setup = Setup()
     gone, stays = await setup.trashed("Gone"), await setup.trashed("Stays")
@@ -337,10 +405,8 @@ async def test_all_without_confirm_counts_and_names_the_entries_and_changes_noth
     message = raised.value.message
     head = f"Nothing was changed. Confirming would permanently delete ALL {len(titles)} entries of "
     assert message.startswith(head + "the Paperless trash (every entry the user can see): ")
-    assert message.endswith(f"and 3 more. {LOST}.")
-    shown, hidden = titles[-SHOWN:], titles[:-SHOWN]  # newest first: the last ones made
-    assert all(f"'{title}'" in message for title in shown)
-    assert not any(f"'{title}'" in message for title in hidden)
+    assert message.endswith(f"and 3 more. {LOST}. {WHEN_CONFIRMED}.")
+    assert sum(f"'{title}'" in message for title in titles) == SHOWN
     assert len(setup.ids()) == len(titles)
 
 
@@ -352,11 +418,14 @@ async def test_all_with_confirm_empties_every_entry_the_user_can_see() -> None:
 
     assert result.count == 3
     assert sorted(result.document_ids) == sorted(emptied)
-    assert result.message == "Permanently deleted ALL 3 entries of the trash."
+    assert result.message == (
+        "Permanently deleted ALL 3 entries of the trash (every entry the user can see) as it "
+        "was when you confirmed."
+    )
     assert setup.ids() == []
 
 
-async def test_all_reads_every_page_of_the_trash() -> None:
+async def test_all_reads_the_whole_trash_in_one_request() -> None:
     setup = Setup()
     for number in range(205):
         _ = await setup.trashed(f"Doc {number}")

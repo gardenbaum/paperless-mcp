@@ -535,12 +535,12 @@ reason = "typing.cast returns its second argument unchanged and never looks at t
 
 [[equivalent]]
 mutant = "paperless_mcp.services.trash.xǁTrashServiceǁrestore__mutmut_24"
-function_hash = "9802904a8fa3"
+function_hash = "c52f682f4e53"
 reason = "deleted=None instead of False: _described only tests the flag for truthiness, and both are falsy."
 
 [[equivalent]]
-mutant = "paperless_mcp.services.trash.xǁTrashServiceǁempty__mutmut_64"
-function_hash = "cada4d162933"
+mutant = "paperless_mcp.services.trash.xǁTrashServiceǁempty__mutmut_72"
+function_hash = "b5c85ce89154"
 reason = "deleted=None instead of False: _described only tests the flag for truthiness, and both are falsy."
 
 [[equivalent]]

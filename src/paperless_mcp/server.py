@@ -301,7 +301,9 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                     adapters.documents, adapters.bulk_writes, taxonomy, web_url=web_url
                 ),
                 bulk_taxonomy=BulkTaxonomyEditor(adapters.taxonomy, adapters.bulk_writes, taxonomy),
-                trash=TrashService(adapters.trash, adapters.trash_writes, taxonomy),
+                trash=TrashService(
+                    adapters.trash, adapters.trash_writes, taxonomy, web_url=web_url
+                ),
             )
             overview = await services.instance.probe(settings.startup_timeout)
             if overview is None:
