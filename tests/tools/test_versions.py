@@ -253,7 +253,7 @@ async def test_merging_without_confirm_changes_nothing_and_says_how_to_confirm()
     )
 
     assert "Nothing was changed" in text
-    assert "merge document 10 'merge me 10' into document 1" in text
+    assert "merge document 10 'merge me 10' (0 notes) into document 1" in text
     assert "vanish" in text
     assert "confirm=true" in text
     assert 10 in {d.id for d in state.documents}

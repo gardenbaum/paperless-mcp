@@ -1126,6 +1126,10 @@ class FakePaperless:
         name. Probed on 3.4.2: a file type it cannot consume and a label over 64 characters are
         400s; a blank label is stored as none; the same content again is a second version.
 
+        Deferred (not modelled): `update_version` on a version id (Paperless resolves it to the
+        root), and a restore from the trash re-attaching a trashed version (live: it comes back as
+        a version of its root; here the trash entry stays a stub).
+
         Order: the global `add_document` permission (403, the HTTP method's), the form (400), the
         document (404), then `change_document` and the object (403, see `_versioned`).
 
@@ -1735,7 +1739,7 @@ def _record(
         page_count=document.page_count,
         notes_count=len(document.notes),
         versions=tuple(document.versions),
-        user_can_change=user.may_change_object(document) if report_change else None,
+        user_can_change=document.changeable_by(user) if report_change else None,
     )
 
 

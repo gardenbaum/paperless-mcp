@@ -15,7 +15,7 @@ from pydantic import Field
 
 from paperless_mcp.domain.documents import UploadMetadata, UploadResult
 from paperless_mcp.domain.errors import Validation
-from paperless_mcp.tools._shared import ANNOTATIONS, boundary, services
+from paperless_mcp.tools._shared import ANNOTATIONS, boundary, check_transport, services
 from paperless_mcp.tools.upload import (
     COMMON,
     TOOLSET,
@@ -29,24 +29,6 @@ from paperless_mcp.tools.upload import (
 )
 
 local = LocalProvider()
-
-# The transports of a remote caller (FastMCP's names); a path is never read for one of them.
-HTTP_TRANSPORTS = frozenset({"sse", "streamable-http"})
-
-
-def check_transport(transport: str | None) -> None:
-    """Refuse a path unless the request came over stdio (or the server runs in-process).
-
-    The server never registers this tool over HTTP; this is the second lock, for a server that
-    was started on the wrong transport. ``None``: no transport (tests, embedding).
-
-    Raises:
-        Validation: The request came over an HTTP transport.
-    """
-    if transport in HTTP_TRANSPORTS:
-        message = "A path can only be read when the server runs over stdio."
-        raise Validation(message, hint="Send the file as content_base64.")
-
 
 LEAD = (
     "Upload a file to Paperless as a new document. Give the file either as path (an absolute "

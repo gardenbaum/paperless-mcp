@@ -3153,54 +3153,73 @@
             }),
             'type': 'array',
           }),
-          'versions': dict({
-            'description': 'Newest first.',
-            'items': dict({
-              'description': 'One file version of a document.',
-              'properties': dict({
-                'added': dict({
-                  'format': 'date-time',
-                  'type': 'string',
-                }),
-                'checksum': dict({
-                  'anyOf': list([
-                    dict({
-                      'type': 'string',
-                    }),
-                    dict({
-                      'type': 'null',
-                    }),
-                  ]),
-                  'default': None,
-                  'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
-                }),
-                'id': dict({
-                  'type': 'integer',
-                }),
-                'is_root': dict({
-                  'description': 'True for the original upload.',
-                  'type': 'boolean',
-                }),
-                'version_label': dict({
-                  'anyOf': list([
-                    dict({
-                      'type': 'string',
-                    }),
-                    dict({
-                      'type': 'null',
-                    }),
-                  ]),
-                }),
+          'message': dict({
+            'anyOf': list([
+              dict({
+                'type': 'string',
               }),
-              'required': list([
-                'id',
-                'added',
-                'version_label',
-                'is_root',
-              ]),
-              'type': 'object',
-            }),
-            'type': 'array',
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Set when the versions could not be listed after the merge.',
+          }),
+          'versions': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'description': 'One file version of a document.',
+                  'properties': dict({
+                    'added': dict({
+                      'format': 'date-time',
+                      'type': 'string',
+                    }),
+                    'checksum': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                      'default': None,
+                      'description': 'SHA-256 of the file; two versions with the same checksum are copies.',
+                    }),
+                    'id': dict({
+                      'type': 'integer',
+                    }),
+                    'is_root': dict({
+                      'description': 'True for the original upload.',
+                      'type': 'boolean',
+                    }),
+                    'version_label': dict({
+                      'anyOf': list([
+                        dict({
+                          'type': 'string',
+                        }),
+                        dict({
+                          'type': 'null',
+                        }),
+                      ]),
+                    }),
+                  }),
+                  'required': list([
+                    'id',
+                    'added',
+                    'version_label',
+                    'is_root',
+                  ]),
+                  'type': 'object',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'Newest first; null if the document could not be read after the merge.',
           }),
           'web_url': dict({
             'description': 'Link to the document in the Paperless web UI.',

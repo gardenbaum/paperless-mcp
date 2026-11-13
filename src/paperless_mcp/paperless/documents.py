@@ -579,8 +579,8 @@ class PaperlessDocumentWriter:
         """See ``DocumentWriter.upload_document_version``.
 
         One multipart POST to ``update_version``: the file as ``document`` and the label as
-        ``version_label``. Paperless answers 404 to a document that does not exist or that the
-        user may not see, and 403 to one they may see but not change. Sent once, like an upload.
+        ``version_label``. Paperless answers 404 to a document that does not exist, and 403 to one
+        the user may not see or may not change. Sent once, like an upload.
         """
         form = {} if upload.label is None else {"version_label": upload.label}
         try:
@@ -601,7 +601,8 @@ class PaperlessDocumentWriter:
         """See ``DocumentWriter.set_version_label``.
 
         ``version_label`` null clears the label; Paperless also turns an empty string into null.
-        It answers 404 to a missing or hidden document and to a version that is not on it.
+        It answers 404 to a missing document and to a version that is not on it, and 403 to a
+        document the user may not see or change.
         """
         try:
             row = await self._client.call(

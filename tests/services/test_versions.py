@@ -4,7 +4,7 @@ The fakes of the "unconfirmed" cases are created without `allow_writes`: the fak
 raises `WriteNotAllowedError` on any write, so a passing test proves nothing was written.
 """
 
-from typing import final
+from typing import TYPE_CHECKING, final, override
 
 import pytest
 from fakes.accounts import ADMIN, READER
@@ -15,10 +15,18 @@ from paperless_mcp.domain.errors import (
     ConfirmationRequired,
     NotFound,
     PermissionDenied,
+    UpstreamTimeout,
     Validation,
 )
 from paperless_mcp.domain.versions import VersionUpload
+from paperless_mcp.paperless.auth import StaticTokenProvider
+from paperless_mcp.services.taxonomy import TaxonomyResolver
 from paperless_mcp.services.versions import MAX_LABEL, MAX_SOURCES, VersionService
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from paperless_mcp.domain.documents import DocumentRecord
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
@@ -34,7 +42,12 @@ class Setup:
         self.state: FakeState = seeded()
         self.writer: FakePaperless = FakePaperless(self.state, user=ADMIN[0], allow_writes=True)
         self.fake: FakePaperless = FakePaperless(self.state, user=user, allow_writes=writes)
-        self.service: VersionService = VersionService(self.fake, self.fake, web_url=WEB)
+        self.taxonomy: TaxonomyResolver = TaxonomyResolver(
+            self.fake, StaticTokenProvider("t"), ttl=3600.0
+        )
+        self.service: VersionService = VersionService(
+            self.fake, self.fake, self.taxonomy, web_url=WEB
+        )
 
     async def add(self, document: int, text: str, label: str | None = None) -> int:
         """A text version of `document`, made behind the service's back; returns its id."""
@@ -54,7 +67,7 @@ class Setup:
     def as_user(self, user: str) -> VersionService:
         """The service for another user of the same instance."""
         fake = FakePaperless(self.state, user=user, allow_writes=True)
-        return VersionService(fake, fake, web_url=WEB)
+        return VersionService(fake, fake, self.taxonomy, web_url=WEB)
 
     def version_ids(self, document: int) -> list[int]:
         [found] = [d for d in self.state.documents if d.id == document]
@@ -234,10 +247,11 @@ async def test_merging_without_confirm_changes_nothing_and_says_what_would_happe
 
     assert raised.value.message == (
         "Nothing was changed. Confirming would merge document "
-        f"{other} 'doc {other}' and document {third} 'doc {third}' into document 1 "
-        f"'{PUBLIC_TITLE}' as its newest versions: the merged documents vanish for good, not even "
-        "into the trash. Their titles, tags, correspondents, notes and other metadata are lost; "
-        "only their files stay, as versions of document 1."
+        f"{other} 'doc {other}' (0 notes) and document {third} 'doc {third}' (0 notes) into "
+        f"document 1 '{PUBLIC_TITLE}' as its newest versions: the merged documents vanish for "
+        "good, not even into the trash. Their titles, tags, correspondents, notes and other "
+        "metadata are lost; only their files stay, as versions of document 1, which then shows "
+        f"the file and text of document {third}."
     )
     assert raised.value.hint == CONFIRM_HINT
     assert {d.id for d in setup.state.documents} >= {PUBLIC, other, third}
@@ -251,10 +265,11 @@ async def test_merging_one_document_without_a_label_says_so_in_the_singular() ->
         _ = await setup.service.merge(PUBLIC, [other], None)
 
     assert raised.value.message == (
-        f"Nothing was changed. Confirming would merge document {other} 'doc {other}' into "
-        f"document 1 '{PUBLIC_TITLE}' as its newest version: the merged document vanishes for "
-        "good, not even into the trash. Its title, tags, correspondents, notes and other "
-        "metadata are lost; only its file stays, as a version of document 1."
+        f"Nothing was changed. Confirming would merge document {other} 'doc {other}' (0 notes) "
+        f"into document 1 '{PUBLIC_TITLE}' as its newest version: the merged document vanishes "
+        "for good, not even into the trash. Its title, tags, correspondents, notes and other "
+        "metadata are lost; only its file stays, as a version of document 1, which then shows "
+        f"the file and text of document {other}."
     )
 
 
@@ -266,8 +281,8 @@ async def test_merging_three_documents_lists_them_with_commas_and_an_and() -> No
         _ = await setup.service.merge(PUBLIC, [one, two, three], None)
 
     assert (
-        f"merge document {one} 'doc {one}', document {two} 'doc {two}' and document {three} "
-        f"'doc {three}' into document 1"
+        f"merge document {one} 'doc {one}' (0 notes), document {two} 'doc {two}' (0 notes) and "
+        f"document {three} 'doc {three}' (0 notes) into document 1"
     ) in raised.value.message
 
 
@@ -278,7 +293,9 @@ async def test_the_merge_message_names_the_label() -> None:
     with pytest.raises(ConfirmationRequired) as raised:
         _ = await setup.service.merge(PUBLIC, [other], " scan ")
 
-    assert f"merge document {other} 'doc {other}' into document 1" in raised.value.message
+    assert f"merge document {other} 'doc {other}' (0 notes) into document 1" in (
+        raised.value.message
+    )
     assert "as its newest version, labelled 'scan': the merged document vanishes" in (
         raised.value.message
     )
@@ -294,6 +311,7 @@ async def test_a_confirmed_merge_returns_the_new_versions_and_the_sources_are_go
     result = await setup.service.merge(PUBLIC, [one, two], None, confirm=True)
 
     assert (result.document_id, result.merged_document_ids) == (PUBLIC, (one, two))
+    assert result.versions is not None
     assert [v.id for v in result.versions] == [two, one, PUBLIC]
     assert result.web_url == f"{WEB}/documents/1/details"
     assert {d.id for d in setup.state.documents}.isdisjoint({one, two})
@@ -305,6 +323,7 @@ async def test_a_confirmed_merge_of_one_document_passes_the_label_trimmed() -> N
 
     result = await setup.service.merge(PUBLIC, [one], " scan ", confirm=True)
 
+    assert result.versions is not None
     assert [v.version_label for v in result.versions] == ["scan", None]
 
 
@@ -410,3 +429,138 @@ async def test_merging_needs_the_permission() -> None:
         _ = await setup.as_user(READER[0]).merge(PUBLIC, [other], None, confirm=True)
 
     assert other in {d.id for d in setup.state.documents}
+
+
+# --- the taxonomy counts, and a merge whose answer cannot be read ---------------------------
+
+
+async def counts(setup: Setup) -> dict[str, int | None]:
+    return {t.name: t.document_count for t in await setup.taxonomy.items("tag")}
+
+
+async def test_the_taxonomy_counts_forget_merged_documents() -> None:
+    setup = Setup()
+    source = setup.document(owner=None)
+    setup.state.documents[-1].tags = [1]
+    assert (await counts(setup))["e2e-finance"] == 2
+
+    _ = await setup.service.merge(PUBLIC, [source], None, confirm=True)
+
+    assert (await counts(setup))["e2e-finance"] == 1
+
+
+class Refusing(FakePaperless):
+    """The fake, with a Paperless that refuses every merge after the sources were read."""
+
+    @override
+    async def merge_as_versions(
+        self, root_id: int, source_ids: Sequence[int], label: str | None
+    ) -> None:
+        self.state.documents[-1].tags = []  # the change made before the refusal
+        message = "refused"
+        raise Validation(message)
+
+
+async def test_the_counts_are_forgotten_even_when_the_merge_fails() -> None:
+    setup = Setup()
+    source = setup.document(owner=None)
+    setup.state.documents[-1].tags = [1]
+    assert (await counts(setup))["e2e-finance"] == 2
+    fake = Refusing(setup.state, user=ADMIN[0], allow_writes=True)
+    service = VersionService(fake, fake, setup.taxonomy, web_url=WEB)
+
+    with pytest.raises(Validation):
+        _ = await service.merge(PUBLIC, [source], None, confirm=True)
+
+    assert (await counts(setup))["e2e-finance"] == 1
+
+
+async def test_the_notes_of_each_source_are_counted_in_the_prompt() -> None:
+    setup = Setup(writes=False)
+    one, two = setup.document(), setup.document()
+    note = setup.state.documents[0].notes[0]
+    setup.state.documents[-2].notes = [note]
+    setup.state.documents[-1].notes = [note, note]
+
+    with pytest.raises(ConfirmationRequired) as raised:
+        _ = await setup.service.merge(PUBLIC, [one, two], None)
+
+    assert f"document {one} 'doc {one}' (1 note) and document {two} 'doc {two}' (2 notes)" in (
+        raised.value.message
+    )
+
+
+async def test_a_user_who_may_not_change_a_document_is_refused_before_the_prompt() -> None:
+    setup = Setup()
+    version = await setup.add(PUBLIC, "one")
+    other = setup.document(owner=None)
+    setup.state.documents[0].owner = 2  # admin's: the reader may view but not change it
+    setup.state.documents[0].viewers = {3}
+    reader = setup.as_user(READER[0])
+
+    for call in (
+        reader.delete(PUBLIC, version),
+        reader.merge(PUBLIC, [other], None),
+        reader.merge(other, [PUBLIC], None),
+    ):
+        with pytest.raises(PermissionDenied) as raised:
+            _ = await call
+        assert raised.value.message == "The Paperless user may not change document 1."
+        assert raised.value.hint == "Ask the owner of the document, or use another user."
+
+
+async def test_an_unconfirmed_merge_leaves_the_counts_alone() -> None:
+    setup = Setup(writes=False)
+    source = setup.document(owner=None)
+    setup.state.documents[-1].tags = [1]
+    _ = await counts(setup)
+    setup.state.documents[-1].tags = []  # a change made behind the cache's back
+
+    with pytest.raises(ConfirmationRequired):
+        _ = await setup.service.merge(PUBLIC, [source], None)
+
+    assert (await counts(setup))["e2e-finance"] == 2
+
+
+class Unreadable(FakePaperless):
+    """The fake, unable to read the root again once the merge is done."""
+
+    def __init__(self, state: FakeState) -> None:
+        super().__init__(state, user=ADMIN[0], allow_writes=True)
+        self.merged: bool = False
+
+    @override
+    async def merge_as_versions(
+        self, root_id: int, source_ids: Sequence[int], label: str | None
+    ) -> None:
+        await super().merge_as_versions(root_id, source_ids, label)
+        self.merged = True
+
+    @override
+    async def get_document(self, document_id: int) -> DocumentRecord:
+        if self.merged:
+            message = "slow"
+            raise UpstreamTimeout(message)
+        return await super().get_document(document_id)
+
+
+async def test_a_merge_that_went_through_is_reported_even_if_the_root_cannot_be_read_after() -> (
+    None
+):
+    setup = Setup()
+    source = setup.document()
+    fake = Unreadable(setup.state)
+    service = VersionService(fake, fake, setup.taxonomy, web_url=WEB)
+
+    result = await service.merge(PUBLIC, [source], None, confirm=True)
+
+    assert (result.document_id, result.merged_document_ids, result.versions) == (
+        PUBLIC,
+        (source,),
+        None,
+    )
+    assert result.message == (
+        "The documents were merged, but the versions could not be read afterwards; "
+        "list them with list_document_versions."
+    )
+    assert {d.id for d in setup.state.documents}.isdisjoint({source})

@@ -247,7 +247,7 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                     upload_dirs=settings.upload_dirs if by_path else (),
                 ),
                 versions=VersionService(
-                    adapters.documents, adapters.document_writes, web_url=web_url
+                    adapters.documents, adapters.document_writes, taxonomy, web_url=web_url
                 ),
                 version_uploads=VersionUploadService(
                     adapters.documents,

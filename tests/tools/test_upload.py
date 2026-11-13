@@ -14,9 +14,6 @@ from fakes.paperless import FakePaperless, seeded
 from fastmcp import Client
 from harness import serve
 
-from paperless_mcp.domain.errors import Validation
-from paperless_mcp.tools.upload_stdio import check_transport
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -275,17 +272,3 @@ async def test_a_path_sent_with_content_to_the_remote_tool_is_not_read(tmp_path:
     assert pdf("secret") not in uploaded
     assert result.is_error  # FastMCP refuses an argument the tool does not declare
     assert uploaded == []
-
-
-# --- the path variant refuses to serve a request that did not come over stdio -------------------
-
-
-@pytest.mark.parametrize("transport", ["sse", "streamable-http"])
-def test_a_path_is_refused_over_an_http_transport(transport: str) -> None:
-    with pytest.raises(Validation, match="stdio"):
-        check_transport(transport)
-
-
-@pytest.mark.parametrize("transport", ["stdio", None])
-def test_a_path_is_allowed_over_stdio_or_without_a_transport(transport: str | None) -> None:
-    check_transport(transport)  # None: the server runs in-process, as the tests do

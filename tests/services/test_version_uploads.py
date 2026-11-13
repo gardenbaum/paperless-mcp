@@ -272,16 +272,32 @@ async def test_a_missing_or_hidden_document_is_not_found_and_nothing_is_sent() -
     assert reader.untouched()
 
 
-async def test_a_version_id_is_not_a_document_and_the_hint_says_so() -> None:
+async def test_a_version_id_is_not_a_document() -> None:
     setup = Setup()
     version = (await setup.upload()).version_id
     assert version is not None
-    other = Setup()
 
-    with pytest.raises(NotFound):
-        _ = await other.upload(document=version)
+    with pytest.raises(NotFound) as raised:
+        _ = await setup.upload(document=version)
 
-    assert other.untouched()
+    assert raised.value.message == f"No document {version} exists that this user may see."
+    assert raised.value.hint == "Take the id from a search_documents row."
+    assert len(setup.fake.uploads) == 1
+    assert len(setup.state.tasks) == 1
+
+
+async def test_a_document_the_record_says_the_user_cannot_change_is_refused_before_sending() -> (
+    None
+):
+    setup = Setup(user=READER[0], permissions=frozenset({"view_document", "add_document"}))
+    setup.state.documents[0].owner = 2
+    setup.state.documents[0].viewers = {3}
+
+    with pytest.raises(PermissionDenied) as raised:
+        _ = await setup.upload()
+
+    assert raised.value.message == "The Paperless user may not change document 1."
+    assert setup.untouched()
 
 
 async def test_a_user_who_may_not_change_documents_is_denied() -> None:

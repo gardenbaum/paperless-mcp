@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from paperless_mcp.domain.errors import (
     ConfirmationRequired,
     NotFound,
+    PaperlessMcpError,
+    PermissionDenied,
     Validation,
     quoted,
 )
@@ -21,6 +23,7 @@ from paperless_mcp.domain.versions import (
     VersionLabelSet,
     VersionsMerged,
 )
+from paperless_mcp.services.document_edits import COUNTED
 from paperless_mcp.services.documents import document_link
 from paperless_mcp.services.removal import RESTORE
 
@@ -29,6 +32,7 @@ if TYPE_CHECKING:
 
     from paperless_mcp.domain.documents import DocumentRecord
     from paperless_mcp.domain.ports import DocumentReader, DocumentWriter
+    from paperless_mcp.services.taxonomy import TaxonomyResolver
 
 # Paperless's max_length of a version label.
 MAX_LABEL = 64
@@ -49,13 +53,38 @@ def clean_label(label: str | None) -> str | None:
     return text or None
 
 
+def require_change(document: DocumentRecord) -> None:
+    """Refuse early when Paperless says the user cannot change ``document`` (False, not None).
+
+    Deleting a version and merging also need ownership, which a read does not tell: that is left
+    to Paperless's own 403 (deferred).
+
+    Raises:
+        PermissionDenied: The record says the user may not change the document.
+    """
+    if document.user_can_change is False:
+        message = f"The Paperless user may not change document {document.id}."
+        raise PermissionDenied(message, hint="Ask the owner of the document, or use another user.")
+
+
 class VersionService:
     """Reads and changes the file versions of documents for the current user."""
 
-    def __init__(self, reader: DocumentReader, writer: DocumentWriter, *, web_url: str) -> None:
-        """Read through ``reader``, write through ``writer``; ``web_url`` is the Paperless UI."""
+    def __init__(
+        self,
+        reader: DocumentReader,
+        writer: DocumentWriter,
+        taxonomy: TaxonomyResolver,
+        *,
+        web_url: str,
+    ) -> None:
+        """Read through ``reader``, write through ``writer``; ``web_url`` is the Paperless UI.
+
+        ``taxonomy`` forgets the document counts after a merge, which removes documents.
+        """
         self._reader: DocumentReader = reader
         self._writer: DocumentWriter = writer
+        self._taxonomy: TaxonomyResolver = taxonomy
         self._web_url: str = web_url
 
     async def list_versions(self, document_id: int) -> DocumentVersions:
@@ -102,6 +131,7 @@ class VersionService:
             PermissionDenied: The user may not delete the document (not its owner).
         """
         document = await self._reader.get_document(document_id)
+        require_change(document)
         found = [v for v in document.versions if v.id == version_id]
         if not found:
             message = f"Document {document_id} has no version {version_id}."
@@ -165,6 +195,8 @@ class VersionService:
         text = self._checked(root_id, source_ids, label)
         root = await self._reader.get_document(root_id)
         sources = [await self._reader.get_document(number) for number in source_ids]
+        for document in (root, *sources):
+            require_change(document)
         for source in sources:
             if len(source.versions) > 1:
                 count = len(source.versions)
@@ -178,13 +210,31 @@ class VersionService:
                 )
         if not confirm:
             raise ConfirmationRequired.for_effect(self._effect(root, sources, text))
-        await self._writer.merge_as_versions(root_id, tuple(source_ids), text)
-        merged = await self._reader.get_document(root_id)
+        try:
+            await self._writer.merge_as_versions(root_id, tuple(source_ids), text)
+        finally:
+            for kind in COUNTED:
+                self._taxonomy.invalidate(kind)
+        link = document_link(self._web_url, root_id)
+        try:
+            versions = (await self._reader.get_document(root_id)).versions
+        except PaperlessMcpError:
+            # The merge happened and cannot be undone: an error here would hide that.
+            return VersionsMerged(
+                document_id=root_id,
+                merged_document_ids=tuple(source_ids),
+                versions=None,
+                web_url=link,
+                message=(
+                    "The documents were merged, but the versions could not be read afterwards; "
+                    "list them with list_document_versions."
+                ),
+            )
         return VersionsMerged(
             document_id=root_id,
             merged_document_ids=tuple(source_ids),
-            versions=merged.versions,
-            web_url=document_link(self._web_url, root_id),
+            versions=versions,
+            web_url=link,
         )
 
     @staticmethod
@@ -212,7 +262,11 @@ class VersionService:
 
     @staticmethod
     def _effect(root: DocumentRecord, sources: Sequence[DocumentRecord], label: str | None) -> str:
-        names = [f"document {s.id} {quoted(s.title)}" for s in sources]
+        def described(source: DocumentRecord) -> str:
+            notes = f"{source.notes_count} note{'' if source.notes_count == 1 else 's'}"
+            return f"document {source.id} {quoted(source.title)} ({notes})"
+
+        names = [described(s) for s in sources]
         many = len(sources) > 1
         shown = f"{', '.join(names[:-1])} and {names[-1]}" if many else names[0]
         versions = "as its newest versions" if many else "as its newest version"
@@ -224,5 +278,6 @@ class VersionService:
             f"merge {shown} into document {root.id} {quoted(root.title)} {versions}: {who} for "
             f"good, not even into the trash. {loss}, tags, correspondents, notes and other "
             f"metadata are lost; only {'their files stay' if many else 'its file stays'}, as "
-            f"{'versions' if many else 'a version'} of document {root.id}"
+            f"{'versions' if many else 'a version'} of document {root.id}, which then shows the "
+            f"file and text of document {sources[-1].id}"
         )

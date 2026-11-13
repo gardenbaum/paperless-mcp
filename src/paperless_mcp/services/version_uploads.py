@@ -18,7 +18,7 @@ from paperless_mcp.services.task_outcome import follow
 from paperless_mcp.services.upload_source import clean_filename, decode_base64, read_allowed
 from paperless_mcp.services.upload_types import sniff
 from paperless_mcp.services.uploads import UNSUPPORTED
-from paperless_mcp.services.versions import clean_label
+from paperless_mcp.services.versions import clean_label, require_change
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -102,7 +102,7 @@ class VersionUploadService:
             message = "The file is not a type Paperless can consume."
             raise Validation(message, hint=f"Supported: {UNSUPPORTED}")
         text = clean_label(label)
-        _ = await self._reader.get_document(document_id)  # a missing or hidden document stops here
+        require_change(await self._reader.get_document(document_id))  # missing, hidden or not ours
         upload = VersionUpload(filename=name, mime_type=mime_type, content=data, label=text)
         task_id = await self._writer.upload_document_version(document_id, upload)
         outcome = await follow(self._tasks, task_id, wait_seconds, nothing_named=NO_VERSION)

@@ -10,10 +10,12 @@ goes to the trash and can be restored from there; a merge removes its source doc
 import asyncio
 import hashlib
 import time
+import uuid
 from typing import TYPE_CHECKING
 
 import pytest
 
+from paperless_mcp.domain.documents import DocumentUpload
 from paperless_mcp.domain.errors import NotFound, PermissionDenied, Validation
 from paperless_mcp.domain.versions import VersionUpload
 from paperless_mcp.paperless.documents import unseen_document, unseen_version
@@ -42,6 +44,21 @@ def text_version(text: str, label: str | None = None) -> VersionUpload:
     )
 
 
+async def consumed(backend: Backend, task_id: str) -> int:
+    """Wait for the task (read as the admin), track what it made and return its one document."""
+    deadline = time.monotonic() + CONSUMPTION_SECONDS
+    while True:
+        status = await backend.admin.tasks.get_task(task_id)
+        if status.is_final:
+            break
+        assert time.monotonic() < deadline, f"Task {task_id} took too long"
+        await asyncio.sleep(0.5)
+    assert status.state == "success", status.message
+    [made] = status.document_ids
+    backend.track_document(made)
+    return made
+
+
 async def add_version(
     backend: Backend, document: int, text: str, label: str | None = None, *, by: Ports | None = None
 ) -> int:
@@ -50,17 +67,7 @@ async def add_version(
     task_id = await (by or ports).document_writes.upload_document_version(
         document, text_version(text, label)
     )
-    deadline = time.monotonic() + CONSUMPTION_SECONDS
-    while True:
-        status = await ports.tasks.get_task(task_id)
-        if status.is_final:
-            break
-        assert time.monotonic() < deadline, f"Task {task_id} took too long"
-        await asyncio.sleep(1)
-    assert status.state == "success", status.message
-    [version] = status.document_ids
-    backend.track_document(version)
-    return version
+    return await consumed(backend, task_id)
 
 
 async def versions(ports: Ports, document: int) -> tuple[DocumentVersion, ...]:
@@ -88,33 +95,22 @@ async def test_a_new_version_is_the_newest_with_its_label_and_checksum(backend: 
 
 
 @pytest.mark.contract(UPLOAD)
-async def test_the_same_content_twice_makes_two_versions_with_one_checksum(
+async def test_the_same_content_twice_is_two_versions_and_a_blank_label_is_none(
     backend: Backend,
 ) -> None:
     document = backend.new_document()
 
     first = await add_version(backend, document, "plmcp24 same content")
-    second = await add_version(backend, document, "plmcp24 same content")
+    second = await add_version(backend, document, "plmcp24 same content", "")
 
     found = await versions(backend.admin, document)
     assert [v.id for v in found] == [second, first, document]
     assert found[0].checksum == found[1].checksum != found[2].checksum
+    assert [v.version_label for v in found] == [None, None, None]
 
 
 @pytest.mark.contract(UPLOAD)
-@pytest.mark.parametrize("label", [None, ""])
-async def test_no_label_and_a_blank_label_both_leave_the_version_without_one(
-    backend: Backend, label: str | None
-) -> None:
-    document = backend.new_document()
-
-    _ = await add_version(backend, document, "plmcp24 unlabelled", label)
-
-    assert (await versions(backend.admin, document))[0].version_label is None
-
-
-@pytest.mark.contract(UPLOAD)
-async def test_an_unsupported_file_or_a_long_label_is_rejected_before_any_version_exists(
+async def test_an_unsupported_file_or_a_long_label_is_rejected_and_a_missing_document_not_found(
     backend: Backend,
 ) -> None:
     ports, document = backend.admin, backend.new_document()
@@ -128,33 +124,29 @@ async def test_an_unsupported_file_or_a_long_label_is_rejected_before_any_versio
         _ = await ports.document_writes.upload_document_version(
             document, text_version("plmcp24 long label", "x" * 65)
         )
-
-    assert [v.is_root for v in await versions(ports, document)] == [True]
-
-
-@pytest.mark.contract(UPLOAD)
-async def test_a_version_cannot_go_to_a_missing_document(backend: Backend) -> None:
     with pytest.raises(NotFound) as raised:
-        _ = await backend.admin.document_writes.upload_document_version(
+        _ = await ports.document_writes.upload_document_version(
             MISSING, text_version("plmcp24 nowhere")
         )
 
+    assert [v.is_root for v in await versions(ports, document)] == [True]
     assert raised.value.message == unseen_document(MISSING).message
 
 
 @pytest.mark.contract(UPLOAD)
 @pytest.mark.contract(LABEL)
 @pytest.mark.contract(DELETE)
-async def test_a_view_grant_or_no_change_permission_cannot_touch_versions(
-    backend: Backend,
-) -> None:
+async def test_permissions_on_versions_follow_ownership_and_grants(backend: Backend) -> None:
     admin = backend.admin
     document = backend.new_document()
     version = await add_version(backend, document, "plmcp24 guarded")
     viewer = backend.restricted(CHANGING, view=[document])
     reader = backend.restricted(frozenset({"view_document"}), change=[document])
+    granted = backend.restricted(CHANGING, change=[document])
+    stranger = backend.restricted(CHANGING)
 
-    for user in (viewer, reader, backend.blind):
+    # No change right: the global permission, the grant or the document is missing.
+    for user in (viewer, reader, backend.blind, stranger):
         with pytest.raises(PermissionDenied):
             _ = await user.document_writes.upload_document_version(
                 document, text_version("plmcp24 denied")
@@ -163,66 +155,33 @@ async def test_a_view_grant_or_no_change_permission_cannot_touch_versions(
             _ = await user.document_writes.set_version_label(document, version, "no")
         with pytest.raises(PermissionDenied):
             _ = await user.document_writes.delete_version(document, version)
-
+    with pytest.raises(NotFound):
+        _ = await stranger.document_writes.set_version_label(MISSING, version, "no")
     assert [(v.id, v.version_label) for v in await versions(admin, document)] == [
         (version, None),
         (document, None),
     ]
 
-
-@pytest.mark.contract(UPLOAD)
-@pytest.mark.contract(LABEL)
-@pytest.mark.contract(DELETE)
-async def test_a_change_grant_adds_versions_and_sets_labels_but_does_not_delete_them(
-    backend: Backend,
-) -> None:
-    document = backend.new_document()
-    version = await add_version(backend, document, "plmcp24 shared")
-    user = backend.restricted(CHANGING, change=[document])
-
-    labelled = await user.document_writes.set_version_label(document, version, "by user")
-    added = await add_version(backend, document, "plmcp24 by the user", by=user)
+    # A change grant adds versions and sets labels, but deleting needs ownership.
+    labelled = await granted.document_writes.set_version_label(document, version, "by user")
+    added = await add_version(backend, document, "plmcp24 by the user", by=granted)
     with pytest.raises(PermissionDenied):
-        _ = await user.document_writes.delete_version(document, added)  # deleting needs ownership
-
+        _ = await granted.document_writes.delete_version(document, added)
     assert labelled.version_label == "by user"
-    assert [v.id for v in await versions(backend.admin, document)] == [added, version, document]
+    assert [v.id for v in await versions(admin, document)] == [added, version, document]
 
 
-@pytest.mark.contract(UPLOAD)
 @pytest.mark.contract(LABEL)
 @pytest.mark.contract(DELETE)
-async def test_a_document_the_user_has_no_grant_on_is_refused_not_hidden(
+async def test_labels_are_set_cleared_and_bounded_and_unknown_versions_are_not_found(
     backend: Backend,
 ) -> None:
-    document = backend.new_document()
-    version = await add_version(backend, document, "plmcp24 private")
-    user = backend.restricted(CHANGING)
-
-    with pytest.raises(PermissionDenied):
-        _ = await user.document_writes.upload_document_version(
-            document, text_version("plmcp24 intruder")
-        )
-    with pytest.raises(PermissionDenied):
-        _ = await user.document_writes.set_version_label(document, version, "no")
-    with pytest.raises(PermissionDenied):
-        _ = await user.document_writes.delete_version(document, version)
-    with pytest.raises(NotFound):
-        _ = await user.document_writes.set_version_label(MISSING, version, "no")
-
-    assert len(await versions(backend.admin, document)) == 2
-
-
-@pytest.mark.contract(LABEL)
-async def test_a_label_is_set_changed_and_cleared_on_any_version_the_root_included(
-    backend: Backend,
-) -> None:
-    ports, document = backend.admin, backend.new_document()
+    ports, document, other = backend.admin, backend.new_document(), backend.new_document()
     version = await add_version(backend, document, "plmcp24 labels")
+    foreign = await add_version(backend, other, "plmcp24 foreign")
 
     set_ = await ports.document_writes.set_version_label(document, version, "draft")
     root = await ports.document_writes.set_version_label(document, document, "original")
-
     assert (set_.id, set_.version_label, set_.is_root) == (version, "draft", False)
     assert set_.checksum == hashlib.sha256(b"plmcp24 labels").hexdigest()
     assert (root.id, root.version_label, root.is_root) == (document, "original", True)
@@ -233,124 +192,88 @@ async def test_a_label_is_set_changed_and_cleared_on_any_version_the_root_includ
     cleared = await ports.document_writes.set_version_label(document, version, None)
     blank = await ports.document_writes.set_version_label(document, document, "")
     assert (cleared.version_label, blank.version_label) == (None, None)
-
-
-@pytest.mark.contract(LABEL)
-async def test_a_label_of_65_characters_is_rejected_and_64_fit(backend: Backend) -> None:
-    ports, document = backend.admin, backend.new_document()
-    version = await add_version(backend, document, "plmcp24 long")
-
     with pytest.raises(Validation):
         _ = await ports.document_writes.set_version_label(document, version, "x" * 65)
     fits = await ports.document_writes.set_version_label(document, version, "y" * 64)
-
     assert fits.version_label == "y" * 64
 
-
-@pytest.mark.contract(LABEL)
-@pytest.mark.contract(DELETE)
-async def test_an_unknown_or_foreign_version_or_document_is_not_found(backend: Backend) -> None:
-    ports, document, other = backend.admin, backend.new_document(), backend.new_document()
-    foreign = await add_version(backend, other, "plmcp24 foreign")
-
-    for version in (MISSING, foreign):
+    for unknown in (MISSING, foreign):
         with pytest.raises(NotFound) as raised:
-            _ = await ports.document_writes.set_version_label(document, version, "x")
-        assert raised.value.message == unseen_version(document, version).message
+            _ = await ports.document_writes.set_version_label(document, unknown, "x")
+        assert raised.value.message == unseen_version(document, unknown).message
         with pytest.raises(NotFound):
-            _ = await ports.document_writes.delete_version(document, version)
+            _ = await ports.document_writes.delete_version(document, unknown)
     with pytest.raises(NotFound):
         _ = await ports.document_writes.set_version_label(MISSING, foreign, "x")
     with pytest.raises(NotFound):
         _ = await ports.document_writes.delete_version(MISSING, foreign)
-
-    assert [v.is_root for v in await versions(ports, document)] == [True]
     assert len(await versions(ports, other)) == 2
 
 
 @pytest.mark.contract(DELETE)
-async def test_deleting_the_newest_version_brings_back_the_previous_one_and_trashes_it(
+async def test_deleting_versions_trashes_them_and_the_document_shows_the_newest_left(
     backend: Backend,
 ) -> None:
     ports, document = backend.admin, backend.new_document()
     first = await add_version(backend, document, "plmcp24 first")
     second = await add_version(backend, document, "plmcp24 second")
+    third = await add_version(backend, document, "plmcp24 third")
 
-    current = await ports.document_writes.delete_version(document, second)
-
-    assert current == first
-    assert [v.id for v in await versions(ports, document)] == [first, document]
-    assert await ports.documents.get_document_content(document) == "plmcp24 first"
-    assert backend.in_trash(second)  # not gone for good: the trash can restore it
-    assert not backend.in_trash(document)
-
-
-@pytest.mark.contract(DELETE)
-async def test_deleting_an_older_version_leaves_the_newest_current(backend: Backend) -> None:
-    ports, document = backend.admin, backend.new_document()
-    first = await add_version(backend, document, "plmcp24 older")
-    second = await add_version(backend, document, "plmcp24 newer")
-
-    current = await ports.document_writes.delete_version(document, first)
-
+    current = await ports.document_writes.delete_version(document, third)
     assert current == second
-    assert [v.id for v in await versions(ports, document)] == [second, document]
-    assert await ports.documents.get_document_content(document) == "plmcp24 newer"
-
-
-@pytest.mark.contract(DELETE)
-async def test_the_root_version_is_not_deleted_and_a_version_only_once(backend: Backend) -> None:
-    ports, document = backend.admin, backend.new_document()
-    version = await add_version(backend, document, "plmcp24 once")
-
-    with pytest.raises(Validation):
-        _ = await ports.document_writes.delete_version(document, document)
-    _ = await ports.document_writes.delete_version(document, version)
-    with pytest.raises(NotFound):
-        _ = await ports.document_writes.delete_version(document, version)
-
-    assert [v.id for v in await versions(ports, document)] == [document]
+    assert [v.id for v in await versions(ports, document)] == [second, first, document]
+    assert await ports.documents.get_document_content(document) == "plmcp24 second"
+    assert backend.in_trash(third)  # not gone for good: the trash can restore it
     assert not backend.in_trash(document)
 
+    current = await ports.document_writes.delete_version(document, first)  # an older one
+    assert current == second
+    assert await ports.documents.get_document_content(document) == "plmcp24 second"
 
-@pytest.mark.contract(MERGE)
-async def test_one_merged_document_becomes_the_newest_version_with_its_label(
-    backend: Backend,
-) -> None:
-    ports, root, source = backend.admin, backend.new_document(), backend.new_document()
-    backend.track_document(source)
-    note = await ports.document_writes.add_note(source, "belongs to the source")
-    source_title = (await ports.documents.get_document(source)).title
-    root_title = (await ports.documents.get_document(root)).title
-
-    await ports.document_writes.merge_as_versions(root, (source,), "from source")
-
-    [newest, original] = await versions(ports, root)
-    assert (newest.id, newest.version_label, newest.is_root) == (source, "from source", False)
-    assert (original.id, original.is_root) == (root, True)
-    assert (await ports.documents.get_document(root)).title == root_title  # the root's metadata
-    assert note.note not in [n.note for n in await ports.documents.list_document_notes(root)]
-    # The source is gone as a document of its own, and not in the trash either.
-    with pytest.raises(NotFound):
-        _ = await ports.documents.get_document(source)
-    assert not backend.in_trash(source)
-    assert source_title != root_title
+    with pytest.raises(Validation):  # the root is deleted with the document
+        _ = await ports.document_writes.delete_version(document, document)
+    with pytest.raises(NotFound):  # and a version only once
+        _ = await ports.document_writes.delete_version(document, third)
+    assert [v.id for v in await versions(ports, document)] == [second, document]
 
 
 @pytest.mark.contract(MERGE)
-async def test_several_merged_documents_become_versions_in_the_order_given(
+async def test_merged_documents_become_versions_in_order_and_vanish_with_their_notes(
     backend: Backend,
 ) -> None:
     ports, root = backend.admin, backend.new_document()
     first, second = backend.new_document(), backend.new_document()
     backend.track_document(first)
     backend.track_document(second)
+    held = await add_version(
+        backend, root, "plmcp24 root version"
+    )  # a root with versions takes more
+    note = await ports.document_writes.add_note(first, "belongs to the source")
+    root_title = (await ports.documents.get_document(root)).title
 
     await ports.document_writes.merge_as_versions(root, (first, second), None)
 
     found = await versions(ports, root)
-    assert [v.id for v in found] == [second, first, root]
-    assert [v.version_label for v in found] == [None, None, None]
+    assert [v.id for v in found] == [second, first, held, root]
+    assert [v.version_label for v in found] == [None, None, None, None]
+    assert (await ports.documents.get_document(root)).title == root_title  # the root's metadata
+    assert note.note not in [n.note for n in await ports.documents.list_document_notes(root)]
+    for source in (first, second):  # gone as documents, and not in the trash either
+        with pytest.raises(NotFound):
+            _ = await ports.documents.get_document(source)
+        assert not backend.in_trash(source)
+
+
+@pytest.mark.contract(MERGE)
+async def test_one_merged_document_may_carry_a_label(backend: Backend) -> None:
+    ports, root, source = backend.admin, backend.new_document(), backend.new_document()
+    backend.track_document(source)
+
+    await ports.document_writes.merge_as_versions(root, (source,), "from source")
+
+    [newest, original] = await versions(ports, root)
+    assert (newest.id, newest.version_label, newest.is_root) == (source, "from source", False)
+    assert (original.id, original.is_root) == (root, True)
 
 
 @pytest.mark.contract(MERGE)
@@ -379,57 +302,47 @@ async def test_a_merge_that_paperless_refuses_changes_nothing(backend: Backend) 
 
 
 @pytest.mark.contract(MERGE)
-async def test_a_root_that_already_has_versions_takes_more(backend: Backend) -> None:
-    ports, root, source = backend.admin, backend.new_document(), backend.new_document()
-    backend.track_document(source)
-    first = await add_version(backend, root, "plmcp24 root version")
-
-    await ports.document_writes.merge_as_versions(root, (source,), None)
-
-    assert [v.id for v in await versions(ports, root)] == [source, first, root]
-
-
-@pytest.mark.contract(MERGE)
-async def test_merging_needs_the_permission_to_change_the_documents(backend: Backend) -> None:
+async def test_merging_needs_change_and_delete_rights_and_ownership_of_every_document(
+    backend: Backend,
+) -> None:
     ports, root, source = backend.admin, backend.new_document(), backend.new_document()
     viewer = backend.restricted(CHANGING, view=[root, source])
     half = backend.restricted(CHANGING, view=[source], change=[root])
+    granted = backend.restricted(CHANGING, change=[root, source])  # a grant is not ownership
+    blind_to_source = backend.restricted(CHANGING, change=[root])
 
-    with pytest.raises(PermissionDenied):
-        await viewer.document_writes.merge_as_versions(root, (source,), None)
-    with pytest.raises(PermissionDenied):
-        await half.document_writes.merge_as_versions(root, (source,), None)
-    with pytest.raises(PermissionDenied):
-        await backend.reader.document_writes.merge_as_versions(root, (source,), None)
-
-    assert [v.is_root for v in await versions(ports, root)] == [True]
-    assert (await ports.documents.get_document(source)).id == source
-
-
-@pytest.mark.contract(MERGE)
-async def test_a_change_grant_is_not_enough_to_merge_the_user_must_own_the_documents(
-    backend: Backend,
-) -> None:
-    ports, root, source = backend.admin, backend.new_document(), backend.new_document()
-    user = backend.restricted(CHANGING, change=[root, source])
-
-    with pytest.raises(PermissionDenied):
-        await user.document_writes.merge_as_versions(root, (source,), None)
-
-    assert [v.is_root for v in await versions(ports, root)] == [True]
-    assert (await ports.documents.get_document(source)).id == source
-
-
-@pytest.mark.contract(MERGE)
-async def test_a_document_the_user_cannot_see_is_refused_not_reported_missing(
-    backend: Backend,
-) -> None:
-    root, hidden = backend.new_document(), backend.new_document()
-    user = backend.restricted(CHANGING, change=[root])
-
-    with pytest.raises(PermissionDenied):
-        await user.document_writes.merge_as_versions(root, (hidden,), None)
+    for user in (viewer, half, granted, backend.reader, blind_to_source):
+        with pytest.raises(PermissionDenied):
+            await user.document_writes.merge_as_versions(root, (source,), None)
     with pytest.raises(Validation):
-        await user.document_writes.merge_as_versions(root, (MISSING,), None)
+        await blind_to_source.document_writes.merge_as_versions(root, (MISSING,), None)
 
-    assert (await backend.admin.documents.get_document(hidden)).id == hidden
+    assert [v.is_root for v in await versions(ports, root)] == [True]
+    assert (await ports.documents.get_document(source)).id == source
+
+
+@pytest.mark.contract(MERGE)
+@pytest.mark.contract(DELETE)
+async def test_an_owner_without_admin_rights_deletes_a_version_and_merges(backend: Backend) -> None:
+    user = backend.restricted(CHANGING | {"view_paperlesstask"})
+    owned: list[int] = []
+    for name in ("root", "source"):
+        text = f"plmcp24 owner {name} {uuid.uuid4().hex}"
+        upload = DocumentUpload(
+            filename=f"{text}.txt", mime_type="text/plain", content=text.encode(), title=text
+        )
+        task_id = await user.document_writes.upload_document(upload)
+        owned.append(await consumed(backend, task_id))
+    root, source = owned
+
+    version = await add_version(backend, root, "plmcp24 owner version", by=user)
+    current = await user.document_writes.delete_version(root, version)
+    await user.document_writes.merge_as_versions(root, (source,), "merged")
+
+    assert current == root
+    assert [(v.id, v.version_label) for v in await versions(user, root)] == [
+        (source, "merged"),
+        (root, None),
+    ]
+    with pytest.raises(NotFound):
+        _ = await user.documents.get_document(source)

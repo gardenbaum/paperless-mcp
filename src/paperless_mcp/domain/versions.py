@@ -121,5 +121,11 @@ class VersionsMerged(BaseModel):
         tuple[int, ...],
         Field(description="The documents that were merged in; they no longer exist on their own."),
     ]
-    versions: Annotated[tuple[DocumentVersion, ...], Field(description="Newest first.")]
+    versions: Annotated[
+        tuple[DocumentVersion, ...] | None,
+        Field(description="Newest first; null if the document could not be read after the merge."),
+    ]
     web_url: Annotated[str, Field(description="Link to the document in the Paperless web UI.")]
+    message: Annotated[
+        str | None, Field(description="Set when the versions could not be listed after the merge.")
+    ] = None

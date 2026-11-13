@@ -16,8 +16,7 @@ from pydantic import Field
 
 from paperless_mcp.domain.errors import Validation
 from paperless_mcp.domain.versions import VersionUploadResult
-from paperless_mcp.tools._shared import ANNOTATIONS, boundary, services
-from paperless_mcp.tools.upload_stdio import check_transport
+from paperless_mcp.tools._shared import ANNOTATIONS, boundary, check_transport, services
 from paperless_mcp.tools.versions import COMMON, TOOLSET, DocumentId, Label, Wait
 
 local = LocalProvider()
