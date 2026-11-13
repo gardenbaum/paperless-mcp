@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from paperless_mcp.domain.bulk import BulkOperation, DocumentBulkReport, DocumentChange
+    from paperless_mcp.domain.documents import DocumentPage, DocumentQuery
 
 pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-6")]
 
@@ -63,6 +64,14 @@ class Recording(FakePaperless):
     def __init__(self, state: FakeState, *, user: str, writes: bool) -> None:
         super().__init__(state, user=user, allow_writes=writes)
         self.calls: list[tuple[tuple[int, ...], DocumentChange]] = []
+        self.searched: list[tuple[int, ...]] = []
+
+    @override
+    async def search_documents(
+        self, query: DocumentQuery, *, page: int, page_size: int
+    ) -> DocumentPage:
+        self.searched.append(query.ids or ())
+        return await super().search_documents(query, page=page, page_size=page_size)
 
     @override
     async def bulk_edit_documents(
@@ -616,6 +625,8 @@ async def test_more_link_targets_than_one_search_page_are_all_checked() -> None:
     )
 
     assert setup.document(SECOND).custom_fields[setup.field("e2e-documentlink")] == targets
+    batches = [ids for ids in setup.fake.searched if set(ids) & set(targets)]
+    assert batches == [tuple(targets[:MAX_DOCUMENTS]), tuple(targets[MAX_DOCUMENTS:])]
 
 
 # --- delete, reprocess
