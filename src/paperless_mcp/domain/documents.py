@@ -33,6 +33,7 @@ class DocumentQuery(BaseModel):
         query: Full-text query in Paperless's Tantivy syntax, passed through unchanged.
         more_like: Id of a document to find similar ones to; never together with ``query``.
         custom_field_query: Paperless's ``custom_field_query`` expression, passed through.
+        ids: Only these documents (those of them the user may see); empty means no restriction.
     """
 
     model_config: ClassVar[ConfigDict] = ConfigDict(frozen=True)
@@ -54,6 +55,7 @@ class DocumentQuery(BaseModel):
     inbox: bool | None = None
     custom_field_query: JsonValue = None
     ordering: Ordering | None = None
+    ids: tuple[int, ...] = ()
 
 
 type NameOrId = str | int
@@ -204,6 +206,7 @@ class DocumentHit(BaseModel):
     tags: tuple[int, ...]
     custom_fields: tuple[CustomFieldValue, ...]
     highlights: str | None = None
+    user_can_change: bool | None = None
 
 
 class DocumentPage(BaseModel):

@@ -85,6 +85,19 @@ async def test_taxonomy_filters_match_by_id(backend: Backend) -> None:
 
 
 @pytest.mark.contract(CONTRACT)
+async def test_ids_select_exactly_the_documents_the_user_may_see(backend: Backend) -> None:
+    public = (await document(backend.admin, PUBLIC)).id
+    private = (await document(backend.admin, PRIVATE)).id
+    both = DocumentQuery(ids=(public, private, 999_999_999))
+
+    assert {hit.id for hit in await search(backend.admin, both)} == {public, private}
+    assert {hit.id for hit in await search(backend.reader, both)} == {public}
+    assert {hit.id for hit in await search(backend.admin, DocumentQuery(ids=(private,)))} == {
+        private
+    }
+
+
+@pytest.mark.contract(CONTRACT)
 async def test_date_ranges_include_both_ends(backend: Backend) -> None:
     ports = backend.admin
     hit = await document(ports, PUBLIC)

@@ -24,6 +24,8 @@ if TYPE_CHECKING:
     from fastmcp import Context
 
     from paperless_mcp.services.ai import AiService
+    from paperless_mcp.services.bulk_documents import BulkDocumentEditor
+    from paperless_mcp.services.bulk_taxonomy import BulkTaxonomyEditor
     from paperless_mcp.services.document_edits import DocumentEditor
     from paperless_mcp.services.documents import DocumentService
     from paperless_mcp.services.files import FileService
@@ -36,7 +38,7 @@ if TYPE_CHECKING:
     from paperless_mcp.services.uploads import UploadService
 
 # Every toolset; each tool carries exactly one of them as its only tag.
-TOOLSETS: Final = frozenset({"core", "ai"})
+TOOLSETS: Final = frozenset({"core", "ai", "bulk"})
 
 # Tools whose result is an image or a file as MCP content blocks, with no output schema and no
 # structured content (decision-11); every other tool has a typed return model (decision-4).
@@ -63,6 +65,8 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "create_taxonomy_item": "core",
     "update_taxonomy_item": "core",
     "delete_taxonomy_item": "core",
+    "bulk_edit_documents": "bulk",
+    "bulk_edit_taxonomy": "bulk",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
@@ -202,6 +206,25 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=False,
         open_world_hint=False,
     ),
+    # Destructive (decision-6): it can trash documents and overwrite what many of them hold, so
+    # every execution needs confirm, and dry_run previews it. Not idempotent: a repeated trashing
+    # or reprocessing is another action (a repeated tag change leaves the state as it is).
+    "bulk_edit_documents": ToolAnnotations(
+        title="Bulk edit documents",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6, decision-14): deleting objects is final and permissions can lock
+    # users out, so every execution needs confirm, and dry_run previews it.
+    "bulk_edit_taxonomy": ToolAnnotations(
+        title="Bulk edit taxonomy",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
 }
 
 logger = logging.getLogger(__name__)
@@ -237,6 +260,8 @@ class Services:
     tasks: TaskService
     ai: AiService
     uploads: UploadService
+    bulk_documents: BulkDocumentEditor
+    bulk_taxonomy: BulkTaxonomyEditor
 
 
 def services(ctx: Context) -> Services:
