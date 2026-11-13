@@ -1,11 +1,11 @@
 ---
 id: PLMCP-19
 title: Create, update and delete taxonomy items
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:25:00Z'
-updated_date: '2026-11-12T23:16:00Z'
+updated_date: '2026-11-13T00:41:00Z'
 labels: []
 milestone: m-2
 dependencies:
@@ -25,18 +25,18 @@ Filing documents needs new tags, correspondents and fields on the fly (design §
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 create, update and delete for tags (colour, parent, matching), correspondents, document types, storage paths (path template) and custom fields (data type, select options)
-- [ ] #2 Items are addressed by name or id; delete requires confirm
-- [ ] #3 Changing select options of a custom field keeps existing option ids stable
-- [ ] #4 The taxonomy cache is invalidated after every write
-- [ ] #5 FakePaperless and the contract suite cover every new port method
+- [x] #1 create, update and delete for tags (colour, parent, matching), correspondents, document types, storage paths (path template) and custom fields (data type, select options)
+- [x] #2 Items are addressed by name or id; delete requires confirm
+- [x] #3 Changing select options of a custom field keeps existing option ids stable
+- [x] #4 The taxonomy cache is invalidated after every write
+- [x] #5 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -79,3 +79,9 @@ Process: the controller started PLMCP-19 before its dependency PLMCP-17 (confirm
 TDD evidence, honestly: red first: service delete/option tests (assertions on new messages failed), I3 e2e/fake cases; the pinned-message tables were written after running mutmut and reading survivors, so they went green at once on the existing code; the e2e additions were run only after the code. The fake and contract tests were written together with the fake (live is the oracle).
 Tool budget: default profile now 14 of 20 (11 + 3). Remaining core writes in M2 (add_note, delete_note, delete_document, upload_document) would reach 18 of 20.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Three core tools with a kind parameter (tag, correspondent, document_type, storage_path, custom_field): create_taxonomy_item (new objects match nothing unless a matching rule is given), update_taxonomy_item (changes only what is named; select options added/renamed/removed by id so existing option ids stay stable; data type never changeable; tag cycles rejected by Paperless) and delete_taxonomy_item (destructive). Items are addressed by name or id. Unconfirmed deletes and select-option removals are refused via the shared ConfirmationRequired (decision-15) naming the visible documents affected, child tags with counts, and that invisible child tags are deleted too (live-verified). The TaxonomyResolver cache is invalidated after every write, also on failure. Adapter handles live quirks (regex validated only with both match and algorithm sent; select PATCH needs current options). TaxonomyWriter extended with create/update/delete; FakePaperless (storage paths, matching, tag cascade, option ids) and contract tests on fake and live 3.4.2. New decision-14 (taxonomy write classification and confirmation, builds on decisions 6, 12, 15). Default profile 17 of 20 tools. Verified: just check 1437 passed; full just e2e 290 passed, 6 skipped; just mutation 100 %. Independent review: 4 Important and 11 Minor fixed. Known gaps: list_taxonomy rows don't show matching rules or path templates; monetary default_currency not exposed. Process note: started before its dependency PLMCP-17 merged (controller's mistake), then adopted PLMCP-17's mechanism. DoD #1 left unchecked: fake and contract tests were written together and message tables after the code. DoD #2 and #4 follow from CI and the merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
