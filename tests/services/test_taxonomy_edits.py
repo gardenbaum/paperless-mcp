@@ -458,10 +458,10 @@ async def test_removing_an_option_needs_confirm_and_counts_the_documents_that_ho
 
     assert unused.value.message == (
         "Nothing was changed. Confirming would remove the option(s) 'beta' of 'e2e-select': "
-        "0 documents you can see hold a removed option and would keep a value that is no "
-        "longer one of its options, and update_document can no longer set it."
+        "0 documents you can see that hold a removed option lose their value for this field, "
+        "which Paperless clears shortly after."
     )
-    assert "'alpha' of 'e2e-select': 1 document you can see hold" in used.value.message
+    assert "'alpha' of 'e2e-select': 1 document you can see that hold" in used.value.message
     assert unused.value.hint == CONFIRM_HINT
     assert options_of(setup) == before
     assert setup.fake.writes == []

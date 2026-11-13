@@ -4,6 +4,8 @@ Every object is named with `SCRATCH_ITEM` and a uuid; the live backend deletes w
 the test ends. Documents are the test's own (`backend.new_document`), never a seeded one.
 """
 
+import asyncio
+import time
 import uuid
 from typing import TYPE_CHECKING
 
@@ -24,6 +26,8 @@ pytestmark = [
     pytest.mark.decision("decision-14"),
 ]
 
+CLEARING_SECONDS = 30
+CLEARING_STEP = 0.5
 CREATE = "TaxonomyWriter.create_taxonomy_item"
 UPDATE = "TaxonomyWriter.update_taxonomy_item"
 DELETE = "TaxonomyWriter.delete_taxonomy_item"
@@ -36,6 +40,17 @@ KINDS: tuple[WritableKind, ...] = (
     "custom_field",
 )
 MATCHING_KINDS = ("tag", "correspondent", "document_type", "storage_path")
+
+
+async def value_after_clearing(backend: Backend, document: int, field: int) -> CustomFieldValue:
+    """The document's value of the field once it is None, or the last one after the wait."""
+    deadline = time.monotonic() + CLEARING_SECONDS
+    while True:
+        record = await backend.admin.documents.get_document(document)
+        [found] = [v for v in record.custom_fields if v.field == field]
+        if found.value is None or time.monotonic() >= deadline:
+            return found
+        await asyncio.sleep(CLEARING_STEP)
 
 
 def new_name() -> str:
@@ -455,13 +470,19 @@ async def test_options_given_without_ids_are_all_new(backend: Backend) -> None:
 
 
 @pytest.mark.contract(UPDATE)
-async def test_a_removed_option_stays_on_the_documents_that_used_it(backend: Backend) -> None:
+async def test_the_documents_that_held_a_removed_option_end_up_without_a_value(
+    backend: Backend,
+) -> None:
     field = await select_field(backend, "one", "two")
     assert field.select_options is not None
     one, two = field.select_options
     document = backend.new_document()
+    other = backend.new_document()
     _ = await backend.admin.document_writes.update_document(
         document, DocumentPatch(custom_fields=(CustomFieldValue(field=field.id, value=two.id),))
+    )
+    _ = await backend.admin.document_writes.update_document(
+        other, DocumentPatch(custom_fields=(CustomFieldValue(field=field.id, value=one.id),))
     )
 
     _ = await backend.admin.taxonomy_writes.update_taxonomy_item(
@@ -470,8 +491,12 @@ async def test_a_removed_option_stays_on_the_documents_that_used_it(backend: Bac
         TaxonomyValues(select_options=(OptionInput(id=one.id, label="one"),)),
     )
 
-    record = await backend.admin.documents.get_document(document)
-    assert record.custom_fields == (CustomFieldValue(field=field.id, value=two.id),)
+    # Paperless clears the value in a Celery task (process_cf_select_update) after the save.
+    assert await value_after_clearing(backend, document, field.id) == CustomFieldValue(
+        field=field.id, value=None
+    )
+    kept = await backend.admin.documents.get_document(other)
+    assert kept.custom_fields == (CustomFieldValue(field=field.id, value=one.id),)
     with pytest.raises(Validation):
         _ = await backend.admin.document_writes.update_document(
             document,
