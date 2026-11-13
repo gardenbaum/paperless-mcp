@@ -301,8 +301,8 @@ class TaxonomyEditor:
             gone = [o.label for o in current if o.id in removed]
             effect = (
                 f"remove the option(s) {listed(gone)} of {quoted(field.name)}: "
-                f"{documents(holding)} you can see hold a removed option and would keep a value "
-                "that is no longer one of its options, and update_document can no longer set it"
+                f"{documents(holding)} you can see that hold a removed option lose their value for "
+                "this field, which Paperless clears shortly after"
             )
             raise ConfirmationRequired.for_effect(effect)
         return (

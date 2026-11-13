@@ -212,8 +212,8 @@ async def test_select_options_keep_their_ids_and_the_documents_that_hold_them(
     assert options(field_renamed) == options(renamed)
     assert "confirm=true" in refused
     assert "remove the option(s) 'one' of" in refused
-    assert ": 0 documents you can see hold a removed option" in refused
-    assert ": 1 document you can see hold a removed option" in holding
+    assert ": 0 documents you can see that hold a removed option" in refused
+    assert ": 1 document you can see that hold a removed option" in holding
     assert [o[1] for o in options(removed)] == ["TWO", "three"]
     stored = obj(parse(stack.admin.get(f"/api/custom_fields/{created['id']}/")))
     assert [o["id"] for o in cast("list[Json]", obj(stored["extra_data"])["select_options"])] == [
