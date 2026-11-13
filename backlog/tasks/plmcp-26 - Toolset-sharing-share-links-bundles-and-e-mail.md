@@ -1,11 +1,11 @@
 ---
 id: PLMCP-26
 title: 'Toolset sharing: share links, bundles and e-mail'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:26:00Z'
-updated_date: '2026-11-13T23:19:00Z'
+updated_date: '2026-11-13T23:21:00Z'
 labels: []
 milestone: m-3
 dependencies:
@@ -24,18 +24,18 @@ Sharing documents with others is outward-facing: links expose documents and e-ma
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Share links list, create (with expiry) and delete; share-link bundles list, create, rebuild and delete
-- [ ] #2 email_documents sends documents by e-mail and requires confirm; its annotations mark it open-world
-- [ ] #3 Created links are returned as full URLs based on the public URL
-- [ ] #4 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
-- [ ] #5 FakePaperless and the contract suite cover every new port method
+- [x] #1 Share links list, create (with expiry) and delete; share-link bundles list, create, rebuild and delete
+- [x] #2 email_documents sends documents by e-mail and requires confirm; its annotations mark it open-world
+- [x] #3 Created links are returned as full URLs based on the public URL
+- [x] #4 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
+- [x] #5 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -79,4 +79,12 @@ Fix round (review findings), after rebasing onto origin/main 715c32b (trash tool
 - M5: rebuild description says the same public URL then serves the current files; open_world true. M6: bundle results list documents with id, title and web_url (one get_document_titles call per listing; titles null if the user may not read them). M7: parameters are document_id/document_ids, link_id, bundle_id, PositiveId, min/max length on lists as in trash. M8: the expiry hint no longer says link.
 
 Fix round gates (rebased onto bd69553, pdf toolset; conflicts resolved keeping both sides, surface snapshot diff against main is additions only): just check green (2819 tests, total coverage 99.97 %, diff coverage 100 %); just mutation 100.0 % (10299 killed, 11 timeout, 0 survived, 125 reviewed equivalents; the four email_documents entries renumbered); full just e2e 469 passed, 6 skipped, 1 failed (test_more_like_finds_other_documents[live], PLMCP-40). Tests not written red first in the fix round: service, tool, registry, fake/contract and E2E changes were written alongside or after the code (the adapter changes for I1/M1 were red first).
+
+Controller: review fix round accepted (I1, I2 with decision-17, M1-M8), rebased onto bd69553. DoD #1 left unchecked: tools, fake/contract and E2E tests were written with or after the code. Gates on 563a126: just check 0 (100% diff), just mutation 100.0%, e2e 469 passed, 1 failed (test_more_like_finds_other_documents[live], PLMCP-40). A successful live e-mail send is untested: the E2E stack has no SMTP.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adds the opt-in sharing toolset: list, create and delete share links; list, create, rebuild and delete share-link bundles; and email_documents. Created links are full URLs (public URL + /share/<slug>), verified live without login. Publishing a link or bundle and sending e-mail require confirm (new decision-17, supplementing decision-6 and decision-12); the refusals name the documents, the file version, the expiry and that anyone with the URL can download, or the recipients, subject and an excerpt. An e-mail whose delivery is unknown (timeout, 5xx) is reported as such with no retry hint, never retried, and refused up front when Paperless has e-mail disabled. Fake and contract suite follow live 3.4.2, including that a view grant suffices to share.
+<!-- SECTION:FINAL_SUMMARY:END -->
