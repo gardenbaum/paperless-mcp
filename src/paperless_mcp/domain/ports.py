@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Sequence
+    from datetime import datetime
 
     from paperless_mcp.domain.ai import AiSuggestions, ChatAnswer
     from paperless_mcp.domain.bulk import BulkKind, DocumentChange, PermissionsChange
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     )
     from paperless_mcp.domain.instance import InstanceOverview
     from paperless_mcp.domain.pdf import Output, PageSlot, StartedTasks
+    from paperless_mcp.domain.sharing import FileVersionKind, ShareBundle, ShareLink
     from paperless_mcp.domain.tasks import TaskStatus
     from paperless_mcp.domain.taxonomy import (
         TaxonomyDetail,
@@ -648,5 +650,127 @@ class PdfWriter(Protocol):
         Raises:
             PermissionDenied: See the class docstring.
             Validation: An id does not exist or is listed twice.
+        """
+        ...
+
+
+class SharingReader(Protocol):
+    """Share links and share-link bundles the current user may see."""
+
+    async def list_share_links(self) -> tuple[ShareLink, ...]:
+        """Every share link the user may see, over all pages, in Paperless order.
+
+        Raises:
+            PermissionDenied: The user lacks the global ``view_sharelink`` permission.
+            PaperlessMcpError: More links than this server reads at most.
+        """
+        ...
+
+    async def get_share_link(self, link_id: int) -> ShareLink:
+        """One share link.
+
+        Raises:
+            NotFound: No such link, or the user may not see it.
+            PermissionDenied: The user lacks the global ``view_sharelink`` permission.
+        """
+        ...
+
+    async def list_share_bundles(self) -> tuple[ShareBundle, ...]:
+        """Every share-link bundle the user may see, over all pages, in Paperless order.
+
+        Raises:
+            PermissionDenied: The user lacks the global ``view_sharelinkbundle`` permission.
+            PaperlessMcpError: More bundles than this server reads at most.
+        """
+        ...
+
+    async def get_share_bundle(self, bundle_id: int) -> ShareBundle:
+        """One bundle with its current build status.
+
+        Raises:
+            NotFound: No such bundle, or the user may not see it.
+            PermissionDenied: The user lacks the global ``view_sharelinkbundle`` permission.
+        """
+        ...
+
+
+class SharingWriter(Protocol):
+    """Creating and deleting share links and bundles, and sending documents by e-mail."""
+
+    async def create_share_link(
+        self, document_id: int, *, expiration: datetime | None, file_version: FileVersionKind
+    ) -> ShareLink:
+        """Publish the file of a document under a new link that ``expiration`` ends (None: never).
+
+        Raises:
+            Validation: No such document, or a rejected value.
+            PermissionDenied: The user may not add share links, or may not see the document.
+        """
+        ...
+
+    async def delete_share_link(self, link_id: int) -> None:
+        """Delete a share link; its URL stops working.
+
+        Raises:
+            NotFound: No such link, or the user may not see it.
+            PermissionDenied: The user may not delete share links, or this one.
+        """
+        ...
+
+    async def create_share_bundle(
+        self,
+        document_ids: Sequence[int],
+        *,
+        expiration_days: int | None,
+        file_version: FileVersionKind,
+    ) -> ShareBundle:
+        """Create a bundle of documents; Paperless builds the archive after this returns.
+
+        The result is usually still ``pending``. ``expiration_days`` counts from now (None: never).
+
+        Raises:
+            Validation: No documents, an unknown document, or a bad value.
+            PermissionDenied: The user may not add bundles.
+        """
+        ...
+
+    async def rebuild_share_bundle(self, bundle_id: int) -> ShareBundle:
+        """Build the archive of a bundle again (for a failed build, or after documents changed).
+
+        The result is ``pending``; the URL stays the same.
+
+        Raises:
+            NotFound: No such bundle, or the user may not see it.
+            Validation: Paperless refused the rebuild, with its reason.
+            PermissionDenied: The user may not change this bundle.
+        """
+        ...
+
+    async def delete_share_bundle(self, bundle_id: int) -> None:
+        """Delete a bundle with its archive; its URL stops working.
+
+        Raises:
+            NotFound: No such bundle, or the user may not see it.
+            PermissionDenied: The user may not delete bundles, or this one.
+        """
+        ...
+
+    async def email_documents(
+        self,
+        document_ids: Sequence[int],
+        *,
+        addresses: Sequence[str],
+        subject: str,
+        message: str,
+        use_archive_version: bool,
+    ) -> None:
+        """E-mail the files of the documents as attachments through Paperless's mail server.
+
+        Raises:
+            Validation: No documents, an unknown document, an invalid address or an empty
+                subject or message.
+            FeatureUnavailable: Paperless could not send the message (no mail server set up, or
+                it refused). Whether anyone received it is unknown.
+            PermissionDenied: The user may not see a document.
         """
         ...

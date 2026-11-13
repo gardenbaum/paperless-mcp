@@ -562,3 +562,73 @@ reason = "waited is a sum of values that TaskService already rounded to a tenth,
 mutant = "paperless_mcp.paperless.pdf.xǁPaperlessPdfWriterǁ_run__mutmut_17"
 function_hash = "8f86cafa4e37"
 reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁcreate_share_link__mutmut_26"
+function_hash = "0b788f0a75ba"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁdelete_share_link__mutmut_4"
+function_hash = "e6d1d251f440"
+reason = "retry is only tested for truth (`if retry`), so None behaves like False: no retry."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁdelete_share_link__mutmut_9"
+function_hash = "e6d1d251f440"
+reason = "httpx2 upper-cases the method when it builds the request, so 'delete' sends exactly what 'DELETE' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁcreate_share_bundle__mutmut_21"
+function_hash = "78c50f31ef3b"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁrebuild_share_bundle__mutmut_11"
+function_hash = "9b08f9fbfd91"
+reason = "retry is only tested for truth (`if retry`), so None behaves like False; and a POST is never retried anyway."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁrebuild_share_bundle__mutmut_16"
+function_hash = "9b08f9fbfd91"
+reason = "A POST is never retried (IDEMPOTENT_METHODS), so leaving retry at its default True changes nothing for it; retry=False documents the intent."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁrebuild_share_bundle__mutmut_18"
+function_hash = "9b08f9fbfd91"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁrebuild_share_bundle__mutmut_21"
+function_hash = "9b08f9fbfd91"
+reason = "A POST is never retried (IDEMPOTENT_METHODS), so retry=True changes nothing for it; retry=False documents the intent."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁdelete_share_bundle__mutmut_4"
+function_hash = "95e4f395f135"
+reason = "retry is only tested for truth (`if retry`), so None behaves like False: no retry."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁdelete_share_bundle__mutmut_9"
+function_hash = "95e4f395f135"
+reason = "httpx2 upper-cases the method when it builds the request, so 'delete' sends exactly what 'DELETE' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁemail_documents__mutmut_20"
+function_hash = "f1c98a754875"
+reason = "retry is only tested for truth (`if retry`), so None behaves like False; and a POST is never retried anyway."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁemail_documents__mutmut_25"
+function_hash = "f1c98a754875"
+reason = "A POST is never retried (IDEMPOTENT_METHODS), so leaving retry at its default True changes nothing for it; retry=False documents the intent."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁemail_documents__mutmut_27"
+function_hash = "f1c98a754875"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.sharing.xǁPaperlessSharingWriterǁemail_documents__mutmut_28"
+function_hash = "f1c98a754875"
+reason = "A POST is never retried (IDEMPOTENT_METHODS), so retry=True changes nothing for it; retry=False documents the intent."

@@ -55,6 +55,8 @@ from paperless_mcp.domain.ports import (  # noqa: TC001 -- Ports' annotations ar
     DocumentWriter,
     InstanceReader,
     PdfWriter,
+    SharingReader,
+    SharingWriter,
     TaskReader,
     TaxonomyReader,
     TaxonomyWriter,
@@ -70,6 +72,7 @@ from paperless_mcp.paperless.client import PaperlessClient, RetryPolicy
 from paperless_mcp.paperless.documents import PaperlessDocumentReader, PaperlessDocumentWriter
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.pdf import PaperlessPdfWriter
+from paperless_mcp.paperless.sharing import PaperlessSharingReader, PaperlessSharingWriter
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
 from paperless_mcp.paperless.trash import PaperlessTrashReader, PaperlessTrashWriter
@@ -115,6 +118,8 @@ class Ports:
     trash: TrashReader
     trash_writes: TrashWriter
     pdf_writes: PdfWriter
+    sharing: SharingReader
+    sharing_writes: SharingWriter
 
 
 def fake_ports(state: FakeState, user: str) -> Ports:
@@ -135,6 +140,8 @@ def fake_ports(state: FakeState, user: str) -> Ports:
         trash=fake,
         trash_writes=writer,
         pdf_writes=writer,
+        sharing=fake,
+        sharing_writes=writer,
     )
 
 
@@ -154,6 +161,8 @@ def live_ports(client: PaperlessClient) -> Ports:
         trash=PaperlessTrashReader(client),
         trash_writes=PaperlessTrashWriter(client),
         pdf_writes=PaperlessPdfWriter(client),
+        sharing=PaperlessSharingReader(client),
+        sharing_writes=PaperlessSharingWriter(client),
     )
 
 

@@ -1,0 +1,33 @@
+# serializer version: 1
+# name: test_the_messages_of_the_adapter_errors
+  list([
+    'Paperless could not send the e-mail; whether any recipient got it is unknown. Hint: The usual cause is a Paperless without a mail server: an administrator sets PAPERLESS_EMAIL_HOST and the related variables. Check the Paperless log before sending again.',
+    'No share link 3 exists that this user may see. Hint: Call list_share_links to see the links you can use.',
+    'No share-link bundle 4 exists that this user may see. Hint: Call list_share_bundles to see the bundles you can use.',
+  ])
+# ---
+# name: test_the_messages_of_the_sharing_service
+  dict({
+    'bundle days': 'expires_in_days must be between 1 and 3650; 0 is not. Hint: Leave it out for a link that never expires.',
+    'bundle delete confirm': 'Nothing was changed. Confirming would delete share-link bundle 1 of 2 documents with its archive: its URL stops working for everyone who has it. Hint: Describe the effect to the user and call the tool again with the same arguments and confirm=true only once they agree, or if they already asked for exactly this.',
+    'bundle empty': 'A bundle needs at least one document. Hint: Find the documents with search_documents.',
+    'bundle too big': 'A bundle takes at most 50 documents; 51 given. Hint: Split it into several bundles.',
+    'days too few': 'expires_in_days must be between 1 and 3650; 0 is not. Hint: Leave it out for a link that never expires.',
+    'days too many': 'expires_in_days must be between 1 and 3650; 3651 is not. Hint: Leave it out for a link that never expires.',
+    'document hidden': 'No document 99 exists that this user may see. Hint: Use search_documents to find the document.',
+    'link delete confirm': "Nothing was changed. Confirming would delete share link 1 for the document 'e2e-public-invoice' (id 1): its URL stops working for everyone who has it. Hint: Describe the effect to the user and call the tool again with the same arguments and confirm=true only once they agree, or if they already asked for exactly this.",
+    'mail bad recipient': "'nobody' is not an e-mail address. Hint: Give plain addresses such as name@example.com.",
+    'mail confirm': "Nothing was changed. Confirming would send an e-mail with the archive file of 'e2e-public-invoice' (id 1) to a@example.com; it leaves Paperless and cannot be recalled. Hint: Describe the effect to the user and call the tool again with the same arguments and confirm=true only once they agree, or if they already asked for exactly this.",
+    'mail confirm, original': "Nothing was changed. Confirming would send an e-mail with the original file of 'e2e-public-invoice' (id 1) to a@example.com; it leaves Paperless and cannot be recalled. Hint: Describe the effect to the user and call the tool again with the same arguments and confirm=true only once they agree, or if they already asked for exactly this.",
+    'mail confirm, two documents': "Nothing was changed. Confirming would send an e-mail with the archive files of 'e2e-public-invoice' (id 1) and 'e2e-private-note' (id 2) to a@example.com; it leaves Paperless and cannot be recalled. Hint: Describe the effect to the user and call the tool again with the same arguments and confirm=true only once they agree, or if they already asked for exactly this.",
+    'mail hidden document': 'No document 99 exists that this user may see. Hint: Use search_documents to find the document.',
+    'mail no documents': 'An e-mail needs at least one document. Hint: Use search_documents.',
+    'mail no message': 'The message is empty. Hint: Write the text of the e-mail.',
+    'mail no recipients': 'An e-mail needs at least one recipient. Hint: Give plain addresses such as name@example.com.',
+    'mail no subject': 'The subject is empty. Hint: Give the e-mail a subject.',
+    'mail too many documents': 'An e-mail takes at most 50 documents; 51 given. Hint: Send several e-mails.',
+    'mail too many recipients': 'An e-mail takes at most 20 recipients; 21 given. Hint: Send several e-mails.',
+    'page too far': 'There is no page 2: the list has 1 page. Hint: Start again at page 1.',
+    'page too far, many': 'There is no page 9: the list has 2 pages. Hint: Start again at page 1.',
+  })
+# ---

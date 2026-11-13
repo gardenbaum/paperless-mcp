@@ -272,6 +272,7 @@ modules = [
     "paperless_mcp.tools.core",
     "paperless_mcp.tools.ai",
     "paperless_mcp.tools.bulk",
+    "paperless_mcp.tools.sharing",
     "paperless_mcp.tools.upload",
     "paperless_mcp.tools.upload_stdio",
     "paperless_mcp.tools.versions",

@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from paperless_mcp.services.notes import NoteService
     from paperless_mcp.services.pdf import PdfService
     from paperless_mcp.services.removal import DocumentRemoval
+    from paperless_mcp.services.sharing import SharingService
     from paperless_mcp.services.tasks import TaskService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
     from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
     from paperless_mcp.services.views import ViewService
 
 # Every toolset; each tool carries exactly one of them as its only tag.
-TOOLSETS: Final = frozenset({"core", "ai", "bulk", "versions", "views", "trash", "pdf"})
+TOOLSETS: Final = frozenset({"core", "ai", "bulk", "versions", "views", "trash", "pdf", "sharing"})
 
 # Tools whose result is an image or a file as MCP content blocks, with no output schema and no
 # structured content (decision-11); every other tool has a typed return model (decision-4).
@@ -93,6 +94,14 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "edit_pdf": "pdf",
     "remove_document_password": "pdf",
     "reprocess_documents": "pdf",
+    "list_share_links": "sharing",
+    "create_share_link": "sharing",
+    "delete_share_link": "sharing",
+    "list_share_bundles": "sharing",
+    "create_share_bundle": "sharing",
+    "rebuild_share_bundle": "sharing",
+    "delete_share_bundle": "sharing",
+    "email_documents": "sharing",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
@@ -332,6 +341,69 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=False,
         open_world_hint=False,
     ),
+    "list_share_links": ToolAnnotations(
+        title="List share links",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "list_share_bundles": ToolAnnotations(
+        title="List share bundles",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Publishing: a link or bundle opens the files to anyone who holds the URL, outside Paperless
+    # (open world). Not destructive and not idempotent: it takes nothing away, but every call
+    # makes another public URL. The call is the request, so there is no confirm.
+    "create_share_link": ToolAnnotations(
+        title="Create share link",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    "create_share_bundle": ToolAnnotations(
+        title="Create share bundle",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
+    # Builds the same archive again under the same URL: nothing new is published or lost.
+    "rebuild_share_bundle": ToolAnnotations(
+        title="Rebuild share bundle",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6): a deleted link has no trash; the URL stops working for people who
+    # rely on it. Deleting again leaves the state as it is (idempotent), though the call fails.
+    "delete_share_link": ToolAnnotations(
+        title="Delete share link",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    "delete_share_bundle": ToolAnnotations(
+        title="Delete share bundle",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Open world: the files leave Paperless for addresses nobody here controls. Destructive in
+    # MCP's sense of an effect that cannot be undone (an e-mail cannot be recalled), so it needs
+    # confirm (decision-6). Not idempotent: every call sends another message.
+    "email_documents": ToolAnnotations(
+        title="E-mail documents",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=True,
+    ),
     "list_document_versions": ToolAnnotations(
         title="List document versions",
         read_only_hint=True,
@@ -477,6 +549,7 @@ class Services:
     views: ViewService
     trash: TrashService
     pdf: PdfService
+    sharing: SharingService
 
 
 def services(ctx: Context) -> Services:

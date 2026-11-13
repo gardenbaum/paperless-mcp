@@ -93,9 +93,9 @@ async def test_the_environment_selects_the_tools_over_stdio(stack: Stack) -> Non
         "update_taxonomy_item",
         "delete_taxonomy_item",
     }
-    # `all` adds the toolsets that are off by default: of versions and trash only the listings
-    # are read-only, of views the listing, the read and the run.
+    # `all` adds the toolsets that are off by default: of versions, trash and sharing only the
+    # listings are read-only, of views the listing, the read and the run.
     views = {"list_saved_views", "get_saved_view", "run_saved_view"}
-    listings = {"list_document_versions", "list_trash"}
+    listings = {"list_document_versions", "list_trash", "list_share_links", "list_share_bundles"}
     assert read_only == (default - writing) | listings | views
     assert trimmed == default - {"get_task", "list_taxonomy"}

@@ -77,6 +77,8 @@ VIEWS = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "views"}
 SHIPPED_PDF = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "pdf"}
 READ_VIEWS = {"list_saved_views", "get_saved_view", "run_saved_view"}
 SHIPPED_TRASH = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "trash"}
+SHARING = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "sharing"}
+READ_SHARING = {"list_share_links", "list_share_bundles"}
 
 
 async def names(server: FastMCP) -> set[str]:
@@ -107,7 +109,7 @@ async def test_several_toolsets_combine() -> None:
 async def test_all_offers_every_toolset_the_server_may_offer() -> None:
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"])
 
-    shipped = CORE | SHIPPED_AI | SHIPPED_BULK | SHIPPED_VERSIONS | VIEWS | SHIPPED_TRASH
+    shipped = CORE | SHIPPED_AI | SHIPPED_BULK | SHIPPED_VERSIONS | VIEWS | SHIPPED_TRASH | SHARING
     assert await names(server) == shipped | SHIPPED_PDF | {
         "ask_something",
         "scratch_change",
@@ -142,6 +144,7 @@ async def test_read_only_mode_offers_only_tools_with_the_read_only_hint() -> Non
         | SHIPPED_AI
         | READ_VIEWS
         | {"list_document_versions", "list_trash"}
+        | READ_SHARING
         | {"ask_something", "scratch_preview"}
     )
     assert await names(server) == expected
