@@ -2340,6 +2340,89 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'trash',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': True,
+        'idempotentHint': False,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Empty trash',
+      }),
+      'description': '''
+        Delete trash entries for good: documents, their files, text, notes and metadata are lost.
+        
+        This cannot be undone. It never empties everything by default: name document_ids from
+        list_trash, or pass all=true for the whole trash, and in both cases confirm. Two steps: call
+        without confirm first. Nothing is deleted and the error lists the entries that would go
+        (the first ten, then a count), with confirm=true to pass. Only name what the user asked to
+        delete; to get documents back, use restore_from_trash. All or none: an id that is not in the
+        trash is an error. Needs the permission to delete documents and ownership of every document
+        (or no owner).
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'all': dict({
+            'default': False,
+            'description': 'true: delete every entry in the trash for good. Use this or document_ids.',
+            'type': 'boolean',
+          }),
+          'confirm': dict({
+            'default': False,
+            'description': 'Must be true to go ahead. Without it nothing changes and the error says what would happen. Describe that to the user and pass true only once they agree, or if they already asked for exactly this.',
+            'type': 'boolean',
+          }),
+          'document_ids': dict({
+            'anyOf': list([
+              dict({
+                'items': dict({
+                  'type': 'integer',
+                }),
+                'type': 'array',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'default': None,
+            'description': 'Entry ids from list_trash to delete for good; at most 100. Use this or all, never both.',
+          }),
+        }),
+        'type': 'object',
+      }),
+      'name': 'empty_trash',
+      'outputSchema': dict({
+        'description': 'Entries that were removed from the trash for good.',
+        'properties': dict({
+          'count': dict({
+            'type': 'integer',
+          }),
+          'document_ids': dict({
+            'items': dict({
+              'type': 'integer',
+            }),
+            'type': 'array',
+          }),
+          'message': dict({
+            'type': 'string',
+          }),
+        }),
+        'required': list([
+          'document_ids',
+          'count',
+          'message',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Empty trash',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'ai',
           ]),
         }),
@@ -4447,6 +4530,118 @@
       '_meta': dict({
         'fastmcp': dict({
           'tags': list([
+            'trash',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List trash',
+      }),
+      'description': '''
+        List what was deleted and can still be restored: documents and deleted versions.
+        
+        An entry has an id (pass it to restore_from_trash or empty_trash), the title and the time it
+        was deleted. A version deleted from a document is an entry of its own, with version_of set
+        to the document; while the document itself is in the trash, its entry covers the versions.
+        You see the entries of documents you own or that have no owner. count is the total; pass
+        next_page as page to see more. Needs the permission to view documents.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'page': dict({
+            'default': 1,
+            'description': 'Page number, from 1.',
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'page_size': dict({
+            'default': 25,
+            'description': 'Entries per page, at most 100.',
+            'maximum': 100,
+            'minimum': 1,
+            'type': 'integer',
+          }),
+        }),
+        'type': 'object',
+      }),
+      'name': 'list_trash',
+      'outputSchema': dict({
+        'description': 'One page of the trash.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many entries the trash holds in total.',
+            'type': 'integer',
+          }),
+          'entries': dict({
+            'items': dict({
+              'description': 'An entry of the trash: a deleted document, or a version deleted from a document.',
+              'properties': dict({
+                'deleted_at': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'id': dict({
+                  'description': "Pass it to restore_from_trash or empty_trash (a version's id).",
+                  'type': 'integer',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'version_of': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'Set when the entry is a version (a file) deleted from the document with this id; restoring it re-attaches it to that document. Null for a deleted document.',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'deleted_at',
+                'version_of',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'next_page': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The next page, null on the last one.',
+          }),
+          'page': dict({
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'count',
+          'page',
+          'next_page',
+          'entries',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List trash',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
             'versions',
           ]),
         }),
@@ -4604,6 +4799,104 @@
         'type': 'object',
       }),
       'title': 'Merge documents as versions',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'trash',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'destructiveHint': False,
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': False,
+        'title': 'Restore from trash',
+      }),
+      'description': '''
+        Take entries out of the trash: a document comes back whole, a version is re-attached.
+        
+        A restored document is back with its notes, versions, tags and the rest of its metadata. A
+        restored version becomes a version of its document again, with its label, and the newest
+        one if it was. All or none: an id that is not in the trash (see list_trash) is an error and
+        nothing is restored; so is a version whose document is in the trash too, restore the
+        document instead. Needs the permission to delete documents and ownership of every document
+        (or no owner). Needs no confirm: nothing is lost.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'document_ids': dict({
+            'description': 'Entry ids from list_trash; at most 100, each in the trash.',
+            'items': dict({
+              'type': 'integer',
+            }),
+            'maxItems': 100,
+            'minItems': 1,
+            'type': 'array',
+          }),
+        }),
+        'required': list([
+          'document_ids',
+        ]),
+        'type': 'object',
+      }),
+      'name': 'restore_from_trash',
+      'outputSchema': dict({
+        'description': 'Entries that were taken out of the trash.',
+        'properties': dict({
+          'message': dict({
+            'description': 'What happened to documents and versions.',
+            'type': 'string',
+          }),
+          'restored': dict({
+            'description': 'The entries as they were in the trash.',
+            'items': dict({
+              'description': 'An entry of the trash: a deleted document, or a version deleted from a document.',
+              'properties': dict({
+                'deleted_at': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'id': dict({
+                  'description': "Pass it to restore_from_trash or empty_trash (a version's id).",
+                  'type': 'integer',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'version_of': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'Set when the entry is a version (a file) deleted from the document with this id; restoring it re-attaches it to that document. Null for a deleted document.',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'deleted_at',
+                'version_of',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+        }),
+        'required': list([
+          'restored',
+          'message',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'Restore from trash',
     }),
     dict({
       '_meta': dict({
@@ -14680,6 +14973,118 @@
         'type': 'object',
       }),
       'title': 'List taxonomy',
+    }),
+    dict({
+      '_meta': dict({
+        'fastmcp': dict({
+          'tags': list([
+            'trash',
+          ]),
+        }),
+      }),
+      'annotations': dict({
+        'idempotentHint': True,
+        'openWorldHint': False,
+        'readOnlyHint': True,
+        'title': 'List trash',
+      }),
+      'description': '''
+        List what was deleted and can still be restored: documents and deleted versions.
+        
+        An entry has an id (pass it to restore_from_trash or empty_trash), the title and the time it
+        was deleted. A version deleted from a document is an entry of its own, with version_of set
+        to the document; while the document itself is in the trash, its entry covers the versions.
+        You see the entries of documents you own or that have no owner. count is the total; pass
+        next_page as page to see more. Needs the permission to view documents.
+      ''',
+      'inputSchema': dict({
+        'additionalProperties': False,
+        'properties': dict({
+          'page': dict({
+            'default': 1,
+            'description': 'Page number, from 1.',
+            'minimum': 1,
+            'type': 'integer',
+          }),
+          'page_size': dict({
+            'default': 25,
+            'description': 'Entries per page, at most 100.',
+            'maximum': 100,
+            'minimum': 1,
+            'type': 'integer',
+          }),
+        }),
+        'type': 'object',
+      }),
+      'name': 'list_trash',
+      'outputSchema': dict({
+        'description': 'One page of the trash.',
+        'properties': dict({
+          'count': dict({
+            'description': 'How many entries the trash holds in total.',
+            'type': 'integer',
+          }),
+          'entries': dict({
+            'items': dict({
+              'description': 'An entry of the trash: a deleted document, or a version deleted from a document.',
+              'properties': dict({
+                'deleted_at': dict({
+                  'format': 'date-time',
+                  'type': 'string',
+                }),
+                'id': dict({
+                  'description': "Pass it to restore_from_trash or empty_trash (a version's id).",
+                  'type': 'integer',
+                }),
+                'title': dict({
+                  'type': 'string',
+                }),
+                'version_of': dict({
+                  'anyOf': list([
+                    dict({
+                      'type': 'integer',
+                    }),
+                    dict({
+                      'type': 'null',
+                    }),
+                  ]),
+                  'description': 'Set when the entry is a version (a file) deleted from the document with this id; restoring it re-attaches it to that document. Null for a deleted document.',
+                }),
+              }),
+              'required': list([
+                'id',
+                'title',
+                'deleted_at',
+                'version_of',
+              ]),
+              'type': 'object',
+            }),
+            'type': 'array',
+          }),
+          'next_page': dict({
+            'anyOf': list([
+              dict({
+                'type': 'integer',
+              }),
+              dict({
+                'type': 'null',
+              }),
+            ]),
+            'description': 'The next page, null on the last one.',
+          }),
+          'page': dict({
+            'type': 'integer',
+          }),
+        }),
+        'required': list([
+          'count',
+          'page',
+          'next_page',
+          'entries',
+        ]),
+        'type': 'object',
+      }),
+      'title': 'List trash',
     }),
     dict({
       '_meta': dict({

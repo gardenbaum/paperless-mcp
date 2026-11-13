@@ -26,6 +26,7 @@ from paperless_mcp.paperless.documents import PaperlessDocumentReader, Paperless
 from paperless_mcp.paperless.instance import PaperlessInstanceReader
 from paperless_mcp.paperless.tasks import PaperlessTaskReader
 from paperless_mcp.paperless.taxonomy import PaperlessTaxonomyReader, PaperlessTaxonomyWriter
+from paperless_mcp.paperless.trash import PaperlessTrashReader, PaperlessTrashWriter
 from paperless_mcp.paperless.views import PaperlessViewReader, PaperlessViewWriter
 from paperless_mcp.services.ai import AiService
 from paperless_mcp.services.bulk_documents import BulkDocumentEditor
@@ -39,6 +40,7 @@ from paperless_mcp.services.removal import DocumentRemoval
 from paperless_mcp.services.tasks import TaskService
 from paperless_mcp.services.taxonomy import TaxonomyResolver
 from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
+from paperless_mcp.services.trash import TrashService
 from paperless_mcp.services.uploads import UploadService
 from paperless_mcp.services.version_uploads import VersionUploadService
 from paperless_mcp.services.versions import VersionService
@@ -47,6 +49,7 @@ from paperless_mcp.tools import (
     ai,
     bulk,
     core,
+    trash,
     upload,
     upload_stdio,
     versions,
@@ -84,6 +87,8 @@ if TYPE_CHECKING:
         TaskReader,
         TaxonomyReader,
         TaxonomyWriter,
+        TrashReader,
+        TrashWriter,
         ViewReader,
         ViewWriter,
     )
@@ -136,7 +141,14 @@ class Catalogue:
 
 
 CATALOGUE: Final = Catalogue(
-    providers=(core.provider, ai.provider, bulk.provider, versions.provider, views.provider),
+    providers=(
+        core.provider,
+        ai.provider,
+        bulk.provider,
+        versions.provider,
+        views.provider,
+        trash.provider,
+    ),
     annotations=ANNOTATIONS,
     tool_toolsets=TOOL_TOOLSETS,
     toolsets=TOOLSETS,
@@ -160,6 +172,8 @@ class Ports:
     ai: AiReader
     views: ViewReader
     view_writes: ViewWriter
+    trash: TrashReader
+    trash_writes: TrashWriter
 
 
 def paperless_ports(client: PaperlessClient) -> Ports:
@@ -175,6 +189,8 @@ def paperless_ports(client: PaperlessClient) -> Ports:
         ai=PaperlessAiReader(client),
         views=PaperlessViewReader(client),
         view_writes=PaperlessViewWriter(client),
+        trash=PaperlessTrashReader(client),
+        trash_writes=PaperlessTrashWriter(client),
     )
 
 
@@ -285,6 +301,7 @@ def create_server(  # noqa: PLR0913 -- one keyword per seam, all defaulted
                     adapters.documents, adapters.bulk_writes, taxonomy, web_url=web_url
                 ),
                 bulk_taxonomy=BulkTaxonomyEditor(adapters.taxonomy, adapters.bulk_writes, taxonomy),
+                trash=TrashService(adapters.trash, adapters.trash_writes, taxonomy),
             )
             overview = await services.instance.probe(settings.startup_timeout)
             if overview is None:

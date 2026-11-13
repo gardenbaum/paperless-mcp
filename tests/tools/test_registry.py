@@ -225,6 +225,7 @@ async def test_the_confirm_check_has_destructive_tools_to_check() -> None:
         "delete_document",
         "delete_document_version",
         "merge_documents_as_versions",
+        "empty_trash",
     }
     assert found.isdisjoint({"update_document", "add_note", "get_document"})
 

@@ -35,13 +35,14 @@ if TYPE_CHECKING:
     from paperless_mcp.services.tasks import TaskService
     from paperless_mcp.services.taxonomy import TaxonomyResolver
     from paperless_mcp.services.taxonomy_edits import TaxonomyEditor
+    from paperless_mcp.services.trash import TrashService
     from paperless_mcp.services.uploads import UploadService
     from paperless_mcp.services.version_uploads import VersionUploadService
     from paperless_mcp.services.versions import VersionService
     from paperless_mcp.services.views import ViewService
 
 # Every toolset; each tool carries exactly one of them as its only tag.
-TOOLSETS: Final = frozenset({"core", "ai", "bulk", "versions", "views"})
+TOOLSETS: Final = frozenset({"core", "ai", "bulk", "versions", "views", "trash"})
 
 # Tools whose result is an image or a file as MCP content blocks, with no output schema and no
 # structured content (decision-11); every other tool has a typed return model (decision-4).
@@ -81,6 +82,9 @@ TOOL_TOOLSETS: Final[Mapping[str, str]] = {
     "update_saved_view": "views",
     "delete_saved_view": "views",
     "run_saved_view": "views",
+    "list_trash": "trash",
+    "restore_from_trash": "trash",
+    "empty_trash": "trash",
 }
 
 # Toolsets that need a Paperless capability, mapped to it (only "ai" so far); the startup probe
@@ -323,6 +327,31 @@ ANNOTATIONS: Final[Mapping[str, ToolAnnotations]] = {
         idempotent_hint=False,
         open_world_hint=False,
     ),
+    "list_trash": ToolAnnotations(
+        title="List trash",
+        read_only_hint=True,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Not destructive (decision-6): it only undoes a deletion and drops nothing. Restoring again
+    # leaves the state as it is (idempotent), though the second call fails.
+    "restore_from_trash": ToolAnnotations(
+        title="Restore from trash",
+        read_only_hint=False,
+        destructive_hint=False,
+        idempotent_hint=True,
+        open_world_hint=False,
+    ),
+    # Destructive (decision-6, decision-15): documents and deleted versions are removed for good,
+    # so it takes ids or all=true and confirm in both cases. Not idempotent: with all=true a
+    # repeated call empties whatever was deleted since.
+    "empty_trash": ToolAnnotations(
+        title="Empty trash",
+        read_only_hint=False,
+        destructive_hint=True,
+        idempotent_hint=False,
+        open_world_hint=False,
+    ),
 }
 
 logger = logging.getLogger(__name__)
@@ -381,6 +410,7 @@ class Services:
     bulk_documents: BulkDocumentEditor
     bulk_taxonomy: BulkTaxonomyEditor
     views: ViewService
+    trash: TrashService
 
 
 def services(ctx: Context) -> Services:
