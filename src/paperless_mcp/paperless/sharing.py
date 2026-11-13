@@ -38,8 +38,9 @@ EMAIL: Final = "/api/documents/email/"
 UI_SETTINGS: Final = "/api/ui_settings/"
 # Paperless sends the mail inside the request, so it can take long (seconds per attachment).
 EMAIL_TIMEOUT: Final = 120.0
-# Statuses that mean the request was refused before anything was sent.
-NOT_SENT: Final = frozenset({429, 503})
+# Statuses that mean the request was refused before anything was sent: throttling only. A 503
+# can come from a proxy after it forwarded the request, so it does not prove that nothing went out.
+NOT_SENT: Final = frozenset({429})
 MAX_ERROR = 200
 
 

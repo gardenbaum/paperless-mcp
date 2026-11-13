@@ -429,7 +429,7 @@ async def test_an_email_is_never_sent_twice_on_a_transient_failure(
     assert len(server.sent) == 1
 
 
-@pytest.mark.parametrize("status", [500, 502, 504])
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
 async def test_a_failure_while_sending_says_it_is_unknown_whether_it_was_sent(
     make_client: ClientFactory, status: int
 ) -> None:
@@ -447,11 +447,8 @@ async def test_a_failure_while_sending_says_it_is_unknown_whether_it_was_sent(
     )
 
 
-@pytest.mark.parametrize("status", [429, 503])
-async def test_a_refusal_before_sending_stays_a_temporary_failure(
-    make_client: ClientFactory, status: int
-) -> None:
-    server = Recording(httpx2.Response(status, json={"detail": "Request was throttled."}))
+async def test_a_throttled_email_stays_a_temporary_failure(make_client: ClientFactory) -> None:
+    server = Recording(httpx2.Response(429, json={"detail": "Request was throttled."}))
 
     with pytest.raises(UpstreamUnavailable) as raised:
         await PaperlessSharingWriter(make_client(server)).email_documents(
