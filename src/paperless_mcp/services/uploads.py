@@ -17,10 +17,11 @@ or detects that.
 from typing import TYPE_CHECKING
 
 from paperless_mcp.domain.documents import CustomFieldValue, DocumentUpload, UploadResult
-from paperless_mcp.domain.errors import PaperlessMcpError, Validation
+from paperless_mcp.domain.errors import Validation
 from paperless_mcp.services.custom_values import linked, require_visible, resolve_values
 from paperless_mcp.services.document_edits import MAX_TITLE
 from paperless_mcp.services.documents import document_link
+from paperless_mcp.services.task_outcome import follow
 from paperless_mcp.services.upload_source import (
     clean_filename,
     decode_base64,
@@ -181,40 +182,16 @@ class UploadService:
         self, task_id: str, upload: DocumentUpload, wait_seconds: float
     ) -> UploadResult:
         """What the upload did, after the wait; the task id alone if the task cannot be read."""
-        try:
-            report = await self._tasks.get(task_id, wait_seconds=wait_seconds)
-            document = (
-                report.document_ids[0]
-                if report.state == "success" and report.document_ids
-                else None
-            )
-        except Exception as error:  # noqa: BLE001 -- the file is in Paperless: the task id must get out
-            # An error here would invite a retry, and with it a second document.
-            reason = error.message if isinstance(error, PaperlessMcpError) else "unexpected error"
-            return UploadResult(
-                task_id=task_id,
-                state="unknown",
-                message=(
-                    f"Paperless accepted the file, but its task could not be read ({reason}); "
-                    "the outcome is unknown. Follow the task with get_task."
-                ),
-                document_id=None,
-                web_url=None,
-                wait="timed_out" if wait_seconds > 0 else "not_requested",
-                waited_seconds=0,
-                filename=upload.filename,
-                mime_type=upload.mime_type,
-                size_bytes=len(upload.content),
-            )
-        note = NO_DOCUMENT if report.state == "success" and document is None else None
+        outcome = await follow(self._tasks, task_id, wait_seconds, nothing_named=NO_DOCUMENT)
+        document = outcome.document_id
         return UploadResult(
             task_id=task_id,
-            state=report.state,
-            message=report.message or note,
+            state=outcome.state,
+            message=outcome.message,
             document_id=document,
             web_url=None if document is None else document_link(self._web_url, document),
-            wait=report.wait,
-            waited_seconds=report.waited_seconds,
+            wait=outcome.wait,
+            waited_seconds=outcome.waited_seconds,
             filename=upload.filename,
             mime_type=upload.mime_type,
             size_bytes=len(upload.content),

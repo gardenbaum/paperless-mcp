@@ -36,7 +36,9 @@ pytestmark = [pytest.mark.anyio, pytest.mark.decision("decision-4")]
 # Default profile budget (design 6): the core and ai toolsets together.
 TOOL_BUDGET = 20
 # (tool, parameter) pairs that may take a server-side path: stdio-only uploads (decision-7).
-STDIO_PATH_PARAMETERS: frozenset[tuple[str, str]] = frozenset({("upload_document", "path")})
+STDIO_PATH_PARAMETERS: frozenset[tuple[str, str]] = frozenset(
+    {("upload_document", "path"), ("upload_document_version", "path")}
+)
 # JSON schema formats pydantic gives Path, FilePath and DirectoryPath. Filesystem paths must be
 # typed as such, so this check sees them.
 PATH_FORMATS = frozenset({"path", "file-path", "directory-path"})
@@ -218,7 +220,12 @@ async def test_the_confirm_check_has_destructive_tools_to_check() -> None:
 
     found = {t.name for t in tools if destructive(t)}
 
-    assert found >= {"delete_note", "delete_document"}
+    assert found >= {
+        "delete_note",
+        "delete_document",
+        "delete_document_version",
+        "merge_documents_as_versions",
+    }
     assert found.isdisjoint({"update_document", "add_note", "get_document"})
 
 
@@ -243,7 +250,7 @@ async def test_no_path_parameter_is_in_a_schema_unless_stdio_runs_with_an_allowl
         tools = list(await server.list_tools())
         assert stdio_only_parameters(tools) == [], name
         assert path_parameters(tools, frozenset()) == [], name
-        assert "upload_document" in {t.name for t in tools}, name
+        assert {"upload_document", "upload_document_version"} <= {t.name for t in tools}, name
 
 
 @pytest.mark.decision("decision-7")
@@ -255,9 +262,12 @@ async def test_the_path_parameter_exists_over_stdio_with_an_allowlist_and_is_all
     )
     tools = list(await server.list_tools())
 
-    assert stdio_only_parameters(tools) == ["upload_document.path"]
+    assert stdio_only_parameters(tools) == ["upload_document.path", "upload_document_version.path"]
     assert path_parameters(tools) == []
-    assert path_parameters(tools, frozenset()) == ["upload_document.path"]
+    assert path_parameters(tools, frozenset()) == [
+        "upload_document.path",
+        "upload_document_version.path",
+    ]
 
 
 @pytest.mark.decision("decision-11")

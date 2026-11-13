@@ -449,6 +449,31 @@ function_hash = "ee09c21864dc"
 reason = "httpx2 upper-cases the method; 'post' sends the same POST."
 
 [[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁupload_document_version__mutmut_19"
+function_hash = "905e807da5b1"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁset_version_label__mutmut_11"
+function_hash = "6e96e54caf36"
+reason = "httpx2 upper-cases the method when it builds the request, so 'patch' sends exactly what 'PATCH' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_version__mutmut_5"
+function_hash = "ef2ece8f2e84"
+reason = "request() only tests retry for truth (`if retry`), so None and False both switch retries off."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁdelete_version__mutmut_11"
+function_hash = "ef2ece8f2e84"
+reason = "httpx2 upper-cases the method when it builds the request, so 'delete' sends exactly what 'DELETE' sends."
+
+[[equivalent]]
+mutant = "paperless_mcp.paperless.documents.xǁPaperlessDocumentWriterǁmerge_as_versions__mutmut_20"
+function_hash = "bafdc9f7327b"
+reason = "httpx2 upper-cases the method when it builds the request, so 'post' sends exactly what 'POST' sends."
+
+[[equivalent]]
 mutant = "paperless_mcp.paperless.bulk.xǁPaperlessBulkWriterǁbulk_edit_documents__mutmut_21"
 function_hash = "e01711da5b0e"
 reason = "httpx2 upper-cases the method when it builds the request, so \"post\" goes out as POST; the client reads only the built request's method."

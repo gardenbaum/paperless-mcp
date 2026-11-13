@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         DocumentQuery,
         DocumentRecord,
         DocumentUpload,
+        DocumentVersion,
         FileMetadata,
         FileVersion,
         HistoryEntry,
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
         TaxonomyValues,
         WritableKind,
     )
+    from paperless_mcp.domain.versions import VersionUpload
 
 
 class InstanceReader(Protocol):
@@ -242,6 +244,69 @@ class DocumentWriter(Protocol):
             PermissionDenied: The user may not add documents.
             Validation: Paperless rejected the form (unsupported file type, unknown id, bad
                 custom field value).
+        """
+        ...
+
+    async def upload_document_version(self, document_id: int, upload: VersionUpload) -> str:
+        """Hand a file to Paperless as a new version of a document and return its task's id.
+
+        Like ``upload_document``: Paperless checks the form and answers with the task's UUID,
+        and consumption happens later. The task's document is the new version (not the root).
+        The new version becomes the newest one. The same content twice makes two versions. Not
+        retried: a retry could add the version twice.
+
+        Raises:
+            NotFound: No such document.
+            PermissionDenied: The user lacks the global add and change permissions, or may not
+                change the document (its owner, a superuser, anyone for an unowned document, or a
+                user with a change grant): a document the user may not see is refused, not hidden.
+            Validation: Paperless rejected the form (unsupported file type, label too long).
+        """
+        ...
+
+    async def set_version_label(
+        self, document_id: int, version_id: int, label: str | None
+    ) -> DocumentVersion:
+        """Set the label of a version (the root's too) and return the version; None clears it.
+
+        Raises:
+            NotFound: No such document, or it has no such version.
+            PermissionDenied: The user lacks the global change permission or may not change the
+                document (as for ``upload_document_version``).
+            Validation: The label is longer than 64 characters.
+        """
+        ...
+
+    async def delete_version(self, document_id: int, version_id: int) -> int:
+        """Delete a version other than the root and return the id of the newest one left.
+
+        Paperless moves the version to the trash, where it can be restored from (with its
+        document id being the version id). Not retried: a repeat would answer not found.
+
+        Raises:
+            NotFound: No such document, or it has no such version.
+            PermissionDenied: The user lacks the global delete permission, or is not the owner
+                (a superuser, or anyone for an unowned document): a change grant is not enough.
+            Validation: The version is the root, which only deleting the document removes.
+        """
+        ...
+
+    async def merge_as_versions(
+        self, root_id: int, source_ids: Sequence[int], label: str | None
+    ) -> None:
+        """Make the source documents versions of the root document.
+
+        The sources stop existing as documents of their own, for good (no trash): their
+        metadata, notes and tags are lost, only their files remain, as the root's newest
+        versions. ``label`` is only valid with exactly one source. Paperless merges at once. Not
+        retried: a repeat would answer 400 for sources that are gone.
+
+        Raises:
+            PermissionDenied: Unless the user is a superuser: the global change and delete
+                permissions, and a change grant on, and ownership of (or no owner for), every
+                document are needed; a document the user may not see is refused, not hidden.
+            Validation: A document is missing or listed twice, a source has versions of its own
+                or is itself a version, or ``label`` comes with several sources.
         """
         ...
 

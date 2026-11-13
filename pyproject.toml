@@ -261,6 +261,23 @@ type = "forbidden"
 source_modules = ["paperless_mcp"]
 forbidden_modules = ["httpx"]
 
-# Toolset independence (design §5.1: toolset modules in tools/ do not import each other, shared
-# helpers live in tools/_shared) needs two toolset modules. The task that creates the second
-# one adds an `independence` contract over all toolset modules here.
+# Toolset independence (design §5.1, decision-1): toolset modules in tools/ do not import each
+# other; what they share lives in tools/_shared. A toolset's stdio variant imports its own
+# toolset's module (the shared description and parameter types), which is why those two edges are
+# ignored. Add every new toolset module here.
+[[tool.importlinter.contracts]]
+name = "Toolset modules do not import each other"
+type = "independence"
+modules = [
+    "paperless_mcp.tools.core",
+    "paperless_mcp.tools.ai",
+    "paperless_mcp.tools.bulk",
+    "paperless_mcp.tools.upload",
+    "paperless_mcp.tools.upload_stdio",
+    "paperless_mcp.tools.versions",
+    "paperless_mcp.tools.versions_stdio",
+]
+ignore_imports = [
+    "paperless_mcp.tools.upload_stdio -> paperless_mcp.tools.upload",
+    "paperless_mcp.tools.versions_stdio -> paperless_mcp.tools.versions",
+]

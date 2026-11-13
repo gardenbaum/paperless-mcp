@@ -338,16 +338,21 @@ def fake_backend(*, ai_enabled: bool = False) -> Backend:
     )
 
 
-def live_in_trash(stack: Stack, document_id: int) -> bool:
-    """Whether the live trash holds the document, over all its pages."""
+def trashed(stack: Stack) -> set[int]:
+    """The ids of every document in the live trash, over all its pages."""
+    found: set[int] = set()
     page = 1
     while True:
         listed = stack.admin.get("/api/trash/", params={"page": page, "page_size": 100})
-        if document_id in {row["id"] for row in results(listed)}:
-            return True
+        found |= {int(cast("int", row["id"])) for row in results(listed)}
         if not cast("dict[str, object]", listed.json())["next"]:
-            return False
+            return found
         page += 1
+
+
+def live_in_trash(stack: Stack, document_id: int) -> bool:
+    """Whether the live trash holds the document, over all its pages."""
+    return document_id in trashed(stack)
 
 
 def live_grants(stack: Stack) -> GrantsOf:
@@ -381,11 +386,16 @@ def live_grants(stack: Stack) -> GrantsOf:
 
 
 def delete_and_empty_trash(stack: Stack, documents: list[int]) -> None:
-    """Delete the documents, then remove their trash entries: a delete only moves them there."""
+    """Delete the documents, then remove their trash entries: a delete only moves them there.
+
+    Ids that no longer exist (a document a merge consumed) are skipped when emptying: Paperless
+    answers 400 to an empty request for ids that are not in the trash.
+    """
     for document in documents:
         _ = stack.admin.delete(f"/api/documents/{document}/")
-    if documents:
-        emptied = stack.admin.post("/api/trash/", json={"action": "empty", "documents": documents})
+    in_trash = sorted(trashed(stack) & set(documents))
+    if in_trash:
+        emptied = stack.admin.post("/api/trash/", json={"action": "empty", "documents": in_trash})
         _ = emptied.raise_for_status()
 
 

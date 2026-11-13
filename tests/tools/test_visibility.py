@@ -71,6 +71,7 @@ SYNTHETIC = replace(
 )
 CORE = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "core"}
 SHIPPED_AI = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "ai"}
+SHIPPED_VERSIONS = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "versions"}
 SHIPPED_BULK = {name for name, toolset in TOOL_TOOLSETS.items() if toolset == "bulk"}
 
 
@@ -102,7 +103,7 @@ async def test_several_toolsets_combine() -> None:
 async def test_all_offers_every_toolset_the_server_may_offer() -> None:
     server = serve(with_ai(enabled=True), catalogue=SYNTHETIC, toolsets=["all"])
 
-    assert await names(server) == CORE | SHIPPED_AI | SHIPPED_BULK | {
+    assert await names(server) == CORE | SHIPPED_AI | SHIPPED_BULK | SHIPPED_VERSIONS | {
         "ask_something",
         "pdf_change",
         "pdf_preview",
@@ -131,7 +132,12 @@ async def test_read_only_mode_offers_only_tools_with_the_read_only_hint() -> Non
         "update_taxonomy_item",
         "delete_taxonomy_item",
     }
-    expected = (CORE - writing) | SHIPPED_AI | {"ask_something", "pdf_preview"}
+    expected = (
+        (CORE - writing)
+        | SHIPPED_AI
+        | {"list_document_versions"}
+        | {"ask_something", "pdf_preview"}
+    )
     assert await names(server) == expected
 
 
