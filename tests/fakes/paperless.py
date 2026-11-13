@@ -1476,6 +1476,14 @@ class FakePaperless:
         fields[fields.index(field)] = replace(
             field, name=name, data_type=data_type, select_options=options
         )
+        if field.data_type == "select" and data_type == "select":
+            # Paperless does this asynchronously (Celery task process_cf_select_update after the
+            # save); the fake does it at once.
+            kept = {o.id for o in options}
+            for document in self.state.documents:
+                held = document.custom_fields.get(field.id)
+                if held is not None and held not in kept:
+                    document.custom_fields[field.id] = None
 
     @write
     async def delete_taxonomy_item(self, kind: WritableKind, item_id: int) -> None:
