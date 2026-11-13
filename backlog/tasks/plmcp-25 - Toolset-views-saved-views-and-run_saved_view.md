@@ -1,11 +1,11 @@
 ---
 id: PLMCP-25
 title: 'Toolset views: saved views and run_saved_view'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-11-09T19:26:00Z'
-updated_date: '2026-11-13T10:15:00Z'
+updated_date: '2026-11-13T15:51:00Z'
 labels: []
 milestone: m-3
 dependencies:
@@ -25,18 +25,18 @@ Saved views are how the user organises Paperless; running one requires translati
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Saved views list, get, create, update and delete (confirm) by name or id
-- [ ] #2 run_saved_view returns the documents of a view with the same rows and paging as search_documents
-- [ ] #3 Every filter rule type of Paperless 3.4.2 is either translated or rejected with an explicit error naming the rule type; a test lists the covered rule types
-- [ ] #4 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
-- [ ] #5 FakePaperless and the contract suite cover every new port method
+- [x] #1 Saved views list, get, create, update and delete (confirm) by name or id
+- [x] #2 run_saved_view returns the documents of a view with the same rows and paging as search_documents
+- [x] #3 Every filter rule type of Paperless 3.4.2 is either translated or rejected with an explicit error naming the rule type; a test lists the covered rule types
+- [x] #4 Adapter tests are schema-guarded and E2E covers the main flow on seeded data
+- [x] #5 FakePaperless and the contract suite cover every new port method
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Tests written first (red, then green) at every test level the change touches
 - [ ] #2 just check passes locally and all required CI checks are green on the PR
-- [ ] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
+- [x] #3 Snapshot, gate or decision changes are deliberate and explained in the PR description
 - [ ] #4 Merged to main through the task's own pull request
 <!-- DOD:END -->
 
@@ -62,4 +62,12 @@ Progress: DocumentQuery extended with 37 filter fields (adapter params schema-gu
 Progress: services (filter_rules.translate: all 51 rule types translated, unknown/bad values/duplicate single-valued/uncombinable searches/unknown sort fields rejected naming the rule type; ViewService list/get/create/update/delete(confirm)/run), tools/views.py (6 tools, opt-in toolset), server wiring, README, surface snapshot regenerated deliberately (only the 'all' and 'read-only' profiles gain the six/three views tools; default profile unchanged, still 18 tools), E2E tests (tests/e2e/test_views.py: seeded e2e-view equals the equivalent search_documents, create/run/update/delete flow, a stored unrunnable rule). Found by the service test: DocumentService.search overwrote ids already in the query with the (empty) name-resolved ones, which would have made every view run unfiltered; fixed (given names win, otherwise the query's ids stay) with its own red-first test. Test-after-code (honest): the E2E tests were written after the code (they passed first run); the duplicate-rule message wording in filter_rules was adjusted together with its test.
 
 Gates on the tree rebased onto f3709f0: just check exit 0 (100% diff coverage); just mutation exit 0, 100.0% with 7 new reviewed equivalents (4 typing.cast first argument, 3 lowercase HTTP method); full e2e (18m13s on a shared stack): 335 passed, 2 failed: test_more_like_finds_other_documents[live] (shared-stack index, not worked around) and test_stdio selects-tools, which was mine (toolsets=all read-only now includes the 3 read-only views tools): fixed and rerun green. New live tests (e2e views + contract views + filters, 29 tests) take about 19 s.
+
+Review fix round: list rules split on commas (empty = no filter), created/added range order checked, PermissionDenied before confirm for views the user may not change, M6 narrower guard via OMITTED_RESPONSE_PROPERTIES (permissions filled as {} then the rest validated) replacing the four WRONG_RESPONSE_SCHEMAS entries, tools.views added to the toolset-independence contract. Gates after rebase onto 182bed6: just check 0 (100% diff), just mutation 100.0% (3 more cast equivalents), e2e 402 passed, 1 failed (test_more_like_finds_other_documents[live], shared-stack stale index, passes in CI). DoD #1 left unchecked: the E2E tests were written after the code.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Adds the opt-in views toolset: list/get/create/update/delete (confirmed) saved views by name or id and run_saved_view, which translates all 51 Paperless 3.4.2 filter rule types into a DocumentQuery (or rejects them naming the rule type) and returns the same rows and paging as search_documents. DocumentQuery gained 37 filters, schema-guarded in the adapter; FakePaperless and the contract suite cover the new ports on fake and live. Fixed on the way: DocumentService.search dropped ids already in the query. The default profile is unchanged (18 tools); the surface snapshot only gains views tools in the all and read-only profiles. Schema guard: shared_by__id marked mistyped, saved view responses allowed to omit permissions.
+<!-- SECTION:FINAL_SUMMARY:END -->
